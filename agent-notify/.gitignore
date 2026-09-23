@@ -1,0 +1,7 @@
+# build output
+/bin/
+/agent-notify
+*.test
+
+# local, never shared
+.DS_Store
