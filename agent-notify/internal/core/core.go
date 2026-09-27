@@ -7,9 +7,9 @@ import (
 	"log/slog"
 
 	"github.com/lassoColombo/agent-notify/internal/config"
-	"github.com/lassoColombo/agent-notify/internal/logs"
 	"github.com/lassoColombo/agent-notify/internal/paths"
 	"github.com/lassoColombo/agent-notify/internal/sessionstore"
+	"github.com/lassoColombo/agent-notify/logs"
 )
 
 // core is everything a command needs before it can do anything: where things
@@ -52,7 +52,7 @@ func OpenAt(layout paths.Layout, component string) (*Core, error) {
 		return nil, err
 	}
 
-	logger, closer := logs.Open(layout.LogFile(), component)
+	logger, closer := logs.OpenFile(layout.LogFile(), component)
 	settings, problems := config.Load(layout.ConfigFile)
 	for _, problem := range problems {
 		logger.Warn("configuration", "problem", problem.Error())

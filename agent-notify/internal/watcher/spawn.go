@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/lassoColombo/agent-notify/internal/paths"
+	"github.com/lassoColombo/agent-notify/logs"
 )
 
 // Spawn starts a detached session-watcher and returns immediately.
@@ -26,7 +27,9 @@ import (
 //     inherits that pipe, it never closes, and Claude waits forever. What a
 //     user sees is "the agent hangs after every tool call", with nothing in any
 //     log, because nothing failed — something merely never ended. Cut by
-//     pointing all three streams at the null device.
+//     giving it streams of our choosing: the null device for stdin and stdout,
+//     and the log file for stderr, so that a runtime fatal error in a detached
+//     daemon is not written to a pipe nobody holds.
 //   - **The working directory.** It would pin the agent's directory forever: a
 //     disk that cannot be unmounted, a deleted directory that never goes away.
 //     Cut by chdir to /.
@@ -54,6 +57,13 @@ func Spawn(layout paths.Layout, configured string) error {
 		"--runtime", layout.Runtime,
 		"--config", layout.ConfigFile)
 	command.Stdin, command.Stdout, command.Stderr = null, null, null
+	// Only what the runtime writes over the program's head lands here; the
+	// session-watcher logs everything it means to say through logs.OpenFile,
+	// into this same file.
+	if file, err := logs.File(layout.LogFile()); err == nil {
+		defer file.Close()
+		command.Stderr = file
+	}
 	command.Dir = "/"
 	command.Env = keptEnvironment()
 	command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
@@ -130,7 +140,7 @@ func keptEnvironment() []string {
 	for _, name := range []string{
 		"HOME", "PATH", "TMPDIR", "USER", "LOGNAME",
 		"XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR", "XDG_DATA_HOME",
-		paths.TheVariableThatNamesTheRoot,
+		paths.TheVariableThatNamesTheRoot, logs.TheVariableThatSetsTheLevel,
 	} {
 		if value, present := os.LookupEnv(name); present {
 			kept = append(kept, name+"="+value)

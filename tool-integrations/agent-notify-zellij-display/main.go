@@ -18,6 +18,7 @@ import (
 
 	agentnotify "github.com/lassoColombo/agent-notify"
 	"github.com/lassoColombo/agent-notify/capture"
+	"github.com/lassoColombo/agent-notify/logs"
 	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
@@ -60,17 +61,11 @@ func usage(to *os.File) {
 `)
 }
 
-// logger writes to stderr, which is where a supervised child's diagnostics
-// belong: the session-watcher that starts one captures it, and a person running
-// it by hand simply sees it.
-func logger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
-}
-
 // paint is the whole program: about ten lines of it are the display and the
 // rest is saying so out loud.
 func paint() int {
-	log := logger()
+	log, closeLog := logs.Open(Name)
+	defer closeLog.Close()
 	settings, err := Read(me)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -111,7 +106,8 @@ func paint() int {
 // It cannot give a pane back, because the cold read returns live sessions only
 // and giving one back needs the ended record that remembers the pane.
 func repaint() int {
-	log := logger()
+	log, closeLog := logs.Open(Name)
+	defer closeLog.Close()
 	settings, err := Read(me)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

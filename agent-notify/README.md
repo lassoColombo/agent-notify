@@ -242,7 +242,7 @@ paths
   state       /Users/you/Library/Application Support/agent-notify
   runtime     /var/folders/hg/sj58j9kx5sz6w73q4wf60dtm0000gn/T/agent-notify
   config      /Users/you/.config/agent-notify/config.toml
-  log         /var/folders/hg/sj58j9kx5sz6w73q4wf60dtm0000gn/T/agent-notify/agent-notify.log
+  log         /Users/you/Library/Application Support/agent-notify/agent-notify.log
 
 directories  ok    present, mode 700
 sockets      ok    longest path 82 of 103 bytes — …/T/agent-notify/session-changes.sock
@@ -388,21 +388,23 @@ when the two of you disagree.
 
 ### Environment variables
 
-There is exactly one variable agent-notify owns, and the rest are the platform's
-own, read through the standard rules.
+There are two variables agent-notify owns, and the rest are the platform's own,
+read through the standard rules.
 
 | Variable | What it does |
 | --- | --- |
 | `AGENT_NOTIFY_ROOT` | Moves everything beneath one directory: `<root>/state`, `<root>/run`, `<root>/config.toml`. One variable, so that running an isolated instance is one step. It is made absolute, so a relative value is resolved against the process's own working directory — which for a supervised child is not yours. |
-| `XDG_STATE_HOME` | Where records go on Linux. Ignored on macOS, which uses `~/Library/Application Support`. |
-| `XDG_RUNTIME_DIR` | Where sockets, locks and the log go on Linux. |
+| `AGENT_NOTIFY_LOG_LEVEL` | `debug`, `info`, `warn` or `error`. Absent means `info`, and so does a value it cannot read — which it says in the log, because a typo in the variable you set precisely to see more must not be the reason you see the same as before. It is a variable rather than a configuration key because the log is opened before the configuration is read, deliberately, so that complaints about the configuration have somewhere to go. Setting it once before starting anything sets it for everything. |
+| `XDG_STATE_HOME` | Where records and the log go on Linux. Ignored on macOS, which uses `~/Library/Application Support`. |
+| `XDG_RUNTIME_DIR` | Where sockets and locks go on Linux. |
 | `TMPDIR` | The same, on macOS: under launchd it is a per-user `0700` directory. With none, `os.TempDir()` plus a uid suffix, because `/tmp` is writable by everyone and an unsuffixed name there is a name another user can take first. |
 | `XDG_CONFIG_HOME` | Where the configuration file is, as above. |
 | `PATH` | How `install` and `doctor` find `agent-notify-<name>` programs. |
 
 Those are also almost the whole of what a supervised integration inherits. The
 session-watcher hands its children an explicit short list — `HOME`, `PATH`,
-`TMPDIR`, `USER`, `LOGNAME`, the four XDG variables and `AGENT_NOTIFY_ROOT` —
+`TMPDIR`, `USER`, `LOGNAME`, the four XDG variables, `AGENT_NOTIFY_ROOT` and
+`AGENT_NOTIFY_LOG_LEVEL` —
 and leaves everything else behind, because an agent's environment holds API keys
 and a session-watcher would otherwise keep them in memory for days.
 
@@ -659,12 +661,14 @@ carries the text of what an agent last said.
 
 Inside state: `sessions/<key>.json` for what is live, `ended/<key>.json` for what
 is over and still resumable, `history/<key>.json` for the last few things each
-session said, `locks/<key>.lock` one per session. Inside runtime:
-`subscribers.sock` (the stream, watcher to displays), `session-changes.sock`
-(the datagram, hook to watcher), `session-watcher.lock`, `integrations.json`
-(what the supervisor knows about its children, written so `doctor` can read it
-from another process — and so you can `cat` it at three in the morning) and
-`agent-notify.log`.
+session said, `locks/<key>.lock` one per session, and `agent-notify.log`, which
+every process writes to and which is in state rather than runtime because a log
+swept away by a reboot is a log missing exactly the failures worth reading about.
+Inside runtime: `subscribers.sock` (the stream, watcher to displays),
+`session-changes.sock` (the datagram, hook to watcher), `session-watcher.lock`
+and `integrations.json` (what the supervisor knows about its children, written
+so `doctor` can read it from another process — and so you can `cat` it at three
+in the morning).
 
 A session key is `host~agent~session-id`, percent-encoded so the encoding cannot
 be ambiguous however strange an agent's session ids turn out to be, and capped

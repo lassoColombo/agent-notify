@@ -234,7 +234,9 @@ Then, in order of what breaks:
 agent-notify doctor                                  # where everything resolves to
 agent-notify list                                    # is anything running to draw
 sketchybar --query sketchybar.working                # does the bar have our items
-tail -f "$TMPDIR/agent-notify/agent-notify.log"      # what the display is saying
+
+# what the display is saying
+tail -f "$HOME/Library/Application Support/agent-notify/agent-notify.log"
 ```
 
 The log is the place to look, because a supervised daemon has no terminal to

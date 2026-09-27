@@ -46,8 +46,8 @@ type Layout struct {
 	// State survives a reboot: the records themselves.
 	State string
 
-	// Runtime does not survive a reboot, and must not: sockets, the singleton
-	// lock, the log.
+	// Runtime does not survive a reboot, and must not: sockets and the
+	// singleton lock.
 	Runtime string
 
 	// ConfigFile is the only file here that agent-notify reads and never writes.
@@ -226,10 +226,17 @@ func (l Layout) SessionChangesSocket() string {
 	return filepath.Join(l.Runtime, "session-changes.sock")
 }
 
-// LogFile is shared by both processes, which is why it is named after neither:
-// the session-watcher logs its state changes here and record-agent-event logs
-// here too, because a hook must never write to stdout (plan.md §A17 R2).
-func (l Layout) LogFile() string { return filepath.Join(l.Runtime, "agent-notify.log") }
+// LogFile is written by every process — the session-watcher, record-agent-event,
+// the commands, and every integration — which is why it is named after none of
+// them. A hook must never write to stdout (plan.md §A17 R2), so this is where it
+// says what happened, and one file is what lets a session be followed across all
+// of them.
+//
+// It is in the state directory rather than the runtime one. The log's whole job
+// is to still be there when you come and ask what went wrong, and a directory
+// the system sweeps — or a reboot empties — loses the evidence for exactly the
+// failures worth reading about.
+func (l Layout) LogFile() string { return filepath.Join(l.State, "agent-notify.log") }
 
 // Directories lists every directory agent-notify creates, deepest last so that
 // creating them in order is safe.

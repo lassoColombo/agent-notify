@@ -3,10 +3,8 @@
 package watcher
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +14,7 @@ import (
 
 	"github.com/lassoColombo/agent-notify/internal/config"
 	"github.com/lassoColombo/agent-notify/internal/paths"
+	"github.com/lassoColombo/agent-notify/logs"
 )
 
 // This file is the supervisor, and it is a RECONCILER INSIDE THE SWEEP THAT
@@ -254,13 +253,21 @@ func (w *Watcher) startChild(name, binary string) (*child, error) {
 	defer null.Close()
 	command.Stdin, command.Stdout = null, null
 
-	// Its stderr becomes our log, line by line, tagged. This is the answer to
-	// "where does a supervised integration's diagnostics go" (Q17): a child
-	// started by a daemon has no terminal to complain to, and a display whose
-	// failure is invisible is a display nobody can fix.
-	problems, err := command.StderrPipe()
-	if err != nil {
-		return nil, err
+	// Its stderr is the log file itself, which is the answer to "where does a
+	// supervised integration's diagnostics go" (Q17) and is deliberately not a
+	// channel: an integration logs its own errors through logs.Open, into this
+	// same file, tagged with its own name, and nothing here reads or parses a
+	// word of what it says.
+	//
+	// What arrives on this handle is therefore only what no program can log for
+	// itself — a panic on a goroutine other than the one holding the recover, a
+	// runtime fatal error, a crash inside cgo — which the runtime writes to
+	// fd 2 over the program's head. Losing that would mean a child that died of
+	// the least explicable thing is also the one that died saying nothing.
+	command.Stderr = null
+	if file, err := logs.File(w.opened.Layout.LogFile()); err == nil {
+		defer file.Close()
+		command.Stderr = file
 	}
 
 	if err := command.Start(); err != nil {
@@ -268,7 +275,6 @@ func (w *Watcher) startChild(name, binary string) (*child, error) {
 	}
 	started := &child{name: name, binary: program, command: command, started: time.Now()}
 
-	go w.relay(name, problems)
 	go func() {
 		err := command.Wait()
 		w.mu.Lock()
@@ -283,17 +289,6 @@ func (w *Watcher) startChild(name, binary string) (*child, error) {
 	w.logger.Info("started an integration", "integration", name,
 		"binary", program, "pid", command.Process.Pid)
 	return started, nil
-}
-
-// relay copies a child's stderr into the log.
-func (w *Watcher) relay(name string, from io.Reader) {
-	lines := bufio.NewScanner(from)
-	lines.Buffer(make([]byte, 0, 8192), 64*1024)
-	for lines.Scan() {
-		if text := lines.Text(); text != "" {
-			w.logger.Info("integration said", "integration", name, "line", text)
-		}
-	}
 }
 
 // bury counts what a dead child's death was worth.

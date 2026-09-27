@@ -522,7 +522,7 @@ func TestTheHookNeverFailsAndNeverSpeaks(t *testing.T) {
 	}
 
 	// The complaints went to the log, which is where R2 says they go.
-	log, err := os.ReadFile(filepath.Join(pretend.root, "run", "agent-notify.log"))
+	log, err := os.ReadFile(filepath.Join(pretend.root, "state", "agent-notify.log"))
 	if err != nil {
 		t.Fatalf("reading the log: %v", err)
 	}

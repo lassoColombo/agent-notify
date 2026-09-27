@@ -25,6 +25,7 @@ import (
 	"time"
 
 	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/logs"
 	"github.com/lassoColombo/agent-notify/subscribe"
 	"github.com/lassoColombo/agent-notify/tool"
 )
@@ -176,7 +177,8 @@ func dump() int {
 }
 
 func paint() int {
-	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	log, closeLog := logs.Open(Name)
+	defer closeLog.Close()
 	settings, err := Read(me)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

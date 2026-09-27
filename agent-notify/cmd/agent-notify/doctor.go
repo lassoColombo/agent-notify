@@ -14,11 +14,11 @@ import (
 
 	agentnotify "github.com/lassoColombo/agent-notify"
 	"github.com/lassoColombo/agent-notify/internal/config"
-	"github.com/lassoColombo/agent-notify/internal/logs"
 	"github.com/lassoColombo/agent-notify/internal/paths"
 	"github.com/lassoColombo/agent-notify/internal/process"
 	"github.com/lassoColombo/agent-notify/internal/sessionstore"
 	"github.com/lassoColombo/agent-notify/internal/watcher"
+	"github.com/lassoColombo/agent-notify/logs"
 	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
@@ -91,7 +91,7 @@ func doctor() int {
 	// The log is opened before the configuration is read, so that the
 	// complaints about the configuration have somewhere to go. This is the
 	// same order record-agent-event will use, for the same reason.
-	logger, closer := logs.Open(layout.LogFile(), "doctor")
+	logger, closer := logs.OpenFile(layout.LogFile(), "doctor")
 	defer closer.Close()
 
 	settings, problems := config.Load(layout.ConfigFile)

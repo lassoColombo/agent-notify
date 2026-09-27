@@ -201,8 +201,8 @@ agent-notify list                    # it should be there, working
 `doctor` deliberately does not check whether an agent's hooks are installed —
 it says so in its own output — so the honest check is a real thread and
 `agent-notify list`. When a thread does not appear, the log is the place to
-look: `$TMPDIR/agent-notify/agent-notify.log` on macOS,
-`$XDG_RUNTIME_DIR/agent-notify/agent-notify.log` otherwise. Everything a hook
+look: `~/Library/Application Support/agent-notify/agent-notify.log` on macOS,
+`$XDG_STATE_HOME/agent-notify/agent-notify.log` otherwise. Everything a hook
 cannot do goes there, because nothing a hook does may reach the agent.
 
 ### Uninstalling

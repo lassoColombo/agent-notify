@@ -317,7 +317,7 @@ paths
   state       /Users/you/Library/Application Support/agent-notify
   runtime     /var/folders/hg/…/T/agent-notify
   config      /Users/you/.config/agent-notify/config.toml
-  log         /var/folders/hg/…/T/agent-notify/agent-notify.log
+  log         /Users/you/Library/Application Support/agent-notify/agent-notify.log
 
 directories  ok    present, mode 700
 sockets      ok    longest path 82 of 103 bytes — …/agent-notify/session-changes.sock
