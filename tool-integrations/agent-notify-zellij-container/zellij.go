@@ -151,6 +151,30 @@ func (z Zellij) FocusPane(session string, pane int) error {
 	return err
 }
 
+// SwitchSession takes THIS terminal to another session, landing it on one pane.
+//
+// It is the only thing here that is not addressed to a session by name, and the
+// missing `--session` is the whole of why it works. zellij routes an action with
+// the client id of whoever sent it: with `--session` this program is its own
+// throwaway client and switches that, which exits 0 and moves nobody. Without
+// it, the CLI is the one zellij already associates with the terminal this
+// program was started from, and that terminal is what moves.
+//
+// So this can only be asked by something a person started from the terminal
+// they are looking at — the picker under its keybinding, or a command typed at
+// a prompt. Run from the session-watcher or from a launchd job it is the same
+// silent nothing as any other spelling, which is why [Focus] reads its own
+// ZELLIJ_SESSION_NAME before it ever asks zellij to do this.
+//
+// One command, not two: `--pane-id` makes the pane's tab active on the way in,
+// so there is no go-to-tab to pair with it. The pane is named the way zellij
+// names it, because that is the form it wants back.
+func (z Zellij) SwitchSession(target string, pane int) error {
+	_, err := tool.Run(z.Binary, z.Timeout,
+		"action", "switch-session", target, "--pane-id", Address(pane))
+	return err
+}
+
 // run is `zellij --session <session> …`, under this program's timeout.
 //
 // The running is [tool.Run], which is where the WaitDelay, the check order and

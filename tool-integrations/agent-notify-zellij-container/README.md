@@ -48,7 +48,7 @@ programs:
 | | program | what it does | what it can do to you |
 | --- | --- | --- | --- |
 | display | [agent-notify-zellij-display](../agent-notify-zellij-display) | paints agent state onto pane and tab titles | writes text |
-| container | **this one** | finds the pane, goes to it, reports whether you are there | **moves your cursor** |
+| container | **this one** | finds the pane, goes to it, reports whether you are there | **moves your cursor**, and when you ask from a terminal, that terminal |
 
 They are separate on purpose (plan.md D-37): wanting your tab titles annotated
 is not the same decision as allowing something to jump your terminal somewhere.
@@ -94,7 +94,7 @@ $ echo '{"session":"agent-notify","pane":2,"tab":1}' \
 | --- | --- | --- |
 | `capture-environment` | the hook, inside the agent's own process, on the path the agent is blocked on | read two environment variables and return — **never ask zellij anything** |
 | `interpret-environment` | the session-watcher, once per capture | ask zellij which tab holds that pane; blocking is fine here |
-| `focus` | `agent-notify focus-session`, and anything that offers a click | read, act, read back |
+| `focus` | `agent-notify focus-session`, and anything that offers a click | read, act, read back — and if it was asked from a terminal and nobody is in the session, bring that terminal |
 | `focused` | a notifier about to interrupt you | read, and answer in three values |
 
 `focus` answers `{"ok":true}` or a named failure; `focused` answers `yes`, `no`
@@ -483,19 +483,42 @@ All measured on zellij 0.45.1, all load-bearing:
   client is looking at. So `focus` asks it, answers `not-attached` when the
   answer is nobody, and **reads the state back afterwards** when it is somebody:
   an exit code that is 0 either way is not evidence that anything moved.
-- **Nothing can move a terminal from one session to another from the CLI.**
-  `zellij action switch-session` is the obvious candidate and it does not do
-  this: the server routes it with the client id of whoever sent the action, and a
-  CLI invocation is its own throwaway client, so your terminal stays where it is.
-  Measured against a real attached client, from outside and from a pane inside
-  the session, with and without `--pane-id`: exit 0, no output, nothing moves —
-  the same silence whether the target session is missing, exited, or perfectly
-  healthy. (Upstream asks for `zellij action --client-id`:
+- **A terminal can be moved between sessions, but only by a program it
+  started.** `zellij action switch-session <name> --pane-id terminal_N` takes
+  the terminal to another session and lands it on that pane, with the pane's tab
+  active — one command for what takes two inside a session, and it works whether
+  the target session has a viewer or none at all. What decides whether it does
+  anything is **who is asking**. The server routes an action with the client id
+  it associates with the caller, and it will only find one for a program the
+  terminal itself started: the picker under its keybinding, or a command typed at
+  a prompt. Everything else is exit 0 and silence, measured on 0.45.1 and each
+  one tried against a live attached client:
+
+  | asked by | what happens |
+  | --- | --- |
+  | a program a keybinding started (`Run` in a floating pane) | the terminal moves |
+  | a command typed at that terminal's prompt, however many shells deep, with no tty and stdin closed | the terminal moves |
+  | anything passing `--session`, which makes the CLI its own throwaway client | nothing |
+  | a program started from outside by `zellij run`, in a pane of the same session | nothing |
+  | bytes written into that very pane with `write-chars`, running the very same command | nothing |
+  | any of the above with `ZELLIJ`, `ZELLIJ_SESSION_NAME` and `ZELLIJ_PANE_ID` set by hand to match the client's own row exactly | nothing |
+
+  The environment is therefore not what carries this, which is why nothing can
+  forge it: the session-watcher and a launchd job can ask, and are answered with
+  the same silence as always. So `focus` reads its own `ZELLIJ_SESSION_NAME`
+  before deciding — not to pass it to zellij, but to know whether it is standing
+  in a terminal at all — and only offers to bring one when **no** terminal is
+  showing the target. When one already is, moving it is the **window manager's**
+  job: it focuses the window that session is attached to, and this container does
+  the pane inside it, outermost first. Dragging the terminal somebody is typing
+  in to a session another window is already showing would undo exactly that.
+  (Upstream asks for `zellij action --client-id`, which would let the
+  session-watcher do this too:
   [zellij-org/zellij#5624](https://github.com/zellij-org/zellij/issues/5624).)
-  A jump into another session is therefore the **window manager's** job — focus
-  the terminal window that session is attached to, and this container does the
-  pane inside it, outermost first. Where no window shows it at all, the honest
-  answer is `not-attached`.
+  There is one more measured detail, and it is why there is a wait in the code:
+  `switch-session` answers about 25ms in and the terminal arrives about 130ms
+  later, so a state read taken straight afterwards finds a session with nobody in
+  it and would call a switch that worked a refusal.
 
 ## Failures are words, not sentences
 
@@ -507,7 +530,7 @@ different next move and a sentence cannot be switched on:
 | `never-placed` | these are not this container's coordinates — the session started somewhere it was not watching | nothing; core skips this layer rather than failing the focus |
 | `place-is-gone` | the pane is not in that session any more | the session may still be alive elsewhere; `agent-notify list` says |
 | `not-running` | zellij could not be asked at all — not there, not answering, or the session is gone | start zellij, or check the `zellij` setting |
-| `not-attached` | the session is running and no terminal is showing it, so there is no screen to bring anything to the front of | `zellij attach <session>`, and the same focus works |
+| `not-attached` | the session is running, no terminal is showing it, and this focus was not asked for from a terminal that could come — a click on the menu bar, a notification, anything under launchd | `zellij attach <session>`, and the same focus works. Or ask again from the picker, which **is** such a terminal |
 | `refused` | zellij was asked, understood, and would not — or took the commands and the pane still is not in front | read the detail; this is the one that means something is genuinely wrong |
 
 `not-attached` is **not one of core's words yet**. It is declared here, and core
@@ -533,6 +556,21 @@ builds one and asserts both halves — a session nobody is attached to is named
 `not-attached` rather than reported as focused, and an attached one ends with
 that client's own row pointing at the pane.
 
+**Run it from inside zellij and it stays where it is**, which is a thing the
+tests have to say out loud now. A focus asked from a pane may bring that pane's
+terminal along, and `go test` is usually run from one, so the tests that want the
+other caller empty `ZELLIJ_SESSION_NAME` first. Without that line the suite would
+take the terminal you ran it in to a throwaway session and leave it there.
+
+One branch cannot be tested here at all, and the reason is the rule itself: a
+terminal moves between sessions only for a program **it** started, and nothing a
+test can do counts as one. Keystrokes written into the client's own pane with
+`write-chars` run the command and move nobody — measured, and the same silence
+as everything else in that table. So the suite asserts the decision (a table of
+who is looking and where this is running) and the answer when the terminal does
+not come; that it *does* come was measured by hand, through the picker's own
+keybinding, against a session with no viewer.
+
 What is still left to a person watching their own terminal: whether the window
 that client lives in was the one in front. That is the window manager's half of
 the answer and this program cannot see it.
@@ -545,6 +583,14 @@ the answer and this program cannot see it.
 - **`not-attached` is a word core does not know.** It survives the trip and reads
   correctly, but core has no branch on it — `focus-session` prints it without the
   paragraph of advice it prints for `place-is-gone` or `no-container-configured`.
+- **A click cannot bring a terminal, only the picker can.** Bringing one depends
+  on the focus having been asked for by a program that terminal started, so the
+  menu-bar item and a notification — both launchd's children — still answer
+  `not-attached` for a session no window is showing, and the picker gets you
+  there. Closing that gap needs `zellij action --client-id`
+  ([zellij-org/zellij#5624](https://github.com/zellij-org/zellij/issues/5624)):
+  with it, the session-watcher could name a client out of `list-clients` and move
+  that one instead of relying on who is asking.
 - **doctor does not check this integration.** It checks the file it is named in.
   A container is not a supervised child, so there is no connection to report and
   no handshake to fail — which means a `binary` path that no longer exists looks

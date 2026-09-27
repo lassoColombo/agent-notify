@@ -208,9 +208,17 @@ func TestASessionThatIsGoneIsNotAPaneProblem(t *testing.T) {
 // there now", and `focus-session` printed "X is in front" at somebody looking
 // at a different screen entirely. Nothing is in front of nobody: the answer is
 // a word that says which nothing it was (§A11.3).
+//
+// The empty ZELLIJ_SESSION_NAME is the test saying which caller it is standing
+// in for, and it is not decoration. `go test` is usually run FROM a zellij pane,
+// and a focus asked from one is now allowed to bring that terminal along — so
+// without this line the suite would take the terminal somebody is running it in
+// to a throwaway session and leave it there. See the three-way switch in
+// [Focus].
 func TestFocusOnASessionNobodyIsLookingAt(t *testing.T) {
 	zellij := realZellij(t)
 	name, pane := session(t, zellij)
+	t.Setenv(sessionVariable, "")
 
 	coordinates, _ := json.Marshal(Coordinates{Session: name, Pane: pane})
 	outcome, err := Focus(zellij, coordinates)

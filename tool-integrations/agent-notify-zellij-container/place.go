@@ -3,11 +3,12 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/lassoColombo/agent-notify/subscribe"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/lassoColombo/agent-notify/container"
+	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
 // Name is what this integration calls itself: its config table, its entry in
@@ -149,6 +150,14 @@ const NotAttached = container.Problem("not-attached")
 //     did anything at all. So the only honest proof that a focus landed is to
 //     read the state back and see the pane in front, which is what the second
 //     read is. It costs two subprocesses on a path a person just clicked.
+//
+// ── AND WHY A SESSION WITH NO VIEWER IS NOT ALWAYS THE END ──────────────────
+// `not-attached` used to be the answer to every session nobody was looking at,
+// and for most callers it still is. But when the asking comes from a terminal —
+// the picker, opened by its keybinding in the session you are reading this in —
+// that terminal is itself the viewer the session is missing, and zellij will
+// move it (see [Zellij.SwitchSession]). That is the three-way switch below, and
+// the client check is what it turns on.
 func Focus(zellij Zellij, coordinates json.RawMessage) (container.Outcome, error) {
 	var where Coordinates
 	if err := json.Unmarshal(coordinates, &where); err != nil || !where.ours() {
@@ -180,31 +189,80 @@ func Focus(zellij Zellij, coordinates json.RawMessage) (container.Outcome, error
 	if err != nil {
 		return container.Failed(container.NotRunning, err.Error()), nil
 	}
-	if len(clients) == 0 {
-		return container.Failed(NotAttached, fmt.Sprintf(
-			"zellij session %q is running but no terminal is attached to it, so there is "+
-				"nothing to bring to the front — `zellij attach %s` first",
-			where.Session, where.Session)), nil
-	}
 
-	// From here the session is demonstrably alive, the pane is demonstrably
-	// there and somebody is demonstrably looking, so anything that goes wrong
-	// is zellij declining rather than zellij being absent — two words, because
-	// they deserve different next moves.
-	if err := zellij.GoToTab(where.Session, pane.TabID); err != nil {
-		return container.Failed(container.Refused, err.Error()), nil
-	}
-	// The guard is "already in front of its own tab", not `pane.Focused`, and
-	// the difference is a bug somebody had to close a floating pane by hand to
-	// get past: a tab has TWO focused panes, so the focused TILED pane is
-	// `Focused` and behind the floating layer at the same time. Skipping the
-	// focus there skipped it in precisely the case that needed it most, because
-	// `focus-pane-id` on a tiled pane is what LOWERS that layer — measured on
-	// 0.45.1, it exits 0 and hides the floating panes rather than refusing.
-	if !inFrontOfItsOwnTab(pane, tabs) {
-		if err := zellij.FocusPane(where.Session, where.Pane); err != nil {
+	// Which session THIS program is running in, empty for every caller but a
+	// terminal: the menu-bar item, a notification and anything else under
+	// launchd have no zellij around them. It decides the middle case below,
+	// because zellij moves a terminal between sessions only for a program that
+	// terminal started ([Zellij.SwitchSession]).
+	here := os.Getenv(sessionVariable)
+
+	switch {
+	case len(clients) > 0:
+		// Somebody is looking at that session, so this is the ordinary work of
+		// moving their tab and pane — never a switch, even when this is running
+		// somewhere else. That viewer may be a second window the container
+		// outside this one has just brought to the front, and taking the
+		// terminal somebody is typing in to the same session would undo that
+		// and move the wrong person.
+		//
+		// The session is alive, the pane is there and somebody is demonstrably
+		// looking, so anything that goes wrong now is zellij declining rather
+		// than zellij being absent — two words, because they deserve different
+		// next moves.
+		if err := zellij.GoToTab(where.Session, pane.TabID); err != nil {
 			return container.Failed(container.Refused, err.Error()), nil
 		}
+		// The guard is "already in front of its own tab", not `pane.Focused`, and
+		// the difference is a bug somebody had to close a floating pane by hand to
+		// get past: a tab has TWO focused panes, so the focused TILED pane is
+		// `Focused` and behind the floating layer at the same time. Skipping the
+		// focus there skipped it in precisely the case that needed it most, because
+		// `focus-pane-id` on a tiled pane is what LOWERS that layer — measured on
+		// 0.45.1, it exits 0 and hides the floating panes rather than refusing.
+		if !inFrontOfItsOwnTab(pane, tabs) {
+			if err := zellij.FocusPane(where.Session, where.Pane); err != nil {
+				return container.Failed(container.Refused, err.Error()), nil
+			}
+		}
+
+	case here != "" && here != where.Session:
+		// Nobody is looking at it, and this was asked from a terminal that can
+		// come. One command is the whole of it: the terminal leaves the session
+		// it is in, attaches to this one and lands on this pane with its tab
+		// active. go-to-tab and focus-pane would instead be asking a session
+		// nobody is in to rearrange itself, which is the silent no-op this
+		// branch exists to stop reporting as a focus.
+		if err := zellij.SwitchSession(where.Session, where.Pane); err != nil {
+			return container.Failed(container.Refused, err.Error()), nil
+		}
+		// zellij answers before the terminal has arrived — measured at 25ms out
+		// and 130ms in on 0.45.1 — so the read-back below would find a session
+		// with nobody in it and call a switch that worked a refusal. Two seconds
+		// is a hundred times the wait because it is here for the terminal that
+		// never comes, and it stays inside core's five for one focus step.
+		waited := time.Now().Add(2 * time.Second)
+		for len(clients) == 0 {
+			if time.Now().After(waited) {
+				return container.Failed(container.Refused, fmt.Sprintf(
+					"zellij took the switch and no terminal came to session %q", where.Session)), nil
+			}
+			time.Sleep(25 * time.Millisecond)
+			if clients, err = zellij.Clients(where.Session); err != nil {
+				return container.Failed(container.NotRunning, err.Error()), nil
+			}
+		}
+
+	default:
+		// Nobody is looking at it and nobody here can be brought: either nothing
+		// says where this is running, or it is running in a pane of that same
+		// session — a shell that outlived the terminal it was started in, and
+		// switching a session to itself moves nobody.
+		return container.Failed(NotAttached, fmt.Sprintf(
+			"zellij session %q is running and no terminal is showing it, and this focus was "+
+				"not asked for from inside a zellij pane, so there is nothing here to bring "+
+				"— `zellij attach %s` first",
+			where.Session, where.Session)), nil
 	}
 
 	panes, err = zellij.Panes(where.Session)
