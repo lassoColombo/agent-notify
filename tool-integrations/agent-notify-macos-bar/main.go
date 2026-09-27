@@ -63,8 +63,7 @@ func usage(to *os.File) {
   agent-notify-macos-bar            stay connected and paint
   agent-notify-macos-bar check      say what it can and cannot do on this machine
   agent-notify-macos-bar dump       print what it would put on the bar, and stop
-  agent-notify-macos-bar install    add [integration.macos-bar] to agent-notify's config
-  agent-notify-macos-bar install --print   show what it would add, change nothing
+  agent-notify-macos-bar install    build the .app bundle and print the [integration.macos-bar] table to add
 
 This is one of two macOS displays and it draws the menu bar. The other posts a
 notification when an agent wants you: agent-notify-macos-notifications, its own

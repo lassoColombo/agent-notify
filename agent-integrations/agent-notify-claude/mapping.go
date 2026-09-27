@@ -1,5 +1,6 @@
 // Command agent-notify-claude is Claude Code's agent-integration: it turns
-// Claude's hooks into agent-notify's eight events and nothing else.
+// Claude's hooks into agent-notify's events and nothing else. It produces seven
+// of the nine: never `turn-interrupted`, never `context-changed`.
 //
 // Everything peculiar to Claude lives in this file. Everything after it is
 // hook.Record, which is identical for every agent.

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 )
 
 // install writes this program into Claude's own settings.json, which is how a
@@ -67,7 +68,16 @@ func install(arguments []string) int {
 	return 0
 }
 
+// defaultSettings is ~/.claude/settings.json, or wherever the user moved the
+// whole configuration directory to.
+//
+// It reads the same variable the runtime half reads (see
+// whereClaudeKeepsItsLiveSessions). An installer that wrote to ~/.claude while
+// the hook read CLAUDE_CONFIG_DIR would report success and install nothing.
 func defaultSettings() string {
+	if configured := strings.TrimSpace(os.Getenv(configDirectoryVariable)); configured != "" {
+		return filepath.Join(configured, "settings.json")
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "settings.json"

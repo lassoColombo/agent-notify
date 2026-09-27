@@ -59,13 +59,12 @@ func usage(to *os.File) {
   %s check      say whether macOS will deliver them, and post a test banner
   %s check --sound NAME   post it with that sound, to hear one before
                           writing it into the config
-  %s install    add [integration.%s] to agent-notify's config
-  %s install --print   show what it would add, change nothing
+  %s install    build the .app bundle and print the [integration.%s] table to add
 
 This is one of two macOS displays and it does the interrupting. The other puts
 the semaphore on your menu bar: agent-notify-macos-bar, its own program with its
 own table in the config, installed separately or not at all.
-`, program, program, program, program, program, Name, program)
+`, program, program, program, program, program, Name)
 }
 
 // check says whether this can actually interrupt anybody on this machine.

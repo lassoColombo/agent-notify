@@ -56,8 +56,7 @@ func usage(to *os.File) {
   agent-notify-zellij-display repaint      paint once from the store, with no session-watcher
   agent-notify-zellij-display capture-environment
                                            what pane this process is in; run by the hook, not by you
-  agent-notify-zellij-display install      add [integration.zellij-display] to agent-notify's config
-  agent-notify-zellij-display install --print   show what it would add, and change nothing
+  agent-notify-zellij-display install      print the [integration.zellij-display] table to add; writes nothing
 `)
 }
 

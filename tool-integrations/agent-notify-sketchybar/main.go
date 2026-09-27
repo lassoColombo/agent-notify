@@ -43,8 +43,7 @@ func usage(to *os.File) {
 	fmt.Fprint(to, `agent-notify-sketchybar — the semaphore, on your menu bar
 
   agent-notify-sketchybar            stay connected and paint
-  agent-notify-sketchybar install    add [integration.sketchybar] to agent-notify's config
-  agent-notify-sketchybar install --print   show what it would add, change nothing
+  agent-notify-sketchybar install    print the [integration.sketchybar] table to add; writes nothing
 `)
 }
 
