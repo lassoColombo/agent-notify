@@ -15,16 +15,16 @@ import (
 	"strings"
 	"time"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
 	"github.com/lassoColombo/agent-notify/internal/config"
 	"github.com/lassoColombo/agent-notify/internal/paths"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // SessionStore is every session's record, in files under one root.
 type SessionStore struct {
 	layout   paths.Layout
 	patience time.Duration
-	bounds   agentnotify.Bounds
+	bounds   session.Bounds
 	keep     time.Duration
 }
 
@@ -46,7 +46,7 @@ func Open(layout paths.Layout, settings config.Config) (*SessionStore, error) {
 	return &SessionStore{
 		layout:   layout,
 		patience: LockPatience,
-		bounds:   agentnotify.Bounds{Messages: settings.HistoryMessages, Changes: settings.HistoryChanges},
+		bounds:   session.Bounds{Messages: settings.HistoryMessages, Changes: settings.HistoryChanges},
 		keep:     settings.KeepEndedSessions.Duration(),
 	}, nil
 }
@@ -56,14 +56,14 @@ func Open(layout paths.Layout, settings config.Config) (*SessionStore, error) {
 // It takes no lock. A reader that catches a writer mid-flight sees either the
 // old record or the new one, never a mixture, because a record is replaced by
 // rename and never edited in place.
-func (s *SessionStore) Read(key agentnotify.Key) (agentnotify.Record, bool, error) {
+func (s *SessionStore) Read(key session.Key) (session.Record, bool, error) {
 	live, ended := s.theLiveAndEndedFilesFor(key)
 
-	var liveRecord, endedRecord agentnotify.Record
+	var liveRecord, endedRecord session.Record
 	liveFound, liveErr := readJSON(live, &liveRecord)
 	endedFound, endedErr := readJSON(ended, &endedRecord)
 	if err := errors.Join(liveErr, endedErr); err != nil {
-		return agentnotify.Record{}, false, err
+		return session.Record{}, false, err
 	}
 
 	switch {
@@ -81,12 +81,12 @@ func (s *SessionStore) Read(key agentnotify.Key) (agentnotify.Record, bool, erro
 	case endedFound:
 		return endedRecord, true, nil
 	}
-	return agentnotify.Record{}, false, nil
+	return session.Record{}, false, nil
 }
 
 // theLiveAndEndedFilesFor is the two files a session's record can be in, and
 // there are never any others.
-func (s *SessionStore) theLiveAndEndedFilesFor(key agentnotify.Key) (live, ended string) {
+func (s *SessionStore) theLiveAndEndedFilesFor(key session.Key) (live, ended string) {
 	return s.layout.SessionFile(key.String()), s.layout.EndedFile(key.String())
 }
 
@@ -96,10 +96,10 @@ func (s *SessionStore) theLiveAndEndedFilesFor(key agentnotify.Key) (live, ended
 // together for one session serialise rather than one overwriting the other's
 // read. Different sessions never contend.
 func (s *SessionStore) Apply(
-	report agentnotify.Report, now time.Time,
-) (agentnotify.Record, error) {
-	return s.Update(report.Key, now, func(previous agentnotify.Record) agentnotify.Record {
-		return agentnotify.Apply(previous, report, now)
+	report session.Report, now time.Time,
+) (session.Record, error) {
+	return s.Update(report.Key, now, func(previous session.Record) session.Record {
+		return session.Apply(previous, report, now)
 	})
 }
 
@@ -112,23 +112,23 @@ func (s *SessionStore) Apply(
 // `updated_at`, `schema` and `key` afterwards, unconditionally — a caller never
 // gets to decide those (§A7.3).
 func (s *SessionStore) Update(
-	key agentnotify.Key,
+	key session.Key,
 	now time.Time,
-	change func(previous agentnotify.Record) agentnotify.Record,
-) (agentnotify.Record, error) {
+	change func(previous session.Record) session.Record,
+) (session.Record, error) {
 	if err := key.ReasonThisKeyCannotBeUsed(); err != nil {
-		return agentnotify.Record{}, err
+		return session.Record{}, err
 	}
 
 	held, err := lock(s.layout.LockFile(key.String()), s.patience)
 	if err != nil {
-		return agentnotify.Record{}, err
+		return session.Record{}, err
 	}
 	defer unlock(held)
 
 	previous, _, err := s.Read(key)
 	if err != nil {
-		return agentnotify.Record{}, err
+		return session.Record{}, err
 	}
 
 	next := change(previous)
@@ -141,7 +141,7 @@ func (s *SessionStore) Update(
 
 	destination := s.fileFor(next)
 	if err := writeJSON(destination, next); err != nil {
-		return agentnotify.Record{}, err
+		return session.Record{}, err
 	}
 	// Written before anything is removed, so a crash in between leaves two
 	// files rather than none — and Read resolves two by sequence, while nothing
@@ -175,26 +175,26 @@ func (s *SessionStore) Update(
 // fileFor is the one place that decides which directory a record belongs in.
 // Ending is a transition, not a deletion (R6): the record moves, it is not
 // removed, and a session that comes back is recognised.
-func (s *SessionStore) fileFor(record agentnotify.Record) string {
-	if record.Kernel == agentnotify.Ended {
+func (s *SessionStore) fileFor(record session.Record) string {
+	if record.Kernel == session.Ended {
 		return s.layout.EndedFile(record.Key.String())
 	}
 	return s.layout.SessionFile(record.Key.String())
 }
 
 func (s *SessionStore) recordHistory(
-	key agentnotify.Key, previous, next agentnotify.Record,
+	key session.Key, previous, next session.Record,
 ) error {
 	if s.bounds.Messages <= 0 && s.bounds.Changes <= 0 {
 		return nil
 	}
 	path := s.layout.HistoryFile(key.String())
 
-	var history agentnotify.History
+	var history session.History
 	if _, err := readJSON(path, &history); err != nil {
 		// A corrupt history file must not stop a session from being recorded.
 		// Starting a fresh one loses previews, not state.
-		history = agentnotify.History{}
+		history = session.History{}
 	}
 
 	history, changed := history.Record(previous, next, s.bounds)
@@ -207,10 +207,10 @@ func (s *SessionStore) recordHistory(
 // History returns what a session has said and how its state has moved. An
 // absent file is an empty history, not an error: most sessions have said
 // nothing yet.
-func (s *SessionStore) History(key agentnotify.Key) (agentnotify.History, error) {
-	var history agentnotify.History
+func (s *SessionStore) History(key session.Key) (session.History, error) {
+	var history session.History
 	if _, err := readJSON(s.layout.HistoryFile(key.String()), &history); err != nil {
-		return agentnotify.History{}, err
+		return session.History{}, err
 	}
 	return history, nil
 }
@@ -218,17 +218,17 @@ func (s *SessionStore) History(key agentnotify.Key) (agentnotify.History, error)
 // List returns every live session. This is the cold read path: it must work
 // with no session-watcher running, because `agent-notify list` and an agent's
 // own statusline both depend on it (§A7.6).
-func (s *SessionStore) List() ([]agentnotify.Record, error) {
+func (s *SessionStore) List() ([]session.Record, error) {
 	return s.listDir(s.layout.Sessions())
 }
 
 // ListEnded returns the sessions that have ended and are still remembered —
 // what a picker offers you to resume.
-func (s *SessionStore) ListEnded() ([]agentnotify.Record, error) {
+func (s *SessionStore) ListEnded() ([]session.Record, error) {
 	return s.listDir(s.layout.Ended())
 }
 
-func (s *SessionStore) listDir(dir string) ([]agentnotify.Record, error) {
+func (s *SessionStore) listDir(dir string) ([]session.Record, error) {
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
 		return nil, nil
@@ -237,14 +237,14 @@ func (s *SessionStore) listDir(dir string) ([]agentnotify.Record, error) {
 		return nil, fmt.Errorf("cannot list %s: %w", dir, err)
 	}
 
-	records := make([]agentnotify.Record, 0, len(entries))
+	records := make([]session.Record, 0, len(entries))
 	var problems []error
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			// .write-* temporaries live here for microseconds at a time.
 			continue
 		}
-		var record agentnotify.Record
+		var record session.Record
 		found, err := readJSON(filepath.Join(dir, entry.Name()), &record)
 		if err != nil {
 			// One unreadable record must not cost the caller the other
@@ -269,7 +269,7 @@ func (s *SessionStore) listDir(dir string) ([]agentnotify.Record, error) {
 // though its presence in ended/ says it should have one.
 func (s *SessionStore) ForgetWhatIsTooOld(
 	now time.Time,
-) (removed []agentnotify.Key, err error) {
+) (removed []session.Key, err error) {
 	ended, listErr := s.ListEnded()
 	var problems []error
 	if listErr != nil {
@@ -295,7 +295,7 @@ func (s *SessionStore) ForgetWhatIsTooOld(
 // that lock that the session is still the one it decided to delete. Between
 // listing and locking, a resumed session can have written a new record — and
 // deleting a live session is the one mistake this package must not make.
-func (s *SessionStore) forget(key agentnotify.Key, expected uint64) error {
+func (s *SessionStore) forget(key session.Key, expected uint64) error {
 	held, err := lock(s.layout.LockFile(key.String()), s.patience)
 	if err != nil {
 		return err
@@ -306,7 +306,7 @@ func (s *SessionStore) forget(key agentnotify.Key, expected uint64) error {
 	if err != nil {
 		return err
 	}
-	if !found || current.Sequence != expected || current.Kernel != agentnotify.Ended {
+	if !found || current.Sequence != expected || current.Kernel != session.Ended {
 		return nil
 	}
 
@@ -347,7 +347,7 @@ func (s *SessionStore) pruneLocks(now time.Time) error {
 		if err != nil || now.Sub(info.ModTime()) < s.keep {
 			continue
 		}
-		key, err := agentnotify.ParseKey(name)
+		key, err := session.ParseKey(name)
 		if err != nil {
 			continue
 		}

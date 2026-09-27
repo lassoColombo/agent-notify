@@ -5,9 +5,9 @@ import (
 	"log/slog"
 	"sync"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
 	"github.com/lassoColombo/agent-notify/internal/paths"
-	"github.com/lassoColombo/agent-notify/internal/watcher"
+	"github.com/lassoColombo/agent-notify/internal/sessionwatcher"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // Fake is a session-watcher with no agents behind it.
@@ -23,11 +23,11 @@ import (
 // difference is where the records came from.
 type Fake struct {
 	root string
-	held *watcher.TheOnlyRunningWatcher
-	subs *watcher.Subscribers
+	held *sessionwatcher.TheOnlyRunningWatcher
+	subs *sessionwatcher.Subscribers
 
 	mu       sync.Mutex
-	sessions map[string]agentnotify.Record
+	sessions map[string]session.Record
 }
 
 // StartFake brings one up under root, which the integration under test points
@@ -44,13 +44,13 @@ func StartFake(root string, logger *slog.Logger) (*Fake, error) {
 		return nil, err
 	}
 
-	held, err := watcher.TakeIfNobodyElseHasIt(layout)
+	held, err := sessionwatcher.TakeIfNobodyElseHasIt(layout)
 	if err != nil {
 		return nil, fmt.Errorf("something is already running under %s: %w", root, err)
 	}
 
-	fake := &Fake{root: root, held: held, sessions: map[string]agentnotify.Record{}}
-	subs, err := watcher.Serve(layout, held, logger, 128, fake.snapshot)
+	fake := &Fake{root: root, held: held, sessions: map[string]session.Record{}}
+	subs, err := sessionwatcher.Serve(layout, held, logger, 128, fake.snapshot)
 	if err != nil {
 		held.Release()
 		return nil, err
@@ -66,7 +66,7 @@ func StartFake(root string, logger *slog.Logger) (*Fake, error) {
 // session-watcher OBSERVED rather than was told about carries no event either
 // (D-12 — death and supersession), which is why the field is omitempty on the
 // wire. Where the event matters, play [Fake.Reported].
-func (f *Fake) Publish(record agentnotify.Record) {
+func (f *Fake) Publish(record session.Record) {
 	f.Reported(record, "")
 }
 
@@ -77,7 +77,7 @@ func (f *Fake) Publish(record agentnotify.Record) {
 // now in [View.Changed] — and a fake that could only ever play an empty one
 // would be a fake no notifier could be tested against, which is the one thing
 // this is here to prevent.
-func (f *Fake) Reported(record agentnotify.Record, event agentnotify.Event) {
+func (f *Fake) Reported(record session.Record, event session.Event) {
 	key := record.Key.String()
 
 	f.mu.Lock()
@@ -89,7 +89,7 @@ func (f *Fake) Reported(record agentnotify.Record, event agentnotify.Event) {
 }
 
 // Forget plays a session being pruned.
-func (f *Fake) Forget(key agentnotify.Key) {
+func (f *Fake) Forget(key session.Key) {
 	f.mu.Lock()
 	delete(f.sessions, key.String())
 	f.mu.Unlock()
@@ -103,18 +103,18 @@ func (f *Fake) Connected() []string { return f.subs.Connected() }
 // Root is where it is listening, for an integration to point at.
 func (f *Fake) Root() string { return f.root }
 
-func (f *Fake) snapshot(wantEnded bool) []agentnotify.Record {
+func (f *Fake) snapshot(wantEnded bool) []session.Record {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	sessions := make([]agentnotify.Record, 0, len(f.sessions))
+	sessions := make([]session.Record, 0, len(f.sessions))
 	for _, record := range f.sessions {
-		if !wantEnded && record.Kernel == agentnotify.Ended {
+		if !wantEnded && record.Kernel == session.Ended {
 			continue
 		}
 		sessions = append(sessions, record)
 	}
-	agentnotify.ByUrgency(sessions)
+	session.ByUrgency(sessions)
 	return sessions
 }
 

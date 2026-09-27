@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
@@ -28,9 +28,9 @@ func shortRoot(t *testing.T) string {
 	return root
 }
 
-func session(id string, kernel agentnotify.Kernel, message string) agentnotify.Record {
-	return agentnotify.Record{
-		Key:        agentnotify.Key{Host: "mac", Agent: "claude", SessionID: id},
+func aSession(id string, kernel session.Kernel, message string) session.Record {
+	return session.Record{
+		Key:        session.Key{Host: "mac", Agent: "claude", SessionID: id},
 		Kernel:     kernel,
 		Rank:       kernel.Rank(),
 		Message:    message,
@@ -124,8 +124,8 @@ func TestTenLineSubscriberSeesChangesLive(t *testing.T) {
 		t.Errorf("the first thing a display saw was a %q", first.Why)
 	}
 
-	fake.Publish(session("one", agentnotify.Working, "building"))
-	fake.Publish(session("two", agentnotify.BlockedOnYou, "may I?"))
+	fake.Publish(aSession("one", session.Working, "building"))
+	fake.Publish(aSession("two", session.BlockedOnYou, "may I?"))
 
 	waitFor(t, "both sessions", func() bool {
 		view, ok := seen.latest()
@@ -133,7 +133,7 @@ func TestTenLineSubscriberSeesChangesLive(t *testing.T) {
 	})
 
 	view, _ := seen.latest()
-	if view.Sessions[0].Kernel != agentnotify.BlockedOnYou {
+	if view.Sessions[0].Kernel != session.BlockedOnYou {
 		t.Errorf("the most urgent session is not first: %q", view.Sessions[0].Kernel)
 	}
 	if len(view.Changed) != 1 || view.Changed[0].Record.Key.SessionID != "two" {
@@ -161,7 +161,7 @@ func TestASubscriberSurvivesASessionWatcherRestart(t *testing.T) {
 	})
 
 	waitFor(t, "the display to connect", func() bool { return len(first.Connected()) == 1 })
-	first.Publish(session("one", agentnotify.Working, "before the restart"))
+	first.Publish(aSession("one", session.Working, "before the restart"))
 	waitFor(t, "the first session", func() bool {
 		view, ok := seen.latest()
 		return ok && len(view.Sessions) == 1
@@ -179,7 +179,7 @@ func TestASubscriberSurvivesASessionWatcherRestart(t *testing.T) {
 		t.Fatalf("the second StartFake: %v", err)
 	}
 	defer second.Stop()
-	second.Publish(session("two", agentnotify.BlockedOnYou, "after the restart"))
+	second.Publish(aSession("two", session.BlockedOnYou, "after the restart"))
 
 	waitFor(t, "the display to come back", func() bool { return len(second.Connected()) == 1 })
 	waitFor(t, "the display to be correct again", func() bool {
@@ -230,8 +230,8 @@ func TestASubscriberIsCorrectAfterOverflowing(t *testing.T) {
 	}
 	defer connection.Close()
 
-	hello, _ := json.Marshal(agentnotify.Hello{
-		Kind: agentnotify.KindHello, Name: "a-slow-display", Version: agentnotify.Version,
+	hello, _ := json.Marshal(session.Hello{
+		Kind: session.KindHello, Name: "a-slow-display", Version: session.Version,
 	})
 	if _, err := connection.Write(append(hello, '\n')); err != nil {
 		t.Fatalf("Write: %v", err)
@@ -241,10 +241,10 @@ func TestASubscriberIsCorrectAfterOverflowing(t *testing.T) {
 	// Far more distinct sessions than the queue holds, while it reads nothing.
 	const many = 400
 	for i := range many {
-		fake.Publish(session("s"+strconv.Itoa(i), agentnotify.Working, "busy"))
+		fake.Publish(aSession("s"+strconv.Itoa(i), session.Working, "busy"))
 	}
 	// ...and then the truth changes, after the overflow.
-	final := session("s0", agentnotify.BlockedOnYou, "the only thing that matters now")
+	final := aSession("s0", session.BlockedOnYou, "the only thing that matters now")
 	final.Sequence = 99
 	fake.Publish(final)
 
@@ -252,7 +252,7 @@ func TestASubscriberIsCorrectAfterOverflowing(t *testing.T) {
 	reader := bufio.NewReader(connection)
 	_ = connection.SetReadDeadline(time.Now().Add(10 * time.Second))
 
-	sessions := map[string]agentnotify.Record{}
+	sessions := map[string]session.Record{}
 	sawSnapshot := false
 	deadline := time.Now().Add(8 * time.Second)
 	for time.Now().Before(deadline) {
@@ -261,25 +261,25 @@ func TestASubscriberIsCorrectAfterOverflowing(t *testing.T) {
 		if err != nil {
 			break
 		}
-		kind, err := agentnotify.KindOf(line)
+		kind, err := session.KindOf(line)
 		if err != nil {
 			continue
 		}
 		switch kind {
-		case agentnotify.KindSnapshot:
-			var snapshot agentnotify.Snapshot
+		case session.KindSnapshot:
+			var snapshot session.Snapshot
 			if err := json.Unmarshal(line, &snapshot); err != nil {
 				t.Fatalf("unreadable snapshot: %v", err)
 			}
 			if snapshot.Why == "overflow" {
 				sawSnapshot = true
 			}
-			sessions = map[string]agentnotify.Record{}
+			sessions = map[string]session.Record{}
 			for _, record := range snapshot.Sessions {
 				sessions[record.Key.SessionID] = record
 			}
-		case agentnotify.KindDelta:
-			var delta agentnotify.Delta
+		case session.KindDelta:
+			var delta session.Delta
 			if err := json.Unmarshal(line, &delta); err != nil {
 				t.Fatalf("unreadable delta: %v", err)
 			}
@@ -293,7 +293,7 @@ func TestASubscriberIsCorrectAfterOverflowing(t *testing.T) {
 	if len(sessions) != many {
 		t.Errorf("it ended up holding %d sessions, want %d", len(sessions), many)
 	}
-	if got := sessions["s0"]; got.Kernel != agentnotify.BlockedOnYou {
+	if got := sessions["s0"]; got.Kernel != session.BlockedOnYou {
 		t.Errorf("s0 is %q/%q, want the state that was true when it caught up",
 			got.Kernel, got.Message)
 	}
@@ -318,8 +318,8 @@ func TestASubscriberFromAnotherVersionIsStillWelcome(t *testing.T) {
 	}
 	defer connection.Close()
 
-	hello, _ := json.Marshal(agentnotify.Hello{
-		Kind: agentnotify.KindHello, Name: "from-the-future", Version: "9.0.0",
+	hello, _ := json.Marshal(session.Hello{
+		Kind: session.KindHello, Name: "from-the-future", Version: "9.0.0",
 	})
 	connection.Write(append(hello, '\n'))
 
@@ -328,16 +328,16 @@ func TestASubscriberFromAnotherVersionIsStillWelcome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("no answer at all: %v", err)
 	}
-	var welcome agentnotify.Welcome
+	var welcome session.Welcome
 	if err := json.Unmarshal(line, &welcome); err != nil {
 		t.Fatalf("unreadable: %v", err)
 	}
-	if welcome.Kind != agentnotify.KindWelcome {
+	if welcome.Kind != session.KindWelcome {
 		t.Fatalf("got a %q, want a welcome", welcome.Kind)
 	}
-	if welcome.Version != agentnotify.Version {
+	if welcome.Version != session.Version {
 		t.Errorf("the welcome says version %q, want this core's own %q",
-			welcome.Version, agentnotify.Version)
+			welcome.Version, session.Version)
 	}
 }
 
@@ -361,12 +361,12 @@ func TestWakeOnFiltersWhatArrives(t *testing.T) {
 	waitFor(t, "the display to connect", func() bool { return len(fake.Connected()) == 1 })
 	waitFor(t, "the opening snapshot", func() bool { return seen.count() >= 1 })
 
-	fake.Publish(session("one", agentnotify.Working, "first"))
+	fake.Publish(aSession("one", session.Working, "first"))
 	waitFor(t, "the first delta", func() bool { return seen.count() >= 2 })
 	after := seen.count()
 
 	// The message changes and nothing else. A pane renamer does not care.
-	changedMessage := session("one", agentnotify.Working, "second")
+	changedMessage := aSession("one", session.Working, "second")
 	changedMessage.Sequence = 2
 	fake.Publish(changedMessage)
 	time.Sleep(300 * time.Millisecond)
@@ -375,7 +375,7 @@ func TestWakeOnFiltersWhatArrives(t *testing.T) {
 	}
 
 	// The kernel changes. It does care.
-	movedOn := session("one", agentnotify.FinishedATurn, "second")
+	movedOn := aSession("one", session.FinishedATurn, "second")
 	movedOn.Sequence = 3
 	fake.Publish(movedOn)
 	waitFor(t, "the kernel change", func() bool { return seen.count() > after })

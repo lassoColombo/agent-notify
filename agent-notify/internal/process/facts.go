@@ -15,7 +15,7 @@ import (
 	"errors"
 	"time"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // ErrNoSuchProcess is the one failure that means something. Every other error
@@ -59,7 +59,7 @@ const SameProcessWindow = time.Second
 
 // SameProcess reports whether a recorded process and a live one are the same
 // thing, rather than the same number.
-func SameProcess(recorded agentnotify.Process, found Facts) bool {
+func SameProcess(recorded session.Process, found Facts) bool {
 	if recorded.PID != found.PID {
 		return false
 	}

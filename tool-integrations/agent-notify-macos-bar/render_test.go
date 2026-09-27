@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 var nine = time.Date(2026, 9, 18, 9, 0, 0, 0, time.UTC)
@@ -17,20 +17,20 @@ func bar() Bar {
 	return Bar{
 		Rows:    3,
 		Resting: "0xff8c88a6",
-		Glyphs: agentnotify.NewPalette(map[agentnotify.Kernel]string{
-			agentnotify.BlockedOnYou:  "!",
-			agentnotify.FinishedATurn: "+",
-			agentnotify.Working:       "*",
+		Glyphs: session.NewPalette(map[session.Kernel]string{
+			session.BlockedOnYou:  "!",
+			session.FinishedATurn: "+",
+			session.Working:       "*",
 		}, nil),
-		Colours:  agentnotify.NewPalette(DefaultColours, nil),
+		Colours:  session.NewPalette(DefaultColours, nil),
 		Now:      nine.Add(4 * time.Minute),
 		Announce: 8 * time.Second,
 	}
 }
 
-func session(id string, kernel agentnotify.Kernel, since time.Time) agentnotify.Record {
-	return agentnotify.Record{
-		Key:        agentnotify.Key{Host: "mac", Agent: "claude", SessionID: id},
+func aSession(id string, kernel session.Kernel, since time.Time) session.Record {
+	return session.Record{
+		Key:        session.Key{Host: "mac", Agent: "claude", SessionID: id},
 		Name:       id,
 		Kernel:     kernel,
 		Rank:       kernel.Rank(),
@@ -91,19 +91,19 @@ func marks(t *testing.T, paint WhatTheBarShows) []TitlePiece {
 // TestOneAlienPerStateThatHasAnybodyInIt, most urgent first, each in its own
 // colour — and a state with nothing in it is simply not there.
 func TestOneAlienPerStateThatHasAnybodyInIt(t *testing.T) {
-	paint, _ := Render(bar(), []agentnotify.Record{
-		session("one", agentnotify.Working, nine),
-		session("two", agentnotify.Working, nine),
-		session("three", agentnotify.BlockedOnYou, nine),
+	paint, _ := Render(bar(), []session.Record{
+		aSession("one", session.Working, nine),
+		aSession("two", session.Working, nine),
+		aSession("three", session.BlockedOnYou, nine),
 	})
 	on := marks(t, paint)
 	if len(on) != 2 {
 		t.Fatalf("the item has %d marks on it, want one per live state", len(on))
 	}
-	if on[0].Colour != DefaultColours[agentnotify.BlockedOnYou] {
+	if on[0].Colour != DefaultColours[session.BlockedOnYou] {
 		t.Errorf("the first mark is %q, want blocked-on-you in front", on[0].Colour)
 	}
-	if on[1].Colour != DefaultColours[agentnotify.Working] {
+	if on[1].Colour != DefaultColours[session.Working] {
 		t.Errorf("the second mark is %q, want working", on[1].Colour)
 	}
 	// Two agents in a state is still one alien. How many is in the tooltip.
@@ -116,15 +116,15 @@ func TestOneAlienPerStateThatHasAnybodyInIt(t *testing.T) {
 // of the day and it is not a request: a mark that flickered through it would be
 // a light nobody could work next to.
 func TestOnlyTheStatesWaitingOnYouFlicker(t *testing.T) {
-	flickers := map[agentnotify.Kernel]bool{
-		agentnotify.BlockedOnYou:  true,
-		agentnotify.Broke:         true,
-		agentnotify.FinishedATurn: true,
-		agentnotify.Working:       false,
-		agentnotify.Idle:          false,
+	flickers := map[session.Kernel]bool{
+		session.BlockedOnYou:  true,
+		session.Broke:         true,
+		session.FinishedATurn: true,
+		session.Working:       false,
+		session.Idle:          false,
 	}
 	for kernel, want := range flickers {
-		paint, _ := Render(bar(), []agentnotify.Record{session("one", kernel, nine)})
+		paint, _ := Render(bar(), []session.Record{aSession("one", kernel, nine)})
 		if got := marks(t, paint)[0].Flicker; got != want {
 			t.Errorf("%s flickers = %v, want %v", kernel, got, want)
 		}
@@ -134,10 +134,10 @@ func TestOnlyTheStatesWaitingOnYouFlicker(t *testing.T) {
 // TestOneStateAsksAndTheOthersSitStill is the reason flickering is a property
 // of a piece and not of the item.
 func TestOneStateAsksAndTheOthersSitStill(t *testing.T) {
-	paint, _ := Render(bar(), []agentnotify.Record{
-		session("ask", agentnotify.BlockedOnYou, nine),
-		session("busy", agentnotify.Working, nine),
-		session("quiet", agentnotify.Idle, nine),
+	paint, _ := Render(bar(), []session.Record{
+		aSession("ask", session.BlockedOnYou, nine),
+		aSession("busy", session.Working, nine),
+		aSession("quiet", session.Idle, nine),
 	})
 	on := marks(t, paint)
 	if len(on) != 3 {
@@ -175,14 +175,14 @@ func TestNothingRunningIsStillOneAlien(t *testing.T) {
 // keep: whatever is happening, every mark on the item is the same sprite, so
 // the bar is read by colour and by movement rather than by being decoded.
 func TestTheMarkNeverChangesShape(t *testing.T) {
-	for _, world := range [][]agentnotify.Record{
+	for _, world := range [][]session.Record{
 		nil,
-		{session("ask", agentnotify.BlockedOnYou, nine)},
-		{session("oops", agentnotify.Broke, nine)},
-		{session("ready", agentnotify.FinishedATurn, nine)},
-		{session("busy", agentnotify.Working, nine)},
-		{session("quiet", agentnotify.Idle, nine)},
-		{session("gone", agentnotify.Ended, nine)},
+		{aSession("ask", session.BlockedOnYou, nine)},
+		{aSession("oops", session.Broke, nine)},
+		{aSession("ready", session.FinishedATurn, nine)},
+		{aSession("busy", session.Working, nine)},
+		{aSession("quiet", session.Idle, nine)},
+		{aSession("gone", session.Ended, nine)},
 	} {
 		paint, _ := Render(bar(), world)
 		marks(t, paint) // fails unless every one of them is the invader
@@ -192,9 +192,9 @@ func TestTheMarkNeverChangesShape(t *testing.T) {
 // TestTheMarksAreSeparated. Two sprites with nothing between them read as one
 // wider sprite.
 func TestTheMarksAreSeparated(t *testing.T) {
-	paint, _ := Render(bar(), []agentnotify.Record{
-		session("ask", agentnotify.BlockedOnYou, nine),
-		session("busy", agentnotify.Working, nine),
+	paint, _ := Render(bar(), []session.Record{
+		aSession("ask", session.BlockedOnYou, nine),
+		aSession("busy", session.Working, nine),
 	})
 	on := marks(t, paint)
 	if on[0].Text != "" {
@@ -207,9 +207,9 @@ func TestTheMarksAreSeparated(t *testing.T) {
 
 // TestAnEndedSessionIsNotOnTheBar (D-26).
 func TestAnEndedSessionIsNotOnTheBar(t *testing.T) {
-	paint, _ := Render(bar(), []agentnotify.Record{
-		session("gone", agentnotify.Ended, nine),
-		session("here", agentnotify.Working, nine),
+	paint, _ := Render(bar(), []session.Record{
+		aSession("gone", session.Ended, nine),
+		aSession("here", session.Working, nine),
 	})
 	if on := marks(t, paint); len(on) != 1 {
 		t.Errorf("the item has %d marks, want only the working one", len(on))
@@ -224,9 +224,9 @@ func TestAnEndedSessionIsNotOnTheBar(t *testing.T) {
 
 // TestTheMenuIsStatesThenSessions.
 func TestTheMenuIsStatesThenSessions(t *testing.T) {
-	paint, _ := Render(bar(), []agentnotify.Record{
-		session("busy", agentnotify.Working, nine),
-		session("ask", agentnotify.BlockedOnYou, nine),
+	paint, _ := Render(bar(), []session.Record{
+		aSession("busy", session.Working, nine),
+		aSession("ask", session.BlockedOnYou, nine),
 	})
 	var shape []string
 	for _, item := range paint.Menu {
@@ -240,11 +240,11 @@ func TestTheMenuIsStatesThenSessions(t *testing.T) {
 
 // TestARowSaysEverythingARowHasToSay.
 func TestARowSaysEverythingARowHasToSay(t *testing.T) {
-	record := session("alpha", agentnotify.BlockedOnYou, nine)
+	record := aSession("alpha", session.BlockedOnYou, nine)
 	record.Message = "Shall I delete the branch?"
 	record.Detail = "permission-prompt"
 
-	paint, _ := Render(bar(), []agentnotify.Record{record})
+	paint, _ := Render(bar(), []session.Record{record})
 	row := find(t, paint, "alpha")
 
 	if row.Key != record.Key.String() {
@@ -256,7 +256,7 @@ func TestARowSaysEverythingARowHasToSay(t *testing.T) {
 	if row.Glyph != "!" {
 		t.Errorf("the row's glyph is %q", row.Glyph)
 	}
-	if row.Colour != DefaultColours[agentnotify.BlockedOnYou] {
+	if row.Colour != DefaultColours[session.BlockedOnYou] {
 		t.Errorf("the row's colour is %q", row.Colour)
 	}
 	// And what the agent SAID is deliberately not here: it goes in the
@@ -269,9 +269,9 @@ func TestARowSaysEverythingARowHasToSay(t *testing.T) {
 // TestSessionsAreOrderedByUrgencyInsideAState, which is core's order and not
 // one written here (R24).
 func TestSessionsAreOrderedByUrgencyInsideAState(t *testing.T) {
-	paint, _ := Render(bar(), []agentnotify.Record{
-		session("recent", agentnotify.BlockedOnYou, nine.Add(3*time.Minute)),
-		session("waiting", agentnotify.BlockedOnYou, nine),
+	paint, _ := Render(bar(), []session.Record{
+		aSession("recent", session.BlockedOnYou, nine.Add(3*time.Minute)),
+		aSession("waiting", session.BlockedOnYou, nine),
 	})
 	listed := rows(paint)
 	if len(listed) != 2 || listed[0].Text != "waiting" {
@@ -282,9 +282,9 @@ func TestSessionsAreOrderedByUrgencyInsideAState(t *testing.T) {
 // TestALongStateSaysHowManyItIsNotShowing. Silence about the rest would read as
 // "these are all of them".
 func TestALongStateSaysHowManyItIsNotShowing(t *testing.T) {
-	var many []agentnotify.Record
+	var many []session.Record
 	for _, id := range []string{"a", "b", "c", "d", "e"} {
-		many = append(many, session(id, agentnotify.Working, nine))
+		many = append(many, aSession(id, session.Working, nine))
 	}
 	paint, _ := Render(bar(), many)
 
@@ -302,15 +302,15 @@ func TestALongStateSaysHowManyItIsNotShowing(t *testing.T) {
 func TestAnAnnouncementIsAddedAndTakesNothingAway(t *testing.T) {
 	board := bar()
 	board.Now = nine.Add(2 * time.Second)
-	paint, announcement := Render(board, []agentnotify.Record{
-		session("busy", agentnotify.Working, nine.Add(-time.Hour)),
-		session("alpha", agentnotify.BlockedOnYou, nine),
+	paint, announcement := Render(board, []session.Record{
+		aSession("busy", session.Working, nine.Add(-time.Hour)),
+		aSession("alpha", session.BlockedOnYou, nine),
 	})
 
 	if !announcement.Announced() {
 		t.Fatal("nothing was announced")
 	}
-	if got := marks(t, paint)[0].Colour; got != DefaultColours[agentnotify.BlockedOnYou] {
+	if got := marks(t, paint)[0].Colour; got != DefaultColours[session.BlockedOnYou] {
 		t.Errorf("the first mark is %q", got)
 	}
 	if got := title(paint); got != gap+gap+"alpha" {
@@ -328,7 +328,7 @@ func TestAnAnnouncementIsAddedAndTakesNothingAway(t *testing.T) {
 // records, three seconds apart, and the second is not announcing — because the
 // deadline is state-since plus the window and no paint can move it.
 func TestAnAnnouncementEndsOnTheRecordsClock(t *testing.T) {
-	records := []agentnotify.Record{session("alpha", agentnotify.BlockedOnYou, nine)}
+	records := []session.Record{aSession("alpha", session.BlockedOnYou, nine)}
 
 	early := bar()
 	early.Announce = 5 * time.Second
@@ -356,9 +356,9 @@ func TestAnAnnouncementEndsOnTheRecordsClock(t *testing.T) {
 func TestWorkingDoesNotAnnounce(t *testing.T) {
 	board := bar()
 	board.Now = nine.Add(time.Second)
-	if _, announcement := Render(board, []agentnotify.Record{
-		session("busy", agentnotify.Working, nine),
-		session("quiet", agentnotify.Idle, nine),
+	if _, announcement := Render(board, []session.Record{
+		aSession("busy", session.Working, nine),
+		aSession("quiet", session.Idle, nine),
 	}); announcement.Announced() {
 		t.Errorf("announced %v", announcement)
 	}
@@ -369,9 +369,9 @@ func TestWorkingDoesNotAnnounce(t *testing.T) {
 func TestTheMostRecentIsAnnouncedNotTheWorst(t *testing.T) {
 	board := bar()
 	board.Now = nine.Add(5 * time.Second)
-	_, announcement := Render(board, []agentnotify.Record{
-		session("worse", agentnotify.BlockedOnYou, nine),
-		session("newer", agentnotify.FinishedATurn, nine.Add(2*time.Second)),
+	_, announcement := Render(board, []session.Record{
+		aSession("worse", session.BlockedOnYou, nine),
+		aSession("newer", session.FinishedATurn, nine.Add(2*time.Second)),
 	})
 	if !announcement.Announced() || announcement.Record.DisplayName() != "newer" {
 		t.Errorf("announced %v, want the one that just happened", announcement)
@@ -383,8 +383,8 @@ func TestAnnounceZeroKeepsTheItemPassive(t *testing.T) {
 	board := bar()
 	board.Announce = 0
 	board.Now = nine.Add(time.Second)
-	paint, announcement := Render(board, []agentnotify.Record{
-		session("alpha", agentnotify.BlockedOnYou, nine),
+	paint, announcement := Render(board, []session.Record{
+		aSession("alpha", session.BlockedOnYou, nine),
 	})
 	if announcement.Announced() {
 		t.Errorf("announced %v with the window turned off", announcement)
@@ -401,9 +401,9 @@ func TestAnnounceZeroKeepsTheItemPassive(t *testing.T) {
 // returns has to survive being marshalled, because that is the only form the
 // drawing side ever sees it in.
 func TestWhatCrossesTheBoundaryIsJSON(t *testing.T) {
-	record := session("alpha", agentnotify.BlockedOnYou, nine)
+	record := aSession("alpha", session.BlockedOnYou, nine)
 	record.Message = "it's \"quoted\", has a \\ in it, and\na newline"
-	paint, _ := Render(bar(), []agentnotify.Record{record})
+	paint, _ := Render(bar(), []session.Record{record})
 
 	encoded, err := json.Marshal(paint)
 	if err != nil {
@@ -430,7 +430,7 @@ func TestWhatCrossesTheBoundaryIsJSON(t *testing.T) {
 // are coloured — which was right for an item that showed one mark and wrong for
 // one that shows several. What is rationed now is movement, not colour.
 func TestEveryStateIsADifferentColour(t *testing.T) {
-	seen := map[string]agentnotify.Kernel{}
+	seen := map[string]session.Kernel{}
 	for _, kernel := range Painted() {
 		colour := DefaultColours[kernel]
 		if colour == "" {
@@ -461,7 +461,7 @@ func TestNothingIsDrawnInAHarshColour(t *testing.T) {
 // started: an idle mark nobody could see.
 func TestIdleIsTheTextColourDimmed(t *testing.T) {
 	const text = "e0def4" // Rosé Pine's own foreground
-	idle := DefaultColours[agentnotify.Idle]
+	idle := DefaultColours[session.Idle]
 	if idle[4:] != text {
 		t.Errorf("idle is %q, want the text colour %s dimmed", idle, text)
 	}
@@ -530,16 +530,16 @@ func TestEveryPaintedStateHasASymbol(t *testing.T) {
 // something behind.
 func TestTheDocumentCarriesSymbolsAndTheirFallback(t *testing.T) {
 	board := bar()
-	board.Symbols = agentnotify.NewPalette(DefaultSymbols, nil)
-	paint, _ := Render(board, []agentnotify.Record{
-		session("alpha", agentnotify.Working, nine),
+	board.Symbols = session.NewPalette(DefaultSymbols, nil)
+	paint, _ := Render(board, []session.Record{
+		aSession("alpha", session.Working, nine),
 	})
 
 	if got := paint.Title[0].Symbol; got != Invader {
 		t.Errorf("the item's symbol is %q", got)
 	}
 	row := find(t, paint, "alpha")
-	if row.Symbol != DefaultSymbols[agentnotify.Working] {
+	if row.Symbol != DefaultSymbols[session.Working] {
 		t.Errorf("the row's symbol is %q", row.Symbol)
 	}
 	if row.Glyph == "" {

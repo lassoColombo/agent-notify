@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // This file is pure. It turns the sessions into one WhatTheBarShows and returns
@@ -18,9 +18,9 @@ type Bar struct {
 	// A menu scrolls when it has to, so this is about a menu being readable
 	// rather than about one fitting.
 	Rows    int
-	Glyphs  agentnotify.Palette
-	Symbols agentnotify.Palette
-	Colours agentnotify.Palette
+	Glyphs  session.Palette
+	Symbols session.Palette
+	Colours session.Palette
 	Now     time.Time
 	// Announce is how long a state change adds the name of the session it
 	// happened to, after the counts. Zero leaves the item passive: counts that
@@ -44,10 +44,10 @@ const Invader = "invader"
 //
 // `ended` is absent: an ended session is not displayed, period (D-26), and
 // there is nothing to count.
-func Painted() []agentnotify.Kernel {
-	var painted []agentnotify.Kernel
-	for _, kernel := range agentnotify.Kernels() {
-		if kernel != agentnotify.Ended {
+func Painted() []session.Kernel {
+	var painted []session.Kernel
+	for _, kernel := range session.Kernels() {
+		if kernel != session.Ended {
 			painted = append(painted, kernel)
 		}
 	}
@@ -63,8 +63,8 @@ func Painted() []agentnotify.Kernel {
 // had to remember, because opening and closing a chip are edges. There are no
 // edges here. A menu that is not open has no state to disturb, and the title is
 // a pure function of the records and the clock.
-func Render(bar Bar, sessions []agentnotify.Record) (WhatTheBarShows, agentnotify.Arrival) {
-	byKernel := map[agentnotify.Kernel][]agentnotify.Record{}
+func Render(bar Bar, sessions []session.Record) (WhatTheBarShows, session.Arrival) {
+	byKernel := map[session.Kernel][]session.Record{}
 	live := 0
 	for _, record := range sessions {
 		if !record.Kernel.Live() {
@@ -74,10 +74,10 @@ func Render(bar Bar, sessions []agentnotify.Record) (WhatTheBarShows, agentnotif
 		live++
 	}
 	for _, here := range byKernel {
-		agentnotify.ByUrgency(here)
+		session.ByUrgency(here)
 	}
 
-	now := agentnotify.JustArrived(sessions, bar.Now, bar.Announce)
+	now := session.JustArrived(sessions, bar.Now, bar.Announce)
 	return WhatTheBarShows{
 		Title:   bar.title(byKernel, now),
 		Menu:    bar.menu(byKernel, now),
@@ -93,7 +93,7 @@ func Render(bar Bar, sessions []agentnotify.Record) (WhatTheBarShows, agentnotif
 // lights up a sketchybar chip — not by agreement but by construction, which is
 // the point: three displays cannot disagree about what may take somebody's
 // attention if there is only one of it.
-func anyOfThemIsAskingForYou(here []agentnotify.Record) bool {
+func anyOfThemIsAskingForYou(here []session.Record) bool {
 	for _, record := range here {
 		if record.WantsYou() {
 			return true
@@ -117,7 +117,7 @@ func anyOfThemIsAskingForYou(here []agentnotify.Record) bool {
 // movement rather than by being decoded. How many are in each state is in the
 // menu and in the tooltip; a menu bar is not where a list goes.
 func (b Bar) title(
-	byKernel map[agentnotify.Kernel][]agentnotify.Record, now agentnotify.Arrival,
+	byKernel map[session.Kernel][]session.Record, now session.Arrival,
 ) []TitlePiece {
 	var spans []TitlePiece
 	for _, kernel := range Painted() {
@@ -166,7 +166,7 @@ func (b Bar) title(
 // one mark. It is also what the item is CALLED to the accessibility API, since
 // a picture has no name of its own — so it is written as a sentence somebody
 // would not mind hearing read out.
-func (b Bar) tooltip(byKernel map[agentnotify.Kernel][]agentnotify.Record) string {
+func (b Bar) tooltip(byKernel map[session.Kernel][]session.Record) string {
 	var counted []string
 	for _, kernel := range Painted() {
 		if here := len(byKernel[kernel]); here > 0 {
@@ -185,7 +185,7 @@ const gap = "  "
 // menu is the list behind the item: the states as sections, the sessions as
 // rows under them, in the same order as the counts.
 func (b Bar) menu(
-	byKernel map[agentnotify.Kernel][]agentnotify.Record, now agentnotify.Arrival,
+	byKernel map[session.Kernel][]session.Record, now session.Arrival,
 ) []MenuRow {
 	var menu []MenuRow
 	for _, kernel := range Painted() {
@@ -227,14 +227,14 @@ func (b Bar) menu(
 // second for. What an agent SAID now goes where a thing somebody said belongs:
 // in the notification, which arrives when it is said and is a proper piece of
 // user interface. The menu is for finding a session and going to it.
-func (b Bar) row(record agentnotify.Record, now agentnotify.Arrival) MenuRow {
+func (b Bar) row(record session.Record, now session.Arrival) MenuRow {
 	return MenuRow{
 		Kind:   Row,
 		Text:   record.DisplayName(),
 		Symbol: b.Symbols.For(record),
 		Glyph:  b.Glyphs.For(record),
 		Colour: b.Colours.For(record),
-		Age:    agentnotify.Ago(record.Elapsed(b.Now)),
+		Age:    session.Ago(record.Elapsed(b.Now)),
 		Key:    record.Key.String(),
 		Lit:    now.Announced() && now.Record.Key == record.Key,
 	}
@@ -245,6 +245,6 @@ func (b Bar) row(record agentnotify.Record, now agentnotify.Arrival) MenuRow {
 // A section header is the one place in this whole system with room for them,
 // so `blocked-on-you` is spelled the way somebody would say it rather than the
 // way it is keyed.
-func name(kernel agentnotify.Kernel) string {
+func name(kernel session.Kernel) string {
 	return strings.ReplaceAll(string(kernel), "-", " ")
 }

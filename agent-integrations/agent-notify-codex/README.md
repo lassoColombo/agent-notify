@@ -101,7 +101,7 @@ go build -o /opt/homebrew/bin/agent-notify-codex .
 Install core the same way while you are here, if you have not:
 
 ```sh
-cd ../../agent-notify && go build -o /opt/homebrew/bin/agent-notify ./cmd/agent-notify
+cd ../../agent-notify && go build -o /opt/homebrew/bin/agent-notify .
 ```
 
 ### Register it with codex
@@ -301,7 +301,7 @@ reads as "leave what is stored alone".
 
 ## What it reports
 
-One `agentnotify.Report` per hook, and these are its fields:
+One `session.Report` per hook, and these are its fields:
 
 | Field | Where it comes from |
 | --- | --- |

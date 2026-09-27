@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
@@ -105,13 +105,13 @@ func TestAnEndedSessionLeavesAViewThatDidNotAskForOne(t *testing.T) {
 	})
 	waitFor(t, "both to connect", func() bool { return len(fake.Connected()) == 2 })
 
-	fake.Publish(session("one", agentnotify.Working, "building"))
+	fake.Publish(aSession("one", session.Working, "building"))
 	waitFor(t, "the bar to see it", func() bool {
 		view, ok := bar.latest()
 		return ok && len(view.Sessions) == 1
 	})
 
-	ended := session("one", agentnotify.Ended, "building")
+	ended := aSession("one", session.Ended, "building")
 	ended.Sequence = 2
 	fake.Publish(ended)
 
@@ -121,7 +121,7 @@ func TestAnEndedSessionLeavesAViewThatDidNotAskForOne(t *testing.T) {
 	})
 	waitFor(t, "the picker to keep it", func() bool {
 		view, ok := picker.latest()
-		return ok && len(view.Sessions) == 1 && view.Sessions[0].Kernel == agentnotify.Ended
+		return ok && len(view.Sessions) == 1 && view.Sessions[0].Kernel == session.Ended
 	})
 }
 

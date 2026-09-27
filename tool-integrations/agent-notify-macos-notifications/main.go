@@ -21,7 +21,7 @@ import (
 	"syscall"
 	"time"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 	"github.com/lassoColombo/agent-notify/logs"
 	"github.com/lassoColombo/agent-notify/subscribe"
 	"github.com/lassoColombo/agent-notify/tool"
@@ -135,7 +135,7 @@ func check(arguments []string) int {
 		Title:    "agent-notify",
 		Subtitle: "notifications are working",
 		Body:     "If you can read this, agent-notify can interrupt you when an agent needs you.",
-	}, invaderPNGs.PathOfTheInvaderDrawnIn(DefaultColours[agentnotify.FinishedATurn]), sound)
+	}, invaderPNGs.PathOfTheInvaderDrawnIn(DefaultColours[session.FinishedATurn]), sound)
 	// Long enough for macOS to have asked, been answered, and delivered.
 	Pump(3 * time.Second)
 	fmt.Printf("%-16s %s (after asking)\n", "permission",

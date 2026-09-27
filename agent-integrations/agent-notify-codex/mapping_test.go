@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // The fixtures are real payloads, recorded from codex 0.154.0 and trimmed only
@@ -13,7 +13,7 @@ import (
 
 const sessionID = "01a0a6f4-96d4-7182-b91b-eff9ecf25adf"
 
-func mapped(t *testing.T, raw string) (agentnotify.Report, bool) {
+func mapped(t *testing.T, raw string) (session.Report, bool) {
 	t.Helper()
 	var payload Payload
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
@@ -22,7 +22,7 @@ func mapped(t *testing.T, raw string) (agentnotify.Report, bool) {
 	return Translate(payload, "", Spending{})
 }
 
-func mustMap(t *testing.T, raw string) agentnotify.Report {
+func mustMap(t *testing.T, raw string) session.Report {
 	t.Helper()
 	report, worth := mapped(t, raw)
 	if !worth {
@@ -108,24 +108,24 @@ const recordedSessionEnd = `{
 func TestTheMapping(t *testing.T) {
 	for _, want := range []struct {
 		raw     string
-		event   agentnotify.Event
+		event   session.Event
 		detail  string
 		message string
 		why     string
 	}{
-		{recordedSessionStart, agentnotify.SessionStarted, "", "",
+		{recordedSessionStart, session.SessionStarted, "", "",
 			"a session announcing itself, with no detail: claude sends none either"},
-		{recordedUserPrompt, agentnotify.UserSentPrompt, "", "Reply with exactly one word: ready",
+		{recordedUserPrompt, session.UserSentPrompt, "", "Reply with exactly one word: ready",
 			"what you typed is what a bar shows"},
-		{recordedPostToolUse, agentnotify.AgentProgressed, "", "",
+		{recordedPostToolUse, session.AgentProgressed, "", "",
 			"a tool ran; it is working, and it says nothing new"},
-		{recordedPermissionRequest, agentnotify.BlockedOnHuman, "permission-prompt",
+		{recordedPermissionRequest, session.BlockedOnHuman, "permission-prompt",
 			"needs approval: echo hello > /Users/x/codex-a4-outside.txt",
 			"the command, not codex's summary of it"},
-		{recordedStop, agentnotify.TurnFinished, "", "ready", "the answer"},
-		{recordedInterrupt, agentnotify.TurnInterrupted, "interrupted", "",
+		{recordedStop, session.TurnFinished, "", "ready", "the answer"},
+		{recordedInterrupt, session.TurnInterrupted, "interrupted", "",
 			"you stopped it; nothing was produced and nothing is said"},
-		{recordedSessionEnd, agentnotify.SessionEnded, "exited", "", "gone"},
+		{recordedSessionEnd, session.SessionEnded, "exited", "", "gone"},
 	} {
 		report := mustMap(t, want.raw)
 		if report.Event != want.event {
@@ -160,7 +160,7 @@ func TestTheEventComesFromTheBody(t *testing.T) {
 		t.Error("a payload with no hook_event_name was mapped to something")
 	}
 	report := mustMap(t, `{"session_id":"x","hook_event_name":"Stop"}`)
-	if report.Event != agentnotify.TurnFinished {
+	if report.Event != session.TurnFinished {
 		t.Errorf("event = %q", report.Event)
 	}
 }
@@ -204,13 +204,13 @@ func TestTheHooksWeDoNotWant(t *testing.T) {
 // integration subscribes to Interrupt at all. Stop and Interrupt are mutually
 // exclusive paths in codex: an interrupted turn never reaches the Stop call.
 func TestAnInterruptedTurnDoesNotLeaveASessionWorking(t *testing.T) {
-	kernel := agentnotify.Reduce("", mustMap(t, recordedSessionStart).Event)
-	kernel = agentnotify.Reduce(kernel, mustMap(t, recordedUserPrompt).Event)
-	if kernel != agentnotify.Working {
+	kernel := session.Reduce("", mustMap(t, recordedSessionStart).Event)
+	kernel = session.Reduce(kernel, mustMap(t, recordedUserPrompt).Event)
+	if kernel != session.Working {
 		t.Fatalf("after a prompt the session is %q", kernel)
 	}
-	kernel = agentnotify.Reduce(kernel, mustMap(t, recordedInterrupt).Event)
-	if kernel != agentnotify.Idle {
+	kernel = session.Reduce(kernel, mustMap(t, recordedInterrupt).Event)
+	if kernel != session.Idle {
 		t.Errorf("after an interrupt the session is %q, want idle — not finished-a-turn, which "+
 			"promises an answer to read, and not broke, which is loud about something you chose",
 			kernel)
@@ -220,11 +220,11 @@ func TestAnInterruptedTurnDoesNotLeaveASessionWorking(t *testing.T) {
 // TestInterruptingAPermissionPromptAnswersIt: the recorded traffic has exactly
 // this — a prompt nobody wanted to answer, ended with Esc.
 func TestInterruptingAPermissionPromptAnswersIt(t *testing.T) {
-	kernel := agentnotify.Reduce(agentnotify.Working, mustMap(t, recordedPermissionRequest).Event)
-	if kernel != agentnotify.BlockedOnYou {
+	kernel := session.Reduce(session.Working, mustMap(t, recordedPermissionRequest).Event)
+	if kernel != session.BlockedOnYou {
 		t.Fatalf("a permission request left the session %q", kernel)
 	}
-	if kernel = agentnotify.Reduce(kernel, mustMap(t, recordedInterrupt).Event); kernel != agentnotify.Idle {
+	if kernel = session.Reduce(kernel, mustMap(t, recordedInterrupt).Event); kernel != session.Idle {
 		t.Errorf("interrupting a permission prompt left the session %q", kernel)
 	}
 }
@@ -233,9 +233,9 @@ func TestInterruptingAPermissionPromptAnswersIt(t *testing.T) {
 // PostToolUse behind it says working again. Nothing has to remember that a
 // prompt was outstanding.
 func TestAPermissionRequestClearsItself(t *testing.T) {
-	kernel := agentnotify.Reduce(agentnotify.Working, mustMap(t, recordedPermissionRequest).Event)
-	kernel = agentnotify.Reduce(kernel, mustMap(t, recordedPostToolUse).Event)
-	if kernel != agentnotify.Working {
+	kernel := session.Reduce(session.Working, mustMap(t, recordedPermissionRequest).Event)
+	kernel = session.Reduce(kernel, mustMap(t, recordedPostToolUse).Event)
+	if kernel != session.Working {
 		t.Errorf("after the approved tool ran the session is %q, want working", kernel)
 	}
 }

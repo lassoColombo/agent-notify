@@ -5,14 +5,14 @@ import (
 	"strings"
 	"testing"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // Every payload below is a real one, copied out of a capture of two days of
 // ordinary use. Nothing here is invented, which matters: a hand-written fixture
 // tests what the author believed the agent sends.
 
-func translate(t *testing.T, hook, raw string) (agentnotify.Report, bool) {
+func translate(t *testing.T, hook, raw string) (session.Report, bool) {
 	t.Helper()
 	var payload Payload
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
@@ -21,7 +21,7 @@ func translate(t *testing.T, hook, raw string) (agentnotify.Report, bool) {
 	return Translate(hook, payload, ClaudeSession{}, ClaudeTranscript{}, "")
 }
 
-func mustTranslate(t *testing.T, hook, raw string) agentnotify.Report {
+func mustTranslate(t *testing.T, hook, raw string) session.Report {
 	t.Helper()
 	report, worth := translate(t, hook, raw)
 	if !worth {
@@ -81,7 +81,7 @@ const (
 
 func TestATurnMovesThroughWorkingIntoFinished(t *testing.T) {
 	prompt := mustTranslate(t, "UserPromptSubmit", realPrompt)
-	if prompt.Event != agentnotify.UserSentPrompt {
+	if prompt.Event != session.UserSentPrompt {
 		t.Errorf("a prompt is %q", prompt.Event)
 	}
 	if prompt.Message == nil || *prompt.Message != "commit and proceed with m7" {
@@ -89,13 +89,13 @@ func TestATurnMovesThroughWorkingIntoFinished(t *testing.T) {
 	}
 
 	tool := mustTranslate(t, "PostToolUse", realPostTool)
-	if tool.Event != agentnotify.AgentProgressed || tool.Message != nil {
+	if tool.Event != session.AgentProgressed || tool.Message != nil {
 		t.Errorf("a tool call is %q saying %v; hundreds fire a turn and saying nothing is what lets them coalesce",
 			tool.Event, tool.Message)
 	}
 
 	stop := mustTranslate(t, "Stop", realStop)
-	if stop.Event != agentnotify.TurnFinished {
+	if stop.Event != session.TurnFinished {
 		t.Errorf("a stop is %q", stop.Event)
 	}
 	if stop.Message == nil || *stop.Message != "Agreed, and the justification is withdrawn." {
@@ -103,18 +103,18 @@ func TestATurnMovesThroughWorkingIntoFinished(t *testing.T) {
 	}
 
 	// Reducing them in order is the M7 "done when".
-	kernel := agentnotify.Kernel("")
-	for _, report := range []agentnotify.Report{prompt, tool, stop} {
-		kernel = agentnotify.Reduce(kernel, report.Event)
+	kernel := session.Kernel("")
+	for _, report := range []session.Report{prompt, tool, stop} {
+		kernel = session.Reduce(kernel, report.Event)
 	}
-	if kernel != agentnotify.FinishedATurn {
+	if kernel != session.FinishedATurn {
 		t.Errorf("a turn ended in %q, want finished-a-turn", kernel)
 	}
 }
 
 func TestAPermissionPromptBlocksOnYouAndAnIdleNudgeDoesNothing(t *testing.T) {
 	asking := mustTranslate(t, "Notification", realPermission)
-	if asking.Event != agentnotify.BlockedOnHuman {
+	if asking.Event != session.BlockedOnHuman {
 		t.Errorf("a permission prompt is %q", asking.Event)
 	}
 	if asking.Detail != "permission-prompt" {
@@ -123,7 +123,7 @@ func TestAPermissionPromptBlocksOnYouAndAnIdleNudgeDoesNothing(t *testing.T) {
 	if asking.Message == nil || *asking.Message != "Claude needs your permission to use Bash" {
 		t.Errorf("the ask was not kept: %v", asking.Message)
 	}
-	if got := agentnotify.Reduce(agentnotify.Working, asking.Event); got != agentnotify.BlockedOnYou {
+	if got := session.Reduce(session.Working, asking.Event); got != session.BlockedOnYou {
 		t.Errorf("a permission prompt left a working session at %q", got)
 	}
 
@@ -144,7 +144,7 @@ func TestTheTurnWrapperIsNotASubagent(t *testing.T) {
 	}
 
 	real := mustTranslate(t, "SubagentStop", realSubagent)
-	if real.Event != agentnotify.AgentProgressed || real.Detail != "subagent-finished" {
+	if real.Event != session.AgentProgressed || real.Detail != "subagent-finished" {
 		t.Errorf("a real subagent finishing is %q/%q", real.Event, real.Detail)
 	}
 	if real.Message != nil {
@@ -152,11 +152,11 @@ func TestTheTurnWrapperIsNotASubagent(t *testing.T) {
 	}
 
 	// The thing this buys: a finished turn survives its own wrapper.
-	kernel := agentnotify.FinishedATurn
+	kernel := session.FinishedATurn
 	if _, worth := translate(t, "SubagentStop", realTurnWrapper); worth {
-		kernel = agentnotify.Reduce(kernel, agentnotify.AgentProgressed)
+		kernel = session.Reduce(kernel, session.AgentProgressed)
 	}
-	if kernel != agentnotify.FinishedATurn {
+	if kernel != session.FinishedATurn {
 		t.Errorf("a finished turn was knocked back to %q by its own wrapper", kernel)
 	}
 }
@@ -165,24 +165,24 @@ func TestTheTurnWrapperIsNotASubagent(t *testing.T) {
 // SessionStart on its source is this program's job, not core's.
 func TestCompactionIsWorkingAndNotABeginning(t *testing.T) {
 	compact := mustTranslate(t, "SessionStart", realCompact)
-	if compact.Event != agentnotify.AgentProgressed {
+	if compact.Event != session.AgentProgressed {
 		t.Errorf("a compaction is %q, want agent-progressed: it keeps the session id and is the "+
 			"agent working mid-turn", compact.Event)
 	}
-	if got := agentnotify.Reduce(agentnotify.Working, compact.Event); got != agentnotify.Working {
+	if got := session.Reduce(session.Working, compact.Event); got != session.Working {
 		t.Errorf("a compaction left a working session at %q", got)
 	}
 
 	for _, source := range []string{"startup", "resume", "clear"} {
 		raw := `{"session_id":"s","hook_event_name":"SessionStart","source":"` + source + `"}`
 		report := mustTranslate(t, "SessionStart", raw)
-		if report.Event != agentnotify.SessionStarted {
+		if report.Event != session.SessionStarted {
 			t.Errorf("source %q is %q, want session-started", source, report.Event)
 		}
 	}
 
 	precompact := mustTranslate(t, "PreCompact", realPreCompact)
-	if precompact.Event != agentnotify.AgentProgressed || precompact.Detail != "compacting" {
+	if precompact.Event != session.AgentProgressed || precompact.Detail != "compacting" {
 		t.Errorf("a compaction beginning is %q/%q", precompact.Event, precompact.Detail)
 	}
 }
@@ -201,7 +201,7 @@ func TestEndingSaysWhy(t *testing.T) {
 	for reason, want := range cases {
 		raw := `{"session_id":"s","hook_event_name":"SessionEnd","reason":"` + reason + `"}`
 		report := mustTranslate(t, "SessionEnd", raw)
-		if report.Event != agentnotify.SessionEnded {
+		if report.Event != session.SessionEnded {
 			t.Errorf("reason %q is %q", reason, report.Event)
 		}
 		if report.Detail != want {
@@ -251,7 +251,7 @@ func TestAFailedTurnBreaks(t *testing.T) {
 	  "hook_event_name":"StopFailure","error":"server_error",
 	  "last_assistant_message":"API Error: Your computer went to sleep mid-response. The response above may be incomplete."}`
 	report := mustTranslate(t, "StopFailure", real)
-	if report.Event != agentnotify.TurnFailed {
+	if report.Event != session.TurnFailed {
 		t.Errorf("a failed turn is %q", report.Event)
 	}
 	if report.Detail != "server-error" {
@@ -260,7 +260,7 @@ func TestAFailedTurnBreaks(t *testing.T) {
 	if report.Message == nil || !strings.HasPrefix(*report.Message, "API Error: Your computer went to sleep") {
 		t.Errorf("message = %v, want what the turn died partway through saying", report.Message)
 	}
-	if got := agentnotify.Reduce(agentnotify.Working, report.Event); got != agentnotify.Broke {
+	if got := session.Reduce(session.Working, report.Event); got != session.Broke {
 		t.Errorf("a failed turn left the session at %q", got)
 	}
 }
@@ -304,7 +304,7 @@ func TestWhatIsIgnoredAndWhy(t *testing.T) {
 	// prompt looked like before the field existed.
 	for _, raw := range []string{`{"session_id":"s"}`, `{"session_id":"s","notification_type":""}`} {
 		if report, worth := translate(t, "Notification", raw); !worth ||
-			report.Event != agentnotify.BlockedOnHuman {
+			report.Event != session.BlockedOnHuman {
 			t.Errorf("%s was ignored", raw)
 		}
 	}

@@ -6,9 +6,9 @@
 //
 // An adapter is therefore a translation and one call:
 //
-//	hook.Record(agentnotify.Report{
-//	    Key:   agentnotify.Key{Agent: "claude", SessionID: payload.SessionID},
-//	    Event: agentnotify.TurnFinished,
+//	hook.Record(session.Report{
+//	    Key:   session.Key{Agent: "claude", SessionID: payload.SessionID},
+//	    Event: session.TurnFinished,
 //	    Message: &payload.LastAssistantMessage,
 //	})
 package hook
@@ -22,14 +22,14 @@ import (
 	"sync"
 	"time"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
 	"github.com/lassoColombo/agent-notify/capture"
-	"github.com/lassoColombo/agent-notify/internal/branch"
+	"github.com/lassoColombo/agent-notify/hook/internal/branch"
 	"github.com/lassoColombo/agent-notify/internal/config"
 	"github.com/lassoColombo/agent-notify/internal/core"
 	"github.com/lassoColombo/agent-notify/internal/process"
+	"github.com/lassoColombo/agent-notify/internal/sessionwatcher"
 	"github.com/lassoColombo/agent-notify/internal/subcommand"
-	"github.com/lassoColombo/agent-notify/internal/watcher"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // captureTimeout bounds one integration's `capture-environment`, which runs as
@@ -69,12 +69,12 @@ var captureTimeout = time.Second
 //
 // This is the only way an integration writes to the store. The store itself is
 // internal, and its layout is ours to change.
-func Record(report agentnotify.Report) (agentnotify.Record, bool) {
+func Record(report session.Report) (session.Record, bool) {
 	opened, err := core.OpenEverythingACommandNeeds("record-agent-event")
 	if err != nil {
 		// Nowhere to log to and nowhere to complain: the one case where this
 		// really can do nothing at all. It still must not fail the hook.
-		return agentnotify.Record{}, false
+		return session.Record{}, false
 	}
 	defer opened.Close()
 
@@ -89,7 +89,7 @@ func Record(report agentnotify.Report) (agentnotify.Record, bool) {
 	}
 	if err := report.Key.ReasonThisKeyCannotBeUsed(); err != nil {
 		opened.Logger.Error("record-agent-event", "problem", err.Error())
-		return agentnotify.Record{}, false
+		return session.Record{}, false
 	}
 	if !report.Event.Known() {
 		// Not a refusal. It is a mistake in whoever called this, but the cost of
@@ -117,7 +117,7 @@ func Record(report agentnotify.Report) (agentnotify.Record, bool) {
 	if err != nil {
 		opened.Logger.Error("record-agent-event",
 			"session", report.Key.String(), "problem", err.Error())
-		return agentnotify.Record{}, false
+		return session.Record{}, false
 	}
 	opened.Logger.Info("recorded",
 		"session", written.Key.String(), "event", string(report.Event),
@@ -134,16 +134,16 @@ func Record(report agentnotify.Report) (agentnotify.Record, bool) {
 // nothing more (R4). Starting one is a race several hooks may enter at once,
 // and the singleton lock is what makes that harmless — so this neither waits
 // for the result nor reports it (§A9.2).
-func wake(opened *core.Core, written agentnotify.Record, event agentnotify.Event) {
-	err := watcher.Send(opened.Layout, watcher.PokeFor(written, event))
+func wake(opened *core.Core, written session.Record, event session.Event) {
+	err := sessionwatcher.Send(opened.Layout, sessionwatcher.PokeFor(written, event))
 	if err == nil {
 		return
 	}
-	if !errors.Is(err, watcher.ErrNobodyListening) {
+	if !errors.Is(err, sessionwatcher.ErrNobodyListening) {
 		opened.Logger.Warn("cannot poke the session-watcher", "problem", err.Error())
 		return
 	}
-	if err := watcher.StartIfNobodyIs(opened.Layout, opened.Settings.AgentNotifyBinary); err != nil {
+	if err := sessionwatcher.StartIfNobodyIs(opened.Layout, opened.Settings.AgentNotifyBinary); err != nil {
 		opened.Logger.Warn("cannot start a session-watcher", "problem", err.Error())
 		return
 	}
@@ -155,7 +155,7 @@ func wake(opened *core.Core, written agentnotify.Record, event agentnotify.Event
 //
 // The walk must happen here. By the time anything else reads this event the
 // hook has exited and there is no chain left to walk from (§A8.4).
-func look(opened *core.Core, report *agentnotify.Report) {
+func look(opened *core.Core, report *session.Report) {
 	machine := process.ProcessesOnThisMachine{}
 	binary := opened.Settings.Agent[report.Key.Agent].Binary
 	agentProcess, chain, found := process.FindAgent(binary, process.Self(), machine)
@@ -177,7 +177,7 @@ func look(opened *core.Core, report *agentnotify.Report) {
 
 	previous, _, err := opened.Store.Read(report.Key)
 	if err != nil {
-		previous = agentnotify.Record{}
+		previous = session.Record{}
 	}
 	// Decided BEFORE anything is spawned, which is the whole point. This used
 	// to run every capture and then ask whether the answer was wanted — and it
@@ -234,9 +234,9 @@ func wouldBeAskedNow(settings config.Config) []string {
 // installed contributes nothing, the hook writes and exits, and the next hook
 // tries again (R13).
 func askEveryoneWhoCaptures(
-	settings config.Config, logger *slog.Logger, chain []agentnotify.Ancestor,
-) agentnotify.CapturedContext {
-	captured := agentnotify.CapturedContext{Ancestry: chain}
+	settings config.Config, logger *slog.Logger, chain []session.Ancestor,
+) session.CapturedContext {
+	captured := session.CapturedContext{Ancestry: chain}
 
 	// Who to run is wouldBeAskedNow's answer and never a second opinion: look()
 	// has already decided whether to be here at all on the strength of that same
@@ -304,7 +304,7 @@ func askEveryoneWhoCaptures(
 // code does for everyone unconditionally; here it happens only when something is
 // actually broken, and the failure is logged each time it is attempted.
 func worthCapturing(
-	previous agentnotify.Record, wouldAsk []string, agentProcess agentnotify.Process,
+	previous session.Record, wouldAsk []string, agentProcess session.Process,
 ) bool {
 	stored := previous.CapturedContext
 	if stored.CapturedAt.IsZero() {

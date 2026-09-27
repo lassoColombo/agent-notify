@@ -5,15 +5,15 @@ import (
 	"testing"
 	"time"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
 var nine = time.Date(2026, 9, 18, 9, 0, 0, 0, time.UTC)
 
-func session(id string, kernel agentnotify.Kernel, since time.Time) agentnotify.Record {
-	return agentnotify.Record{
-		Key:        agentnotify.Key{Host: "mac", Agent: "claude", SessionID: id},
+func aSession(id string, kernel session.Kernel, since time.Time) session.Record {
+	return session.Record{
+		Key:        session.Key{Host: "mac", Agent: "claude", SessionID: id},
 		Name:       id,
 		Kernel:     kernel,
 		Rank:       kernel.Rank(),
@@ -24,12 +24,12 @@ func session(id string, kernel agentnotify.Kernel, since time.Time) agentnotify.
 // moved is one entry of View.Changed: a record, and the kernel it moved from.
 // The SDK fills the second in from the delta, or from the session it was last
 // shown when the change was spotted in a snapshot (D-63).
-func moved(from agentnotify.Kernel, record agentnotify.Record) subscribe.Change {
+func moved(from session.Kernel, record session.Record) subscribe.Change {
 	return subscribe.Change{Record: record, PreviousKernel: from}
 }
 
 func notifier() *Notifier {
-	return NewNotifier(Preview{Lines: 4, Width: 40}, agentnotify.NewPalette(DefaultColours, nil))
+	return NewNotifier(Preview{Lines: 4, Width: 40}, session.NewPalette(DefaultColours, nil))
 }
 
 // TestNothingMovedIsNothingToSay.
@@ -48,10 +48,10 @@ func TestNothingMovedIsNothingToSay(t *testing.T) {
 
 // TestAStateChangeIsAnnounced, with everything a banner needs on it.
 func TestAStateChangeIsAnnounced(t *testing.T) {
-	blocked := session("alpha", agentnotify.BlockedOnYou, nine.Add(time.Minute))
+	blocked := aSession("alpha", session.BlockedOnYou, nine.Add(time.Minute))
 	blocked.Message = "Shall I delete the branch?"
 
-	notices := notifier().Fresh([]subscribe.Change{moved(agentnotify.Working, blocked)})
+	notices := notifier().Fresh([]subscribe.Change{moved(session.Working, blocked)})
 	if len(notices) != 1 {
 		t.Fatalf("got %d notices, want 1", len(notices))
 	}
@@ -77,16 +77,16 @@ func TestAStateChangeIsAnnounced(t *testing.T) {
 // which is why this program used to keep a map of timestamps instead.
 func TestAMessageChangingWhileBlockedIsNotASecondBanner(t *testing.T) {
 	n := notifier()
-	blocked := session("alpha", agentnotify.BlockedOnYou, nine)
+	blocked := aSession("alpha", session.BlockedOnYou, nine)
 
-	if notices := n.Fresh([]subscribe.Change{moved(agentnotify.Working, blocked)}); len(notices) != 1 {
+	if notices := n.Fresh([]subscribe.Change{moved(session.Working, blocked)}); len(notices) != 1 {
 		t.Fatalf("the change that matters produced %d notices", len(notices))
 	}
 	for i := range 10 {
 		revised := blocked
 		revised.Message = strings.Repeat("thinking out loud ", i+1)
 		if again := n.Fresh([]subscribe.Change{
-			moved(agentnotify.BlockedOnYou, revised),
+			moved(session.BlockedOnYou, revised),
 		}); len(again) != 0 {
 			t.Fatalf("a message change produced a second banner: %v", again)
 		}
@@ -98,7 +98,7 @@ func TestAMessageChangingWhileBlockedIsNotASecondBanner(t *testing.T) {
 // counts as having moved. One that starts life blocked is worth saying.
 func TestASessionNobodyHasSeenBeforeIsAnnounced(t *testing.T) {
 	notices := notifier().Fresh([]subscribe.Change{
-		moved("", session("alpha", agentnotify.BlockedOnYou, nine)),
+		moved("", aSession("alpha", session.BlockedOnYou, nine)),
 	})
 	if len(notices) != 1 {
 		t.Errorf("got %d notices, want the new session announced", len(notices))
@@ -108,9 +108,9 @@ func TestASessionNobodyHasSeenBeforeIsAnnounced(t *testing.T) {
 // TestWorkingIsNeverWorthABanner, by the same rule the bar uses.
 func TestWorkingIsNeverWorthABanner(t *testing.T) {
 	n := notifier()
-	for _, quiet := range []agentnotify.Kernel{agentnotify.Working, agentnotify.Idle} {
+	for _, quiet := range []session.Kernel{session.Working, session.Idle} {
 		if notices := n.Fresh([]subscribe.Change{
-			moved(agentnotify.BlockedOnYou, session("alpha", quiet, nine.Add(time.Hour))),
+			moved(session.BlockedOnYou, aSession("alpha", quiet, nine.Add(time.Hour))),
 		}); len(notices) != 0 {
 			t.Errorf("%s produced %v", quiet, notices)
 		}
@@ -122,7 +122,7 @@ func TestWorkingIsNeverWorthABanner(t *testing.T) {
 // learns to take a row away.
 func TestAnEndedSessionIsNotABanner(t *testing.T) {
 	if notices := notifier().Fresh([]subscribe.Change{
-		moved(agentnotify.Working, session("alpha", agentnotify.Ended, nine.Add(time.Hour))),
+		moved(session.Working, aSession("alpha", session.Ended, nine.Add(time.Hour))),
 	}); len(notices) != 0 {
 		t.Errorf("announced %v for a session that ended", notices)
 	}
@@ -133,10 +133,10 @@ func TestAnEndedSessionIsNotABanner(t *testing.T) {
 // newer core is judged by the number it came with rather than by the list this
 // binary was compiled against.
 func TestAStateThisBuildHasNeverHeardOfCanStillInterruptYou(t *testing.T) {
-	future := session("alpha", agentnotify.Kernel("awaiting-approval"), nine)
+	future := aSession("alpha", session.Kernel("awaiting-approval"), nine)
 	future.Rank = 45 // between broke and blocked-on-you
 
-	notices := notifier().Fresh([]subscribe.Change{moved(agentnotify.Working, future)})
+	notices := notifier().Fresh([]subscribe.Change{moved(session.Working, future)})
 	if len(notices) != 1 {
 		t.Fatalf("got %d notices, want the unknown state announced on its rank", len(notices))
 	}
@@ -146,8 +146,8 @@ func TestAStateThisBuildHasNeverHeardOfCanStillInterruptYou(t *testing.T) {
 // notification must never replace another's.
 func TestTwoSessionsBothGetTheirOwn(t *testing.T) {
 	notices := notifier().Fresh([]subscribe.Change{
-		moved(agentnotify.Working, session("alpha", agentnotify.BlockedOnYou, nine.Add(time.Minute))),
-		moved(agentnotify.Working, session("beta", agentnotify.Broke, nine.Add(time.Minute))),
+		moved(session.Working, aSession("alpha", session.BlockedOnYou, nine.Add(time.Minute))),
+		moved(session.Working, aSession("beta", session.Broke, nine.Add(time.Minute))),
 	})
 	if len(notices) != 2 {
 		t.Fatalf("got %d notices, want one each", len(notices))
@@ -161,12 +161,12 @@ func TestTwoSessionsBothGetTheirOwn(t *testing.T) {
 // decided here, with the record in hand, and nowhere else.
 func TestANoticeCarriesTheStatesColour(t *testing.T) {
 	notices := notifier().Fresh([]subscribe.Change{
-		moved(agentnotify.Working, session("alpha", agentnotify.Broke, nine.Add(time.Minute))),
+		moved(session.Working, aSession("alpha", session.Broke, nine.Add(time.Minute))),
 	})
 	if len(notices) != 1 {
 		t.Fatalf("notices = %v", notices)
 	}
-	if notices[0].Colour != DefaultColours[agentnotify.Broke] {
+	if notices[0].Colour != DefaultColours[session.Broke] {
 		t.Errorf("the notice is %q, want the colour broke wears on the bar", notices[0].Colour)
 	}
 }
@@ -180,7 +180,7 @@ func TestANoticeCarriesTheStatesColour(t *testing.T) {
 // keeps a map of its own it has a second, worse answer to the same question.
 func TestTheNotifierRemembersNothing(t *testing.T) {
 	change := []subscribe.Change{
-		moved(agentnotify.Working, session("alpha", agentnotify.BlockedOnYou, nine)),
+		moved(session.Working, aSession("alpha", session.BlockedOnYou, nine)),
 	}
 	first := notifier()
 	if a, b := first.Fresh(change), first.Fresh(change); len(a) != 1 || len(b) != 1 {

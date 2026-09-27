@@ -9,7 +9,7 @@ import (
 	"slices"
 	"strings"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // This display runs inside a `.app` bundle, and the reason is one measured fact
@@ -305,5 +305,5 @@ func (b Bundle) plist() []byte {
 	<true/>
 </dict>
 </plist>
-`, program, Identifier, iconName, agentnotify.Version, agentnotify.Version))
+`, program, Identifier, iconName, session.Version, session.Version))
 }

@@ -17,10 +17,10 @@ import (
 	"fmt"
 	"time"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
 	"github.com/lassoColombo/agent-notify/container"
 	"github.com/lassoColombo/agent-notify/internal/config"
 	"github.com/lassoColombo/agent-notify/internal/subcommand"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // focusTimeout bounds one step of a focus, and one `focused` query. On expiry
@@ -123,7 +123,7 @@ func Focused(c Container, coordinates json.RawMessage, timeout time.Duration) co
 }
 
 // Coordinates is what a record holds for one container, or nothing.
-func Coordinates(record agentnotify.Record, name string) json.RawMessage {
+func Coordinates(record session.Record, name string) json.RawMessage {
 	return record.DerivedContext[name]
 }
 
@@ -155,7 +155,7 @@ type Step struct {
 // second one exists because interpretation is not a yes-or-no — aerospace
 // interprets every session it is given and can place only the ones it can see a
 // window for (D-45).
-func FocusSession(settings config.Config, record agentnotify.Record) ([]Step, container.Outcome) {
+func FocusSession(settings config.Config, record session.Record) ([]Step, container.Outcome) {
 	configured, problems := Configured(settings)
 	if len(configured) == 0 {
 		detail := "nothing is listed in [container] order"
@@ -210,7 +210,7 @@ func FocusSession(settings config.Config, record agentnotify.Record) ([]Step, co
 // is to notify anyway: silence would mean a user with no containers never
 // receives a notification at all, which is worse than an occasional redundant
 // one (R27, §A11.7).
-func IsFocused(settings config.Config, record agentnotify.Record) container.Verdict {
+func IsFocused(settings config.Config, record session.Record) container.Verdict {
 	configured, _ := Configured(settings)
 	if len(configured) == 0 {
 		return container.Verdict{Answer: container.CannotTell,

@@ -3,7 +3,7 @@ package process
 import (
 	"path/filepath"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // MostAncestorsWorthClimbing bounds the walk.
@@ -22,8 +22,8 @@ const MostAncestorsWorthClimbing = 10
 //
 // It stops at whatever it cannot read rather than failing: a partial chain is
 // worth more than none, and the caller is a hook that may never fail (R2).
-func Ancestry(start int, prober ReadsProcessFacts) []agentnotify.Ancestor {
-	var chain []agentnotify.Ancestor
+func Ancestry(start int, prober ReadsProcessFacts) []session.Ancestor {
+	var chain []session.Ancestor
 	seen := map[int]bool{}
 
 	for pid := start; pid > 1 && len(chain) < MostAncestorsWorthClimbing; {
@@ -39,7 +39,7 @@ func Ancestry(start int, prober ReadsProcessFacts) []agentnotify.Ancestor {
 		if err != nil {
 			break
 		}
-		chain = append(chain, agentnotify.Ancestor{
+		chain = append(chain, session.Ancestor{
 			PID:       facts.PID,
 			StartedAt: facts.StartedAt,
 			Command:   facts.Command,
@@ -63,7 +63,7 @@ func Ancestry(start int, prober ReadsProcessFacts) []agentnotify.Ancestor {
 // nothing to judge and says so (§A8.4, §A8.5).
 func FindAgent(
 	binary string, start int, prober ReadsProcessFacts,
-) (agentnotify.Process, []agentnotify.Ancestor, bool) {
+) (session.Process, []session.Ancestor, bool) {
 	chain := Ancestry(start, prober)
 
 	for _, ancestor := range chain {
@@ -74,12 +74,12 @@ func FindAgent(
 		if !isBinary(facts, binary) {
 			continue
 		}
-		return agentnotify.Process{
+		return session.Process{
 			PID:       facts.PID,
 			StartedAt: facts.StartedAt,
 		}, chain, true
 	}
-	return agentnotify.Process{}, chain, false
+	return session.Process{}, chain, false
 }
 
 // isBinary decides whether a process is the one the user configured.

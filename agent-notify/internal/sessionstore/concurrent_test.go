@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
 	"github.com/lassoColombo/agent-notify/internal/config"
 	"github.com/lassoColombo/agent-notify/internal/paths"
 	"github.com/lassoColombo/agent-notify/internal/sessionstore"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // The store is written by several short-lived processes at once — two hooks of
@@ -30,7 +30,7 @@ const (
 	stopEnv   = "AGENT_NOTIFY_TEST_STOP"
 )
 
-var contended = agentnotify.Key{Host: "mac", Agent: "claude", SessionID: "contended"}
+var contended = session.Key{Host: "mac", Agent: "claude", SessionID: "contended"}
 
 func TestMain(m *testing.M) {
 	switch os.Getenv(roleEnv) {
@@ -64,8 +64,8 @@ func writer() int {
 
 	for i := range writes {
 		text := label + " " + strconv.Itoa(i)
-		if _, err := opened.Apply(agentnotify.Report{
-			Key: contended, Event: agentnotify.AgentProgressed, Message: &text,
+		if _, err := opened.Apply(session.Report{
+			Key: contended, Event: session.AgentProgressed, Message: &text,
 		}, time.Now().UTC()); err != nil {
 			fmt.Fprintf(os.Stderr, "%s write %d: %v\n", label, i, err)
 			return 1
@@ -180,7 +180,7 @@ func TestConcurrentWriterProcesses(t *testing.T) {
 			"read the same record and one overwrote the other",
 			record.Sequence, want, want-record.Sequence)
 	}
-	if record.Kernel != agentnotify.Working {
+	if record.Kernel != session.Working {
 		t.Errorf("kernel = %q, want working", record.Kernel)
 	}
 
@@ -224,7 +224,7 @@ func TestLockGivesUpRatherThanWaitingForever(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	if _, err := opened.Apply(agentnotify.Report{Key: key, Event: agentnotify.SessionStarted}, when); err != nil {
+	if _, err := opened.Apply(session.Report{Key: key, Event: session.SessionStarted}, when); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 
@@ -242,7 +242,7 @@ func TestLockGivesUpRatherThanWaitingForever(t *testing.T) {
 	deadline := time.Now().Add(3 * time.Second)
 	for {
 		start := time.Now()
-		_, err := opened.Apply(agentnotify.Report{Key: key, Event: agentnotify.AgentProgressed}, when)
+		_, err := opened.Apply(session.Report{Key: key, Event: session.AgentProgressed}, when)
 		waited := time.Since(start)
 		if err != nil {
 			if waited > time.Second {
@@ -275,7 +275,7 @@ func TestHoldTheLock(t *testing.T) {
 	}
 	// Hold it by sitting inside an Update for longer than the other side is
 	// willing to wait.
-	if _, err := opened.Update(key, when, func(previous agentnotify.Record) agentnotify.Record {
+	if _, err := opened.Update(key, when, func(previous session.Record) session.Record {
 		time.Sleep(3 * time.Second)
 		return previous.Clone()
 	}); err != nil {

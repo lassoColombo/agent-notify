@@ -1015,7 +1015,7 @@ written here, and this section is the argument for it.
 
 ##### Branch is read by core, and R10 bends
 
-**R10 says core contains no name of any tool.** `internal/branch` contains one,
+**R10 says core contains no name of any tool.** `hook/internal/branch` contains one,
 deliberately, and the rule is amended rather than quietly broken.
 
 - **Neither agent can be trusted with it.** [verified 2026-09-20, 2.1.236]
@@ -1742,7 +1742,7 @@ exact surface **[deferred]** to implementation.
   **[built in M10]** `Integration.Settings` decodes that one table into whatever
   shape the display declares and refuses an undeclared key *by name*, because a
   misspelled glyph that changes nothing and says nothing is the config bug
-  people give up on. `agentnotify.Palette` resolves the pair, most specific
+  people give up on. `session.Palette` resolves the pair, most specific
   first, and falls back for an unknown kernel to the glyph of the nearest known
   rank — which is the only place the urgency-rank of §A5.5 is actually cashed
   in. Both run inside the integration's own process, compiled in from the SDK,
@@ -2281,7 +2281,7 @@ document, not a bug fix.
   agent's payload.
 - **R10** — Core contains no name of any tool. Names of agents appear only where
   the user's config put them. **[amended 2026-09-20 — D-65]** With one
-  exception, `internal/branch`, and the exception is argued rather than
+  exception, `hook/internal/branch`, and the exception is argued rather than
   excused: the rule exists so per-tool knowledge lives in the integration that
   owns the tool, and there is no integration that owns the checkout every agent
   runs in (§A7.4.4).
@@ -2437,7 +2437,7 @@ meta-plan can be compiled.
 
   **[reopened and answered yes 2026-09-27 — D-78]** Not because an integration
   wants day units, but because a person should not have to know which table they
-  are in to know how to write eight seconds. `agentnotify.Duration` is exported;
+  are in to know how to write eight seconds. `session.Duration` is exported;
   the two bars that still have a duration import it.
 
 Nothing is open as of M15, which is a statement about this moment rather than a
@@ -4486,6 +4486,61 @@ of this section is that it prevents re-litigating.
     and every commit before it.
   - **The macOS menu bar is `agent-notify-macos-bar` alone now.** It needs
     nothing installed, which was always the argument for it (M15a).
+
+- **D-80** (2026-09-27) — **The core module is laid out as its dependency graph,
+  as far as a directory tree can carry one: `main` at the root, the doors beside
+  it, and the depth written down in a test.** *Amends* §A10.4 on where the
+  exported surface lives — the same packages, at different paths. Does not
+  amend §A10.5, which D-77 has already suspended.
+
+  - **The old layout was the graph upside down.** Measured with `go list`:
+    `cmd/agent-notify` was the one package nothing imported, and it sat two
+    directories down; the root package `agentnotify` was imported by ten of the
+    sixteen and sat at the top. Every intuition the tree gave a reader, it gave
+    backwards. `main.go` is now at the module root and the vocabulary is
+    `session/`.
+  - **`agentnotify` becomes `session`,** at `github.com/lassoColombo/agent-notify/session`.
+    It had to move to make room, and the name is better where it is read:
+    `session.Record`, `session.Working`, `session.BlockedOnYou`, `session.Reduce`.
+    Two members do not fit it — `Version` is the build's and `Duration` is a
+    TOML spelling — and they stay rather than earning a package for two symbols.
+    Cost: 1,463 call sites across 83 files in all nine modules, and five test
+    helpers named `session` that had to be renamed to stop shadowing it.
+  - **The command line is nine packages under `command/`,** one per subcommand,
+    where it was one package of 2,700 lines. This buys almost nothing in
+    ownership terms — the dominator tree goes from two levels to three — and
+    that was not the reason. The reason is that `doctor` imports ten of our
+    packages and `install` imports none, and while they shared a package there
+    was no way to see that, and no cost to the next command importing
+    everything because everything was already in scope. What two commands share
+    is now under `command/internal/` — `find`, `rows`, `onpath`, `exit` — where
+    the sharing is an import somebody has to write.
+  - **Which heading a command appears under moved to the tree.** It is a claim
+    about who is reading rather than a property of any one command, and it is
+    only legible if you can see all four at once.
+  - **`internal/branch` is now `hook/internal/branch`.** It is the only package
+    in the module with exactly one importer, so it is the only one that can
+    honestly nest. **`internal/watcher` is now `internal/sessionwatcher`**,
+    which is what this file has always called it in prose, and which frees the
+    name for `command/watcher`.
+  - **`internal/core` was not renamed.** "Core" is a bare abstract noun and a
+    poor name for what the package is — the opened installation, assembled in
+    the order that works — but no better one was found, and renaming it is a
+    taste call that has nothing to do with the layout.
+  - **Depth cannot live in the directories, so it lives in `layering_test.go`.**
+    The tree carries which packages are doors and which are behind an
+    `internal/`; it cannot also carry depth, because `command/install` (floor 1)
+    and `command/doctor` (floor 6) are siblings on disk and `subscribe` (floor
+    5) must keep a path an outside repository can love. The test declares every
+    package's floor, recomputes it from the source with `go/parser` — build tags
+    included, so the check is not only true on the machine it ran on — and fails
+    when the two disagree. It also refuses a package nobody placed, a command
+    importing another command, and a new exported package that is not one of the
+    seven doors.
+  - **The seven doors** are `session`, `hook`, `subscribe`, `container`,
+    `capture`, `tool` and `logs`. `logs` is one of them because three displays
+    write to the shared file (D-79's companion, `827ccc4`); it is easy to
+    mistake for machinery and the test now says otherwise out loud.
 
 
 **The payload discussion of 2026-09-17 is now ratified** in D-10 through D-18.

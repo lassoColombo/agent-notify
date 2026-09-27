@@ -1,8 +1,8 @@
 package core
 
 import (
-	agentnotify "github.com/lassoColombo/agent-notify"
 	"github.com/lassoColombo/agent-notify/internal/process"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // WhatIsRunning is the cold read path: what there is, most urgent first, with
@@ -21,7 +21,7 @@ import (
 //
 // `includeEnded` asks for the sessions that are over and still resumable, which
 // is the set a picker exists to offer (§A7.5) and the set a bar does not want.
-func (c *Core) WhatIsRunning(includeEnded bool) []agentnotify.Record {
+func (c *Core) WhatIsRunning(includeEnded bool) []session.Record {
 	records, err := c.Store.List()
 	if err != nil {
 		// One unreadable record costs its own row and nothing else.
@@ -41,15 +41,15 @@ func (c *Core) WhatIsRunning(includeEnded bool) []agentnotify.Record {
 	}
 	machine := process.ProcessesOnThisMachine{}
 	for i := range records {
-		if records[i].Kernel == agentnotify.Ended {
+		if records[i].Kernel == session.Ended {
 			continue
 		}
 		if process.LivenessOf(records[i], boot, machine) == process.Gone {
-			records[i].Kernel = agentnotify.Ended
+			records[i].Kernel = session.Ended
 			records[i].Detail = process.ProcessGone
-			records[i].Rank = agentnotify.Ended.Rank()
+			records[i].Rank = session.Ended.Rank()
 		}
 	}
-	agentnotify.ByUrgency(records)
+	session.ByUrgency(records)
 	return records
 }

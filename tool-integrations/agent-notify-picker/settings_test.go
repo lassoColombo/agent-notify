@@ -8,7 +8,7 @@ import (
 
 	fzf "github.com/junegunn/fzf/src"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
@@ -77,7 +77,7 @@ base13 = "#040506"
 		t.Fatalf("a colour was refused: %v", complaints)
 	}
 
-	row := Row(session(), noon, Measure([]agentnotify.Record{session()}))
+	row := Row(aSession(), noon, Measure([]session.Record{aSession()}))
 	if !strings.Contains(row, "1;2;3") {
 		t.Errorf("the path in a row is not drawn in the hue that was asked for: %q", row)
 	}

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
@@ -43,13 +43,13 @@ var me = subscribe.Integration{Name: Name}
 //
 // `idle` and `ended` are empty on purpose: a quiet agent shows its name and
 // nothing else, and a session that has ended shows nothing at all (D-26).
-var DefaultGlyphs = map[agentnotify.Kernel]string{
-	agentnotify.BlockedOnYou:  "\uf071", // warning triangle — blocked, needs a hand
-	agentnotify.Broke:         "\uf00d", // a cross — the turn died
-	agentnotify.FinishedATurn: "\uf075", // speech bubble — it is talking to you
-	agentnotify.Working:       "\uf021", // circular arrows — turning, in progress
-	agentnotify.Idle:          "",
-	agentnotify.Ended:         "",
+var DefaultGlyphs = map[session.Kernel]string{
+	session.BlockedOnYou:  "\uf071", // warning triangle — blocked, needs a hand
+	session.Broke:         "\uf00d", // a cross — the turn died
+	session.FinishedATurn: "\uf075", // speech bubble — it is talking to you
+	session.Working:       "\uf021", // circular arrows — turning, in progress
+	session.Idle:          "",
+	session.Ended:         "",
 }
 
 // Settings is `[integration.zellij-display.settings]`, and nothing else in the file is
@@ -72,7 +72,7 @@ type Settings struct {
 // startup, where it can still be reported to a person.
 type Resolved struct {
 	Binary string
-	Glyphs agentnotify.Palette
+	Glyphs session.Palette
 }
 
 // ZellijTimeout bounds one zellij invocation. It has a name and a defined
@@ -97,7 +97,7 @@ func Read(given subscribe.Integration) (Resolved, error) {
 	}
 	return Resolved{
 		Binary: binary,
-		Glyphs: agentnotify.NewPalette(DefaultGlyphs, settings.Glyphs),
+		Glyphs: session.NewPalette(DefaultGlyphs, settings.Glyphs),
 	}, nil
 }
 

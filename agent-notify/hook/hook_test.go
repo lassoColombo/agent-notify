@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
 	"github.com/lassoColombo/agent-notify/internal/config"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // TestWhoIsAskedToCapture pins the predicate that decides which integrations
@@ -132,7 +132,7 @@ func TestEachAnswerLandsUnderItsOwnName(t *testing.T) {
 // and the record needs it whether or not any integration contributed (§A8.4,
 // §A7.4.2).
 func TestTheAncestryIsCarriedWithNothingToCapture(t *testing.T) {
-	chain := []agentnotify.Ancestor{{PID: 7, Command: "claude"}}
+	chain := []session.Ancestor{{PID: 7, Command: "claude"}}
 
 	captured := askEveryoneWhoCaptures(config.Defaults(), slog.New(slog.DiscardHandler), chain)
 
@@ -163,11 +163,11 @@ func program(t *testing.T, dir, name, prints string, exit int) string {
 // the decision is two sorted lists and a pid, and that is exactly why it can be
 // made before anything is run.
 func TestNothingIsCapturedTwiceForOneUnchangedSession(t *testing.T) {
-	running := agentnotify.Process{PID: 4242}
+	running := session.Process{PID: 4242}
 	asked := []string{"pane"}
-	stored := agentnotify.Record{
+	stored := session.Record{
 		Process: running,
-		CapturedContext: agentnotify.CapturedContext{
+		CapturedContext: session.CapturedContext{
 			CapturedAt: time.Now().UTC(),
 			By:         map[string]json.RawMessage{"pane": json.RawMessage(`{"PANE":"7"}`)},
 		},
@@ -175,14 +175,14 @@ func TestNothingIsCapturedTwiceForOneUnchangedSession(t *testing.T) {
 
 	for _, one := range []struct {
 		what     string
-		previous agentnotify.Record
+		previous session.Record
 		asked    []string
-		process  agentnotify.Process
+		process  session.Process
 		want     bool
 	}{
-		{"nothing stored yet", agentnotify.Record{}, asked, running, true},
+		{"nothing stored yet", session.Record{}, asked, running, true},
 		{"nothing moved", stored, asked, running, false},
-		{"the session came back in a new process", stored, asked, agentnotify.Process{PID: 9999}, true},
+		{"the session came back in a new process", stored, asked, session.Process{PID: 9999}, true},
 		{"an integration installed since", stored, []string{"pane", "window"}, running, true},
 		{"an integration removed since", stored, nil, running, true},
 		{
@@ -195,9 +195,9 @@ func TestNothingIsCapturedTwiceForOneUnchangedSession(t *testing.T) {
 			// A machine with no capturing integrations stores its ancestry once
 			// and is then left alone.
 			"nothing captures, and nothing ever did",
-			agentnotify.Record{
+			session.Record{
 				Process:         running,
-				CapturedContext: agentnotify.CapturedContext{CapturedAt: time.Now().UTC()},
+				CapturedContext: session.CapturedContext{CapturedAt: time.Now().UTC()},
 			},
 			nil, running, false,
 		},
@@ -205,13 +205,13 @@ func TestNothingIsCapturedTwiceForOneUnchangedSession(t *testing.T) {
 			// An agent whose process could not be found leaves Process zero,
 			// and that must not read as "the process changed" on every hook.
 			"the agent's process was never found",
-			agentnotify.Record{
-				CapturedContext: agentnotify.CapturedContext{
+			session.Record{
+				CapturedContext: session.CapturedContext{
 					CapturedAt: time.Now().UTC(),
 					By:         map[string]json.RawMessage{"pane": json.RawMessage(`{}`)},
 				},
 			},
-			asked, agentnotify.Process{}, false,
+			asked, session.Process{}, false,
 		},
 	} {
 		t.Run(one.what, func(t *testing.T) {

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 func TestWrapBreaksOnSpaces(t *testing.T) {
@@ -62,7 +62,7 @@ func TestPreviewSettingsThatCannotWork(t *testing.T) {
 // TestTheNotificationBodyIsWhatTheAgentSaid, wrapped and capped, with the cut
 // marked — it is the only place an agent's words are shown now.
 func TestTheNotificationBodyIsWhatTheAgentSaid(t *testing.T) {
-	record := session("alpha", agentnotify.Working, nine)
+	record := aSession("alpha", session.Working, nine)
 	record.Message = strings.Repeat("word ", 200)
 
 	body := strings.Split(Preview{Lines: 3, Width: 20}.Said(record), "\n")
@@ -75,14 +75,14 @@ func TestTheNotificationBodyIsWhatTheAgentSaid(t *testing.T) {
 }
 
 func TestAnAgentThatHasSaidNothingHasAnEmptyBody(t *testing.T) {
-	if got := (Preview{Lines: 4, Width: 30}).Said(session("alpha", agentnotify.Working, nine)); got != "" {
+	if got := (Preview{Lines: 4, Width: 30}).Said(aSession("alpha", session.Working, nine)); got != "" {
 		t.Errorf("Said = %q", got)
 	}
 }
 
 // TestStateIsHowAPersonWouldSayIt, which is what a notification's subtitle uses.
 func TestStateIsHowAPersonWouldSayIt(t *testing.T) {
-	record := session("alpha", agentnotify.BlockedOnYou, nine)
+	record := aSession("alpha", session.BlockedOnYou, nine)
 	record.Detail = "permission-prompt"
 	if got := State(record); got != "blocked on you/permission prompt" {
 		t.Errorf("State = %q", got)

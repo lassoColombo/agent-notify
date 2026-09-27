@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
@@ -36,12 +36,12 @@ var me = subscribe.Integration{Name: Name}
 //
 // The alpha is written and then dropped: a banner's picture is composited by
 // macOS onto a surface nobody here knows the colour of (invaderpngs.go).
-var DefaultColours = map[agentnotify.Kernel]string{
-	agentnotify.BlockedOnYou:  "0xffeb6f92", // love — answer this now
-	agentnotify.Broke:         "0xfff6c177", // gold — something went wrong
-	agentnotify.FinishedATurn: "0xff9ccfd8", // foam — there is something to read
-	agentnotify.Working:       "0xffc4a7e7", // iris — never notifies
-	agentnotify.Idle:          "0xcce0def4", // text — never notifies
+var DefaultColours = map[session.Kernel]string{
+	session.BlockedOnYou:  "0xffeb6f92", // love — answer this now
+	session.Broke:         "0xfff6c177", // gold — something went wrong
+	session.FinishedATurn: "0xff9ccfd8", // foam — there is something to read
+	session.Working:       "0xffc4a7e7", // iris — never notifies
+	session.Idle:          "0xcce0def4", // text — never notifies
 }
 
 // Settings is `[integration.macos-notifications.settings]`, and nothing else in
@@ -95,7 +95,7 @@ type Resolved struct {
 	Core    string
 	Preview Preview
 	Sound   Sound
-	Colours agentnotify.Palette
+	Colours session.Palette
 }
 
 // The default preview: eight lines of sixty characters. A banner is not a
@@ -111,7 +111,7 @@ func Read(given subscribe.Integration) (Resolved, error) {
 
 	resolved := Resolved{
 		Preview: defaultPreview,
-		Colours: agentnotify.NewPalette(DefaultColours, settings.Colors),
+		Colours: session.NewPalette(DefaultColours, settings.Colors),
 	}
 
 	// Loud unless somebody says otherwise: a notification is the one thing in

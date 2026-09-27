@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // TestEveryFieldATitleReadsIsOneItWakesFor is D-73.
@@ -23,17 +23,17 @@ func TestEveryFieldATitleReadsIsOneItWakesFor(t *testing.T) {
 	const zellijSession = "home"
 	panes := []Pane{pane(7, "shell", 1, "one"), pane(8, "other", 1, "one")}
 
-	planned := func(record agentnotify.Record) string {
+	planned := func(record session.Record) string {
 		return fmt.Sprintf("%+v", Plan(zellijSession,
-			[]agentnotify.Record{record}, panes, testGlyphs))
+			[]session.Record{record}, panes, testGlyphs))
 	}
 
-	base := placed("alpha", agentnotify.Working, zellijSession, 7)
+	base := placed("alpha", session.Working, zellijSession, 7)
 	base.Detail = "running-bash"
 	base.Cwd = "/Users/somebody/projects/agent-notify"
 	wakeOn := WhatToWakeFor()
 
-	for field, moved := range agentnotify.EachFieldMoved(base) {
+	for field, moved := range session.EachFieldMoved(base) {
 		if planned(base) == planned(moved) {
 			continue
 		}
@@ -48,7 +48,7 @@ func TestEveryFieldATitleReadsIsOneItWakesFor(t *testing.T) {
 // TestWhatItWakesForIsSpelledTheWayARecordIs, which core refuses at startup
 // (D-70) — but at startup is late to find out, and this says so in a second.
 func TestWhatItWakesForIsSpelledTheWayARecordIs(t *testing.T) {
-	if err := agentnotify.ReasonTheseFieldsCannotBeWokenOn(WhatToWakeFor()); err != nil {
+	if err := session.ReasonTheseFieldsCannotBeWokenOn(WhatToWakeFor()); err != nil {
 		t.Error(err)
 	}
 }

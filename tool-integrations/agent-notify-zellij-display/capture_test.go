@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // TestWhatCaptureReturnsIsWhatPlaceOfReads is the loop that could not be closed
@@ -29,8 +29,8 @@ func TestWhatCaptureReturnsIsWhatPlaceOfReads(t *testing.T) {
 		t.Fatalf("what Capture returned does not encode: %v", err)
 	}
 
-	record := agentnotify.Record{
-		CapturedContext: agentnotify.CapturedContext{
+	record := session.Record{
+		CapturedContext: session.CapturedContext{
 			By: map[string]json.RawMessage{Name: blob},
 		},
 	}
@@ -53,8 +53,8 @@ func TestASessionOutsideZellijIsNotPlaced(t *testing.T) {
 
 	captured, _ := Capture()
 	blob, _ := json.Marshal(captured)
-	record := agentnotify.Record{
-		CapturedContext: agentnotify.CapturedContext{
+	record := session.Record{
+		CapturedContext: session.CapturedContext{
 			By: map[string]json.RawMessage{Name: blob},
 		},
 	}

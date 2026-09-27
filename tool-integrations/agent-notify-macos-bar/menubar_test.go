@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // These run against the real menu bar on this machine. There is no fake worth
@@ -65,7 +65,7 @@ func onTheBar(t *testing.T, want string) []string {
 	}
 }
 
-func applied(t *testing.T, sessions []agentnotify.Record) {
+func applied(t *testing.T, sessions []session.Record) {
 	t.Helper()
 	if !Available() {
 		t.Skip("there is no menu bar here")
@@ -82,10 +82,10 @@ func applied(t *testing.T, sessions []agentnotify.Record) {
 // about this process is nothing at all [verified 2026-09-18, macOS 26.6.2]. The
 // accessibility API is the one thing that can see it.
 func TestTheItemIsReallyOnTheRealMenuBar(t *testing.T) {
-	applied(t, []agentnotify.Record{
-		session("one", agentnotify.Working, nine),
-		session("two", agentnotify.Working, nine),
-		session("three", agentnotify.BlockedOnYou, nine),
+	applied(t, []session.Record{
+		aSession("one", session.Working, nine),
+		aSession("two", session.Working, nine),
+		aSession("three", session.BlockedOnYou, nine),
 	})
 	// The item is a picture and has no title at all, so what the accessibility
 	// API has to go on is the label the paint gave it — which is also what a
@@ -95,7 +95,7 @@ func TestTheItemIsReallyOnTheRealMenuBar(t *testing.T) {
 
 // TestTheItemChangesWhenTheWorldDoes.
 func TestTheItemChangesWhenTheWorldDoes(t *testing.T) {
-	applied(t, []agentnotify.Record{session("one", agentnotify.Working, nine)})
+	applied(t, []session.Record{aSession("one", session.Working, nine)})
 	onTheBar(t, "agent-notify — 1 working")
 
 	applied(t, nil)
@@ -110,8 +110,8 @@ func TestAnAnnouncementReachesTheBar(t *testing.T) {
 	}
 	board := bar()
 	board.Now = time.Now()
-	whatToShow, announcement := Render(board, []agentnotify.Record{
-		session("alpha", agentnotify.BlockedOnYou, board.Now.Add(-time.Second)),
+	whatToShow, announcement := Render(board, []session.Record{
+		aSession("alpha", session.BlockedOnYou, board.Now.Add(-time.Second)),
 	})
 	if !announcement.Announced() {
 		t.Fatal("nothing was announced")
@@ -136,7 +136,7 @@ func TestChoosingARowHandsTheSessionBack(t *testing.T) {
 	whatToDoWhenAMenuRowIsChosen = func(key string) { heard <- key }
 	t.Cleanup(func() { whatToDoWhenAMenuRowIsChosen = was })
 
-	whatToShow, _ := Render(bar(), []agentnotify.Record{session("alpha", agentnotify.Working, nine)})
+	whatToShow, _ := Render(bar(), []session.Record{aSession("alpha", session.Working, nine)})
 	row := find(t, whatToShow, "alpha")
 
 	aMenuRowWasChosen(row.Key)

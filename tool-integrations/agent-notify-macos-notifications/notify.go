@@ -1,7 +1,7 @@
 package main
 
 import (
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
@@ -52,10 +52,10 @@ type Notice struct {
 type Notifier struct {
 	Preview Preview
 	// Colours is the invader's colour per state, the same table the bar wears.
-	Colours agentnotify.Palette
+	Colours session.Palette
 }
 
-func NewNotifier(preview Preview, colours agentnotify.Palette) *Notifier {
+func NewNotifier(preview Preview, colours session.Palette) *Notifier {
 	return &Notifier{Preview: preview, Colours: colours}
 }
 

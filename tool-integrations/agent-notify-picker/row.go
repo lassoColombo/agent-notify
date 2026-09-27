@@ -8,7 +8,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // The columns are capped, not fixed. A cap stops one enormous name pushing
@@ -36,7 +36,7 @@ type Columns struct{ Name, State int }
 
 // Measure sizes the columns against the sessions that are actually in the
 // list, capped so that one outlier cannot push the rest out of line.
-func Measure(sessions []agentnotify.Record) Columns {
+func Measure(sessions []session.Record) Columns {
 	columns := Columns{}
 	for _, record := range sessions {
 		columns.Name = max(columns.Name, lipgloss.Width(oneLine(record.DisplayName())))
@@ -68,7 +68,7 @@ func Measure(sessions []agentnotify.Record) Columns {
 // doing, so that a name can be learned — a row painted end to end in the
 // state's hue makes identity a moving target, and four such rows read as four
 // kinds of object rather than four instances of one.
-func Row(record agentnotify.Record, at time.Time, columns Columns) string {
+func Row(record session.Record, at time.Time, columns Columns) string {
 	state := StateStyle(record.Rank)
 
 	// The glyph's column is a constant rather than a measurement. These are
@@ -80,7 +80,7 @@ func Row(record agentnotify.Record, at time.Time, columns Columns) string {
 		state.Width(glyphColumn).Render(Glyph(record)),
 		state.Width(columns.State).Render(fit(State(record), columns.State)),
 		Subtle.Width(ageColumn).MaxWidth(ageColumn).Align(lipgloss.Right).
-			Render(agentnotify.Ago(record.Elapsed(at))),
+			Render(session.Ago(record.Elapsed(at))),
 		Text.Width(columns.Name).Render(fit(record.DisplayName(), columns.Name)),
 		Where(record),
 	}, "  ")
@@ -92,7 +92,7 @@ func Row(record agentnotify.Record, at time.Time, columns Columns) string {
 // It is a LABEL rather than a second vocabulary. The canonical string — the one
 // the user's palette table is keyed on and the bar and the tab titles use — is
 // what the preview's pane label spells out in full, for the row you are on.
-func State(record agentnotify.Record) string {
+func State(record session.Record) string {
 	word := short(record.Kernel)
 	if record.Detail == "" {
 		return word
@@ -103,7 +103,7 @@ func State(record agentnotify.Record) string {
 // Where is the path and the branch, in the two colours this machine writes a
 // path and a branch in everywhere else, with a dim mark between them so that
 // they are two things rather than one long string.
-func Where(record agentnotify.Record) string {
+func Where(record session.Record) string {
 	where := Directory(record.Cwd)
 	if record.Branch != "" {
 		where += " " + Rule.Render(branchMark) + " " + Branch.Render(record.Branch)

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
@@ -35,7 +35,7 @@ func TestTheFirstViewCarriesNoChanges(t *testing.T) {
 
 	// Already running before anything connects, which is the ordinary case: a
 	// bar is started long after the agents it is going to show.
-	fake.Publish(session("already", agentnotify.BlockedOnYou, "waiting for you"))
+	fake.Publish(aSession("already", session.BlockedOnYou, "waiting for you"))
 
 	seen := &watched{}
 	ctx, stop := context.WithCancel(context.Background())
@@ -83,8 +83,8 @@ func TestAReconnectionIsNotAChange(t *testing.T) {
 	})
 
 	waitFor(t, "the display to connect", func() bool { return len(first.Connected()) == 1 })
-	unmoved := session("steady", agentnotify.Working, "building")
-	first.Reported(unmoved, agentnotify.AgentProgressed)
+	unmoved := aSession("steady", session.Working, "building")
+	first.Reported(unmoved, session.AgentProgressed)
 	waitFor(t, "the session to arrive", func() bool {
 		view, ok := seen.latest()
 		return ok && len(view.Sessions) == 1
@@ -143,7 +143,7 @@ func TestASnapshotComparesOnlyTheFieldsAskedFor(t *testing.T) {
 	})
 
 	waitFor(t, "the display to connect", func() bool { return len(first.Connected()) == 1 })
-	first.Publish(session("one", agentnotify.Working, "building"))
+	first.Publish(aSession("one", session.Working, "building"))
 	waitFor(t, "the session to arrive", func() bool {
 		view, ok := seen.latest()
 		return ok && len(view.Sessions) == 1
@@ -159,7 +159,7 @@ func TestASnapshotComparesOnlyTheFieldsAskedFor(t *testing.T) {
 		t.Fatalf("the second StartFake: %v", err)
 	}
 	defer second.Stop()
-	second.Publish(session("one", agentnotify.Working, "still building, now with feeling"))
+	second.Publish(aSession("one", session.Working, "still building, now with feeling"))
 
 	waitFor(t, "the display to come back", func() bool { return len(second.Connected()) == 1 })
 	waitFor(t, "a view after reconnecting", func() bool { return seen.count() > before })
@@ -198,7 +198,7 @@ func TestAChangeCarriesWhatItMovedFrom(t *testing.T) {
 	})
 
 	waitFor(t, "the display to connect", func() bool { return len(fake.Connected()) == 1 })
-	fake.Reported(session("one", agentnotify.Working, "building"), agentnotify.UserSentPrompt)
+	fake.Reported(aSession("one", session.Working, "building"), session.UserSentPrompt)
 	waitFor(t, "the session to arrive", func() bool {
 		view, ok := seen.latest()
 		return ok && len(view.Changed) == 1
@@ -209,22 +209,22 @@ func TestAChangeCarriesWhatItMovedFrom(t *testing.T) {
 	if got := arrival.Changed[0].PreviousKernel; got != "" {
 		t.Errorf("a session nobody had seen before moved from %q", got)
 	}
-	if got := arrival.Changed[0].Event; got != agentnotify.UserSentPrompt {
+	if got := arrival.Changed[0].Event; got != session.UserSentPrompt {
 		t.Errorf("event = %q, want the one that was reported", got)
 	}
 
-	fake.Reported(session("one", agentnotify.BlockedOnYou, "may I?"), agentnotify.BlockedOnHuman)
+	fake.Reported(aSession("one", session.BlockedOnYou, "may I?"), session.BlockedOnHuman)
 	waitFor(t, "the transition", func() bool {
 		view, ok := seen.latest()
 		return ok && len(view.Changed) == 1 &&
-			view.Changed[0].Record.Kernel == agentnotify.BlockedOnYou
+			view.Changed[0].Record.Kernel == session.BlockedOnYou
 	})
 
 	change := mostRecentChange(t, seen)
-	if change.PreviousKernel != agentnotify.Working {
+	if change.PreviousKernel != session.Working {
 		t.Errorf("previous kernel = %q, want working", change.PreviousKernel)
 	}
-	if change.Event != agentnotify.BlockedOnHuman {
+	if change.Event != session.BlockedOnHuman {
 		t.Errorf("event = %q, want blocked-on-human", change.Event)
 	}
 	// Which is the whole point: a state that moved can be told from a change
@@ -253,13 +253,13 @@ func TestSomethingOtherThanTheStateMovingIsNotATransition(t *testing.T) {
 	})
 
 	waitFor(t, "the display to connect", func() bool { return len(fake.Connected()) == 1 })
-	fake.Reported(session("one", agentnotify.Working, "building"), agentnotify.UserSentPrompt)
+	fake.Reported(aSession("one", session.Working, "building"), session.UserSentPrompt)
 	waitFor(t, "the session to arrive", func() bool {
 		view, ok := seen.latest()
 		return ok && len(view.Sessions) == 1
 	})
 
-	fake.Reported(session("one", agentnotify.Working, "still building"), agentnotify.AgentProgressed)
+	fake.Reported(aSession("one", session.Working, "still building"), session.AgentProgressed)
 	waitFor(t, "the second message", func() bool {
 		view, ok := seen.latest()
 		return ok && len(view.Changed) == 1 && view.Changed[0].Record.Message == "still building"
@@ -290,7 +290,7 @@ func TestASnapshotStillSaysWhatASessionMovedFrom(t *testing.T) {
 	})
 
 	waitFor(t, "the display to connect", func() bool { return len(first.Connected()) == 1 })
-	first.Reported(session("one", agentnotify.Working, "building"), agentnotify.UserSentPrompt)
+	first.Reported(aSession("one", session.Working, "building"), session.UserSentPrompt)
 	waitFor(t, "the session to arrive", func() bool {
 		view, ok := seen.latest()
 		return ok && len(view.Sessions) == 1
@@ -306,7 +306,7 @@ func TestASnapshotStillSaysWhatASessionMovedFrom(t *testing.T) {
 		t.Fatalf("the second StartFake: %v", err)
 	}
 	defer second.Stop()
-	second.Publish(session("one", agentnotify.BlockedOnYou, "may I?"))
+	second.Publish(aSession("one", session.BlockedOnYou, "may I?"))
 
 	waitFor(t, "the display to come back", func() bool { return len(second.Connected()) == 1 })
 	waitFor(t, "the change to arrive in a snapshot", func() bool {
@@ -319,7 +319,7 @@ func TestASnapshotStillSaysWhatASessionMovedFrom(t *testing.T) {
 		t.Fatalf("this was meant to arrive in a snapshot, not a %q", after.Why)
 	}
 	change := after.Changed[0]
-	if change.PreviousKernel != agentnotify.Working {
+	if change.PreviousKernel != session.Working {
 		t.Errorf("previous kernel = %q, want working — what this subscriber last saw",
 			change.PreviousKernel)
 	}

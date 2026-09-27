@@ -14,7 +14,7 @@ import (
 	"cmp"
 	"strings"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // AgentName is what every record this writes says it is, and what the user's
@@ -113,14 +113,14 @@ var NotificationsThatWantYou = map[string]bool{
 func Translate(
 	hookName string, payload Payload, claude ClaudeSession,
 	said ClaudeTranscript, title string,
-) (agentnotify.Report, bool) {
+) (session.Report, bool) {
 	if strings.TrimSpace(payload.SessionID) == "" {
 		// Nothing can be written about a session nobody can name.
-		return agentnotify.Report{}, false
+		return session.Report{}, false
 	}
 
-	report := agentnotify.Report{
-		Key: agentnotify.Key{Agent: AgentName, SessionID: payload.SessionID},
+	report := session.Report{
+		Key: session.Key{Agent: AgentName, SessionID: payload.SessionID},
 		// The best name Claude has for this session, and nothing at all when it
 		// has none (sessionname.go, sessiontitle.go): what a person renamed it
 		// to, then Claude's own title for it, then Claude's own label.
@@ -157,21 +157,21 @@ func Translate(
 		// working mid-turn, not a session beginning — splitting on `source` is
 		// this program's job, not core's (D-31).
 		if payload.Source == "compact" {
-			report.Event = agentnotify.AgentProgressed
+			report.Event = session.AgentProgressed
 			return report, true
 		}
-		report.Event = agentnotify.SessionStarted
+		report.Event = session.SessionStarted
 		return report, true
 
 	case "UserPromptSubmit":
-		report.Event = agentnotify.UserSentPrompt
+		report.Event = session.UserSentPrompt
 		report.Message = text(payload.Prompt)
 		return report, true
 
 	case "PostToolUse":
 		// Fires inside subagents too, carrying the PARENT's session id, which
 		// is exactly right: the pane is busy either way.
-		report.Event = agentnotify.AgentProgressed
+		report.Event = session.AgentProgressed
 		return report, true
 
 	case "SubagentStop":
@@ -193,19 +193,19 @@ func Translate(
 		// direction: a missed `agent-progressed` costs nothing, because the
 		// parent's next PostToolUse says working anyway.
 		if strings.TrimSpace(payload.AgentType) == "" {
-			return agentnotify.Report{}, false
+			return session.Report{}, false
 		}
-		report.Event = agentnotify.AgentProgressed
+		report.Event = session.AgentProgressed
 		report.Detail = "subagent-finished"
 		return report, true
 
 	case "PreCompact":
-		report.Event = agentnotify.AgentProgressed
+		report.Event = session.AgentProgressed
 		report.Detail = "compacting"
 		return report, true
 
 	case "Stop":
-		report.Event = agentnotify.TurnFinished
+		report.Event = session.TurnFinished
 		report.Message = text(payload.LastAssistantMessage)
 		return report, true
 
@@ -215,7 +215,7 @@ func Translate(
 		// which is what a person wants to read. Claude omits it when the turn
 		// died before the assistant said anything, and then the raw detail is
 		// better than silence.
-		report.Event = agentnotify.TurnFailed
+		report.Event = session.TurnFailed
 		report.Detail = kebab(payload.Error)
 		report.Message = text(cmp.Or(payload.LastAssistantMessage, payload.ErrorDetails))
 		return report, true
@@ -227,22 +227,22 @@ func Translate(
 		// the field existed.
 		kind := payload.NotificationType
 		if kind != "" && !NotificationsThatWantYou[kind] {
-			return agentnotify.Report{}, false
+			return session.Report{}, false
 		}
-		report.Event = agentnotify.BlockedOnHuman
+		report.Event = session.BlockedOnHuman
 		report.Detail = kebab(kind)
 		report.Message = text(payload.Message)
 		return report, true
 
 	case "SessionEnd":
-		report.Event = agentnotify.SessionEnded
+		report.Event = session.SessionEnded
 		report.Detail = endedBecause(payload.Reason)
 		return report, true
 	}
 
 	// A hook this program was not written for, which includes every hook
 	// Claude adds after this was written.
-	return agentnotify.Report{}, false
+	return session.Report{}, false
 }
 
 // endedBecause turns Claude's reason into the shared detail vocabulary of

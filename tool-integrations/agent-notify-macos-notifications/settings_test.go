@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
@@ -206,7 +206,7 @@ broke = "0xfff6c177"
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
-	sample := agentnotify.Record{Kernel: agentnotify.Broke, Rank: agentnotify.RankBroke}
+	sample := session.Record{Kernel: session.Broke, Rank: session.RankBroke}
 	if got := settings.Colours.For(sample); got != "0xfff6c177" {
 		t.Errorf("colours.For(broke) = %q", got)
 	}

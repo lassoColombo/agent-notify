@@ -13,7 +13,7 @@ import (
 	"slices"
 	"strings"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // The transcript is the only place the numbers are. [verified 2026-09-20,
@@ -71,7 +71,7 @@ type ClaudeTranscript struct {
 	// Responses are the ones this read could see, oldest first. Core counts the
 	// ones it has not counted before, so handing it the same response on twenty
 	// hooks in a row costs nothing and misses nothing.
-	Responses []agentnotify.Spend
+	Responses []session.Spend
 	// Model is what produced the newest response, and the transcript is where it
 	// has to come from: [verified 2026-09-20, 2.1.236] the hook payload does not
 	// carry it. Claude builds every hook input from the same six fields and the
@@ -197,20 +197,20 @@ var assistantLine = []byte(`"assistant"`)
 // Claude is appending to this file while this runs and the read may have landed
 // mid-line, so a line that does not parse is ordinary and worth nothing more
 // than moving on to the next one.
-func whatThisLineCost(line []byte) (agentnotify.Spend, string, bool) {
+func whatThisLineCost(line []byte) (session.Spend, string, bool) {
 	if !bytes.Contains(line, assistantLine) {
-		return agentnotify.Spend{}, "", false
+		return session.Spend{}, "", false
 	}
 	var written transcriptLine
 	if err := json.Unmarshal(line, &written); err != nil {
-		return agentnotify.Spend{}, "", false
+		return session.Spend{}, "", false
 	}
 	if written.Type != "assistant" || written.IsSidechain || written.RequestID == "" {
-		return agentnotify.Spend{}, "", false
+		return session.Spend{}, "", false
 	}
 
 	usage := written.Message.Usage
-	spend := agentnotify.Spend{
+	spend := session.Spend{
 		Response:   written.RequestID,
 		Input:      usage.Input,
 		Output:     usage.Output,
@@ -223,7 +223,7 @@ func whatThisLineCost(line []byte) (agentnotify.Spend, string, bool) {
 	if spend.Input == 0 && spend.Output == 0 && spend.CacheRead == 0 && spend.CacheWrite == 0 {
 		// An assistant line with no usage at all is not a response that was
 		// charged for, whatever else it is.
-		return agentnotify.Spend{}, "", false
+		return session.Spend{}, "", false
 	}
 	return spend, strings.TrimSpace(written.Message.Model), true
 }

@@ -25,7 +25,7 @@ import (
 	"syscall"
 	"time"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 	"github.com/lassoColombo/agent-notify/logs"
 	"github.com/lassoColombo/agent-notify/subscribe"
 	"github.com/lassoColombo/agent-notify/tool"
@@ -279,12 +279,12 @@ type Display struct {
 	Core   string
 	Logger *slog.Logger
 	mu     sync.Mutex
-	last   []agentnotify.Record
+	last   []session.Record
 	// said is the announcement the last paint made. Unlike M14's, it is not
 	// needed to DRAW anything — there are no edges here, because a menu that
 	// nobody has open has no state to disturb — only to know when the clock
 	// must next be woken.
-	said agentnotify.Arrival
+	said session.Arrival
 	// wake re-arms that clock. Without it the paint that ENDS an announcement
 	// waits for the refresh interval that was already running when the
 	// announcement arrived (D-47).
@@ -300,7 +300,7 @@ func (d *Display) Render(view subscribe.View) error {
 	return d.paint(view.Sessions)
 }
 
-func (d *Display) paint(sessions []agentnotify.Record) error {
+func (d *Display) paint(sessions []session.Record) error {
 	bar := d.Bar
 	bar.Now = time.Now()
 

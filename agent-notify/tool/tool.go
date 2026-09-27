@@ -52,7 +52,7 @@ import (
 	"strings"
 	"time"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // FlushAfterKilling is how long a killed child is given to let go of the pipes
@@ -200,8 +200,8 @@ func asked(binary string, args []string) string {
 // prints something large: zellij answers a missing session with a coloured list
 // of every session that does exist.
 //
-// Cleaned through core's own [agentnotify.CleanMessage] and
-// [agentnotify.CleanLine] rather than a local strip. These are somebody else's
+// Cleaned through core's own [session.CleanMessage] and
+// [session.CleanLine] rather than a local strip. These are somebody else's
 // bytes heading for a log file, a status bar, and in sketchybar's case back out
 // to a terminal — so the escape handling has to be the careful one, which
 // understands OSC as well as CSI and repairs invalid UTF-8 rather than passing
@@ -210,8 +210,8 @@ func asked(binary string, args []string) string {
 // "nothing" rather than "" when a program failed in silence, because an error
 // ending in a colon and a space reads as a bug in the error.
 func Summarise(output []byte) string {
-	for _, line := range strings.Split(agentnotify.CleanMessage(string(output)), "\n") {
-		if cleaned := agentnotify.CleanLine(line); cleaned != "" {
+	for _, line := range strings.Split(session.CleanMessage(string(output)), "\n") {
+		if cleaned := session.CleanLine(line); cleaned != "" {
 			return cleaned
 		}
 	}

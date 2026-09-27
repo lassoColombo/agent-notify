@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // Preview is how much of an agent's last message a notification carries.
@@ -36,11 +36,11 @@ func (p Preview) on() bool { return p.Lines > 0 && p.Width > 0 }
 // Said is the agent's last message alone, wrapped and capped — no state line in
 // front of it. It is what a notification's body is made of, where the state has
 // already been said in the subtitle and saying it twice is noise.
-func (p Preview) Said(record agentnotify.Record) string {
+func (p Preview) Said(record session.Record) string {
 	if !p.on() {
 		return ""
 	}
-	body := wrap(agentnotify.CleanMessage(record.Message), p.Width)
+	body := wrap(session.CleanMessage(record.Message), p.Width)
 	if len(body) > p.Lines {
 		body = body[:p.Lines]
 		body[p.Lines-1] = truncate(body[p.Lines-1], max(p.Width-1, 1)) + "…"
@@ -51,7 +51,7 @@ func (p Preview) Said(record agentnotify.Record) string {
 // State is the (kernel, detail) pair as a person would say it. It is here
 // rather than in render.go because a notification's subtitle wants exactly the
 // same words a tooltip's first line does.
-func State(record agentnotify.Record) string {
+func State(record session.Record) string {
 	return strings.ReplaceAll(record.State(), "-", " ")
 }
 

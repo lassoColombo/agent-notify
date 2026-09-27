@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
@@ -35,12 +35,12 @@ var me = subscribe.Integration{Name: Name}
 //
 // The shapes are different from each other as shapes, not only as colours, so
 // that the item still says something with the colour taken away.
-var DefaultGlyphs = map[agentnotify.Kernel]string{
-	agentnotify.BlockedOnYou:  "?", // it is asking you
-	agentnotify.Broke:         "!", // it went wrong
-	agentnotify.FinishedATurn: "●", // solid: there is something to read
-	agentnotify.Working:       "◌", // dotted: still going
-	agentnotify.Idle:          "○", // hollow: nothing
+var DefaultGlyphs = map[session.Kernel]string{
+	session.BlockedOnYou:  "?", // it is asking you
+	session.Broke:         "!", // it went wrong
+	session.FinishedATurn: "●", // solid: there is something to read
+	session.Working:       "◌", // dotted: still going
+	session.Idle:          "○", // hollow: nothing
 }
 
 // DefaultSymbols is the mark each state wears in the menu.
@@ -59,12 +59,12 @@ var DefaultGlyphs = map[agentnotify.Kernel]string{
 // SF Symbols back can have them, one state at a time, in the same table every
 // other appearance setting lives in. A name this macOS does not know is refused
 // when the config is read.
-var DefaultSymbols = map[agentnotify.Kernel]string{
-	agentnotify.BlockedOnYou:  Invader,
-	agentnotify.Broke:         Invader,
-	agentnotify.FinishedATurn: Invader,
-	agentnotify.Working:       Invader,
-	agentnotify.Idle:          Invader,
+var DefaultSymbols = map[session.Kernel]string{
+	session.BlockedOnYou:  Invader,
+	session.Broke:         Invader,
+	session.FinishedATurn: Invader,
+	session.Working:       Invader,
+	session.Idle:          Invader,
 }
 
 // DefaultColours is what each state is worth looking at in.
@@ -100,11 +100,11 @@ var DefaultSymbols = map[agentnotify.Kernel]string{
 // The cost of a fixed palette is light mode: these are the values for a dark
 // menu bar, and somebody who switches appearance wants `labelColor` and friends
 // back, which `[…settings.colors]` still takes by name.
-var DefaultColours = map[agentnotify.Kernel]string{
-	agentnotify.BlockedOnYou:  "0xffeb6f92", // love — answer this now
-	agentnotify.Broke:         "0xfff6c177", // gold — something went wrong
-	agentnotify.FinishedATurn: "0xff9ccfd8", // foam — there is something to read
-	agentnotify.Working:       "0xffc4a7e7", // iris — getting on with it
+var DefaultColours = map[session.Kernel]string{
+	session.BlockedOnYou:  "0xffeb6f92", // love — answer this now
+	session.Broke:         "0xfff6c177", // gold — something went wrong
+	session.FinishedATurn: "0xff9ccfd8", // foam — there is something to read
+	session.Working:       "0xffc4a7e7", // iris — getting on with it
 	// Idle is the text colour at 80%, and not the palette's Subtle or Muted
 	// tones, which are the one thing that does not survive the move onto a menu
 	// bar: they are dim tones designed for an opaque `#191724`, and the bar is a
@@ -112,7 +112,7 @@ var DefaultColours = map[agentnotify.Kernel]string{
 	// darker than the system's own secondary label — which was already too dark
 	// to read. Dimming the text colour keeps the quiet state quiet without
 	// making it a colour nobody can see.
-	agentnotify.Idle: "0xcce0def4",
+	session.Idle: "0xcce0def4",
 }
 
 // Settings is `[integration.macos-bar.settings]`, and nothing else in the
@@ -127,11 +127,11 @@ type Settings struct {
 	//
 	// Written the way a person writes a duration, which is one spelling for
 	// every duration in this system rather than this display's own: "8s" is
-	// eight seconds, "0s" keeps the item passive (agentnotify.Duration, D-78).
+	// eight seconds, "0s" keeps the item passive (session.Duration, D-78).
 	//
 	// A POINTER because "0s" and an absent key are different requests and a
 	// value cannot tell them apart.
-	Announce *agentnotify.Duration `toml:"announce"`
+	Announce *session.Duration `toml:"announce"`
 	// Resting is the colour of the mark on the bar while nothing wants you.
 	Resting string `toml:"resting"`
 	// Sign is the code signing identity `install` gives the bundle, remembered
@@ -157,9 +157,9 @@ type Resolved struct {
 	Announce time.Duration
 	Resting  string
 	Font     string
-	Glyphs   agentnotify.Palette
-	Symbols  agentnotify.Palette
-	Colours  agentnotify.Palette
+	Glyphs   session.Palette
+	Symbols  session.Palette
+	Colours  session.Palette
 }
 
 // Refresh is how often the item is repainted with nothing new to say, so that
@@ -194,9 +194,9 @@ func Read(given subscribe.Integration) (Resolved, error) {
 	resolved := Resolved{
 		Rows: defaultRows, Announce: defaultAnnounce,
 		Resting: defaultResting,
-		Glyphs:  agentnotify.NewPalette(DefaultGlyphs, settings.Glyphs),
-		Symbols: agentnotify.NewPalette(DefaultSymbols, settings.Symbols),
-		Colours: agentnotify.NewPalette(DefaultColours, settings.Colors),
+		Glyphs:  session.NewPalette(DefaultGlyphs, settings.Glyphs),
+		Symbols: session.NewPalette(DefaultSymbols, settings.Symbols),
+		Colours: session.NewPalette(DefaultColours, settings.Colors),
 	}
 	if settings.Rows > 0 {
 		resolved.Rows = settings.Rows

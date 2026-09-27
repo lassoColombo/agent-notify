@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // TestEveryFieldTheMenuReadsIsOneItWakesFor is D-73.
@@ -22,18 +22,18 @@ import (
 // to a row next year fails here the day it is added, without anybody having
 // thought about it.
 func TestEveryFieldTheMenuReadsIsOneItWakesFor(t *testing.T) {
-	drawn := func(record agentnotify.Record) string {
-		shown, arrival := Render(bar(), []agentnotify.Record{record})
+	drawn := func(record session.Record) string {
+		shown, arrival := Render(bar(), []session.Record{record})
 		return fmt.Sprintf("%+v|%+v", shown, arrival)
 	}
 
-	base := session("alpha", agentnotify.Working, nine)
+	base := aSession("alpha", session.Working, nine)
 	base.Detail = "running-bash"
 	base.Message = "Shall I delete the branch?"
 	base.Cwd = "/Users/somebody/projects/agent-notify"
 	wakeOn := WhatToWakeFor()
 
-	for field, moved := range agentnotify.EachFieldMoved(base) {
+	for field, moved := range session.EachFieldMoved(base) {
 		if drawn(base) == drawn(moved) {
 			continue
 		}
@@ -48,7 +48,7 @@ func TestEveryFieldTheMenuReadsIsOneItWakesFor(t *testing.T) {
 // TestWhatItWakesForIsSpelledTheWayARecordIs, which core refuses at startup
 // (D-70) — but at startup is late to find out, and this says so in a second.
 func TestWhatItWakesForIsSpelledTheWayARecordIs(t *testing.T) {
-	if err := agentnotify.ReasonTheseFieldsCannotBeWokenOn(WhatToWakeFor()); err != nil {
+	if err := session.ReasonTheseFieldsCannotBeWokenOn(WhatToWakeFor()); err != nil {
 		t.Error(err)
 	}
 }

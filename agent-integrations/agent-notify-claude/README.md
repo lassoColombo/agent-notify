@@ -72,7 +72,7 @@ could do with a failure except make things worse.
 
 ## What it reports
 
-Every hook this program answers writes one `agentnotify.Report`, and every
+Every hook this program answers writes one `session.Report`, and every
 report carries the whole of the following — not just the fields the event is
 about. The record is being written anyway, so a name or a token count costs no
 extra write, and a `/rename` halfway through a session lands on the next tool
@@ -161,7 +161,7 @@ git clone git@github.com:lassoColombo/agent-notify.git ~/projects/agent-notify
 
 # core first: the CLI is what you will check things with
 cd ~/projects/agent-notify/agent-notify
-env -u GOROOT go install ./cmd/agent-notify
+env -u GOROOT go install .
 
 # then this
 cd ~/projects/agent-notify/agent-integrations/agent-notify-claude

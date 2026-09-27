@@ -165,12 +165,12 @@ cd ~/projects/agent-notify/agent-notify
 env -u GOROOT go build ./...                        # everything compiles
 env -u GOROOT go test ./...                         # and passes
 
-env -u GOROOT go build -o /opt/homebrew/bin/agent-notify ./cmd/agent-notify
+env -u GOROOT go build -o /opt/homebrew/bin/agent-notify .
 agent-notify version
 # 0.0.0-dev
 ```
 
-`go install ./cmd/agent-notify` works too and puts the binary in
+`go install .` works too and puts the binary in
 `$(go env GOPATH)/bin`. Either way the binary must be somewhere your **shell**
 can find it *and* somewhere a supervised child can: see
 [`agent-notify-binary`](#the-top-level-keys) below, which is what a hook's PATH
@@ -1042,19 +1042,28 @@ which needs no script at all.
 
 ## The library
 
-`github.com/lassoColombo/agent-notify` is the entire public surface, plus five
-small packages beside it. Everything else is under `internal/`, where it can
-change without breaking a module we do not control — which is the whole reason
-the boundary is there.
+Seven packages are the entire public surface, and they are exactly the seven
+directories at the top of the module — the doors. Everything else is under an
+`internal/`, where it can change without breaking a module we do not control,
+which is the whole reason the boundary is there. `main.go` sits beside them
+because the command line is a client of the same seven and never a second
+implementation of anything (R14).
+
+All of them are under `github.com/lassoColombo/agent-notify/`.
 
 | Package | For |
 | --- | --- |
-| `agentnotify` | the vocabulary: events, kernels, the record, the protocol, the display rules |
-| `agentnotify/hook` | an agent-integration: one function |
-| `agentnotify/subscribe` | a display: connect, be handed the state, render |
-| `agentnotify/container` | a container: place and focus a session |
-| `agentnotify/capture` | the one subcommand that runs inside the agent |
-| `agentnotify/tool` | running the external program an integration drives, under a timeout |
+| `session` | the vocabulary: events, kernels, the record, the protocol, the display rules |
+| `hook` | an agent-integration: one function |
+| `subscribe` | a display: connect, be handed the state, render |
+| `container` | a container: place and focus a session |
+| `capture` | the one subcommand that runs inside the agent |
+| `tool` | running the external program an integration drives, under a timeout |
+| `logs` | the one log file every agent-notify process appends to |
+
+A test keeps that list honest: `layering_test.go` fails if a new exported
+package appears at the top level, if a package lands in no floor of the
+dependency graph, or if one subcommand reaches into another.
 
 ### The vocabulary
 
@@ -1063,7 +1072,7 @@ machine. An adapter cannot invent an event — one that could would be an adapte
 that decides what your bar counts.
 
 ```go
-agentnotify.Reduce(agentnotify.Working, agentnotify.TurnFinished)  // finished-a-turn
+session.Reduce(session.Working, session.TurnFinished)  // finished-a-turn
 ```
 
 Seven of the nine assert a state (`user-sent-prompt`, `agent-progressed`,
@@ -1084,9 +1093,9 @@ differently, are here once: `Record.DisplayName()`, `Record.State()`,
 A translation and one call.
 
 ```go
-hook.Record(agentnotify.Report{
-    Key:     agentnotify.Key{Agent: "claude", SessionID: payload.SessionID},
-    Event:   agentnotify.TurnFinished,
+hook.Record(session.Report{
+    Key:     session.Key{Agent: "claude", SessionID: payload.SessionID},
+    Event:   session.TurnFinished,
     Message: &payload.LastAssistantMessage,
 })
 ```
@@ -1141,7 +1150,7 @@ and your `WakeOn` omits wakes you never for that change, and nothing errors.
 `EachFieldMoved` exists so a test can find that for you.
 
 ```go
-for field, moved := range agentnotify.EachFieldMoved(base) {
+for field, moved := range session.EachFieldMoved(base) {
     if render(base) != render(moved) && !slices.Contains(wakeOn, field) {
         t.Errorf("the render moves with %q and this display does not wake for it", field)
     }

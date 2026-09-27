@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
@@ -45,8 +45,8 @@ func TestAUserWithNoOpinionGetsTheDefaults(t *testing.T) {
 		settings.Announce != defaultAnnounce || settings.Resting != defaultResting {
 		t.Errorf("the defaults did not survive an empty file: %+v", settings)
 	}
-	sample := agentnotify.Record{Kernel: agentnotify.BlockedOnYou, Rank: agentnotify.RankBlockedOnYou}
-	if got := settings.Glyphs.For(sample); got != DefaultGlyphs[agentnotify.BlockedOnYou] {
+	sample := session.Record{Kernel: session.BlockedOnYou, Rank: session.RankBlockedOnYou}
+	if got := settings.Glyphs.For(sample); got != DefaultGlyphs[session.BlockedOnYou] {
 		t.Errorf("the glyph is %q", got)
 	}
 }

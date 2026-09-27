@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/lassoColombo/agent-notify/internal/config"
-	"github.com/lassoColombo/agent-notify/internal/watcher"
+	"github.com/lassoColombo/agent-notify/internal/sessionwatcher"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -77,7 +77,7 @@ func (i Integration) Settings(into any) error {
 //
 //	Glyphs map[string]string `toml:"glyphs"`
 //
-// in its own settings struct and hands it to agentnotify.NewPalette, which is
+// in its own settings struct and hands it to session.NewPalette, which is
 // one read of the file instead of two and keeps the strictness above honest: a
 // shortcut that read `glyphs` separately would have to be excused from
 // DisallowUnknownFields, and the excuse would grow.
@@ -114,5 +114,5 @@ func (i Integration) CoreBinary() (string, error) {
 		return "", err
 	}
 	settings, _ := config.Load(layout.ConfigFile)
-	return watcher.CoreBinary(settings.AgentNotifyBinary)
+	return sessionwatcher.CoreBinary(settings.AgentNotifyBinary)
 }

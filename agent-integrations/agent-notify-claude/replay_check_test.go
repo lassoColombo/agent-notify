@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // TestReplayOfRealCaptures runs every hook payload this machine has recorded
@@ -31,7 +31,7 @@ func TestReplayOfRealCaptures(t *testing.T) {
 	type step struct {
 		when   string
 		hook   string
-		report agentnotify.Report
+		report session.Report
 		worth  bool
 	}
 	bySession := map[string][]step{}
@@ -70,14 +70,14 @@ func TestReplayOfRealCaptures(t *testing.T) {
 	t.Logf("ignored: %v", ignored)
 
 	// Reduce each session's events in order and count where they ended up.
-	endings := map[agentnotify.Kernel]int{}
+	endings := map[session.Kernel]int{}
 	var longest string
 	var longestSteps []step
 	for sid, steps := range bySession {
 		sort.Slice(steps, func(i, j int) bool { return steps[i].when < steps[j].when })
-		kernel := agentnotify.Kernel("")
+		kernel := session.Kernel("")
 		for _, s := range steps {
-			kernel = agentnotify.Reduce(kernel, s.report.Event)
+			kernel = session.Reduce(kernel, s.report.Event)
 		}
 		endings[kernel]++
 		if len(steps) > len(longestSteps) {
@@ -88,10 +88,10 @@ func TestReplayOfRealCaptures(t *testing.T) {
 
 	// Show the shape of one busy session, which is what a person would watch.
 	t.Logf("the busiest session (%s) had %d events; its first 25 transitions:", longest[:8], len(longestSteps))
-	kernel := agentnotify.Kernel("")
+	kernel := session.Kernel("")
 	shown := 0
 	for _, s := range longestSteps {
-		next := agentnotify.Reduce(kernel, s.report.Event)
+		next := session.Reduce(kernel, s.report.Event)
 		if next != kernel && shown < 25 {
 			detail := s.report.Detail
 			if detail != "" {

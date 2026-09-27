@@ -16,7 +16,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 	"github.com/lassoColombo/agent-notify/capture"
 	"github.com/lassoColombo/agent-notify/logs"
 	"github.com/lassoColombo/agent-notify/subscribe"
@@ -145,29 +145,29 @@ func WhatToWakeFor() []string {
 // Display is the render function and what it needs.
 type Display struct {
 	Zellij Zellij
-	Glyphs agentnotify.Palette
+	Glyphs session.Palette
 	Logger *slog.Logger
 }
 
 // Render is called with the current state, never with a transition, so it has
 // nothing to remember and nothing to get out of step with (R22).
 func (d *Display) Render(view subscribe.View) error {
-	for session, records := range Group(view.Sessions) {
-		panes, err := d.Zellij.Panes(session)
+	for zellijSession, records := range Group(view.Sessions) {
+		panes, err := d.Zellij.Panes(zellijSession)
 		if err != nil {
 			// One zellij session being gone says nothing about the others, and
 			// nothing at all about the agents (R13). The read failing is also
 			// what guarantees no rename is attempted against it.
-			d.Logger.Debug("skipped a zellij session", "session", session, "why", err.Error())
+			d.Logger.Debug("skipped a zellij session", "session", zellijSession, "why", err.Error())
 			continue
 		}
-		for _, command := range Plan(session, records, panes, d.Glyphs) {
+		for _, command := range Plan(zellijSession, records, panes, d.Glyphs) {
 			if err := d.Zellij.Do(command); err != nil {
-				d.Logger.Warn("zellij refused", "session", session, "why", command.Why,
+				d.Logger.Warn("zellij refused", "session", zellijSession, "why", command.Why,
 					"problem", err.Error())
 				continue
 			}
-			d.Logger.Debug("painted", "session", session, "what", command.Why)
+			d.Logger.Debug("painted", "session", zellijSession, "what", command.Why)
 		}
 	}
 	return nil

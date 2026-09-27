@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
 	"github.com/lassoColombo/agent-notify/internal/process"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // The tests above prove the rules. These prove that the machine answers the way
@@ -53,9 +53,9 @@ func TestAKilledProcessIsJudgedDead(t *testing.T) {
 		t.Fatalf("cannot see the process we just started: %v", err)
 	}
 
-	record := agentnotify.Record{
-		Kernel:  agentnotify.Working,
-		Process: agentnotify.Process{PID: facts.PID, StartedAt: facts.StartedAt},
+	record := session.Record{
+		Kernel:  session.Working,
+		Process: session.Process{PID: facts.PID, StartedAt: facts.StartedAt},
 	}
 	if got := process.LivenessOf(record, "", machine); got != process.Running {
 		t.Fatalf("a running process was judged %v", got)
@@ -78,9 +78,9 @@ func TestAKilledProcessIsJudgedDead(t *testing.T) {
 // the number. This process is certainly running; it is not the process the
 // record describes.
 func TestAReusedPidIsNotJudgedAlive(t *testing.T) {
-	record := agentnotify.Record{
-		Kernel: agentnotify.Working,
-		Process: agentnotify.Process{
+	record := session.Record{
+		Kernel: session.Working,
+		Process: session.Process{
 			PID:       process.Self(),
 			StartedAt: time.Unix(1, 0).UTC(),
 		},
@@ -145,7 +145,7 @@ func TestAPidNothingIsUsingIsNotThere(t *testing.T) {
 	}
 }
 
-func describe(chain []agentnotify.Ancestor) string {
+func describe(chain []session.Ancestor) string {
 	var text string
 	for i, ancestor := range chain {
 		if i > 0 {

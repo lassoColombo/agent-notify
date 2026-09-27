@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
@@ -25,19 +25,19 @@ import (
 // the sweep produces is still a transition worth announcing and the only thing
 // varying is the field under test.
 func TestEveryFieldABannerReadsIsOneItWakesFor(t *testing.T) {
-	said := func(record agentnotify.Record) string {
+	said := func(record session.Record) string {
 		return fmt.Sprintf("%+v", notifier().Fresh([]subscribe.Change{
-			{Record: record, PreviousKernel: agentnotify.Working},
+			{Record: record, PreviousKernel: session.Working},
 		}))
 	}
 
-	base := session("alpha", agentnotify.BlockedOnYou, nine)
+	base := aSession("alpha", session.BlockedOnYou, nine)
 	base.Detail = "permission-prompt"
 	base.Message = "Shall I delete the branch?"
 	base.Cwd = "/Users/somebody/projects/agent-notify"
 	wakeOn := WhatToWakeFor()
 
-	for field, moved := range agentnotify.EachFieldMoved(base) {
+	for field, moved := range session.EachFieldMoved(base) {
 		if said(base) == said(moved) {
 			continue
 		}
@@ -52,7 +52,7 @@ func TestEveryFieldABannerReadsIsOneItWakesFor(t *testing.T) {
 // TestWhatItWakesForIsSpelledTheWayARecordIs, which core refuses at startup
 // (D-70) — but at startup is late to find out, and this says so in a second.
 func TestWhatItWakesForIsSpelledTheWayARecordIs(t *testing.T) {
-	if err := agentnotify.ReasonTheseFieldsCannotBeWokenOn(WhatToWakeFor()); err != nil {
+	if err := session.ReasonTheseFieldsCannotBeWokenOn(WhatToWakeFor()); err != nil {
 		t.Error(err)
 	}
 }

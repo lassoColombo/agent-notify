@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
 	"github.com/lassoColombo/agent-notify/internal/config"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 func TestMissingFileIsNotAComplaint(t *testing.T) {
@@ -152,7 +152,7 @@ func durationKeys() []string {
 	var keys []string
 	for i := range structure.NumField() {
 		field := structure.Field(i)
-		if field.Type == reflect.TypeOf(agentnotify.Duration{}) {
+		if field.Type == reflect.TypeOf(session.Duration{}) {
 			keys = append(keys, field.Tag.Get("toml"))
 		}
 	}

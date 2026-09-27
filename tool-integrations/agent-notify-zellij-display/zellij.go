@@ -50,15 +50,15 @@ func Address(id int) string { return "terminal_" + strconv.Itoa(id) }
 //
 // This is why every render reads before it writes: a failed read means the
 // whole zellij session is skipped and not one rename is attempted against it.
-func (z Zellij) Panes(session string) ([]Pane, error) {
-	out, err := z.run(session, "action", "list-panes", "--json", "--tab")
+func (z Zellij) Panes(zellijSession string) ([]Pane, error) {
+	out, err := z.run(zellijSession, "action", "list-panes", "--json", "--tab")
 	if err != nil {
 		return nil, err
 	}
 	var panes []Pane
 	if err := json.Unmarshal(out, &panes); err != nil {
 		return nil, fmt.Errorf("zellij session %q is not there (it answered %q)",
-			session, tool.Summarise(out))
+			zellijSession, tool.Summarise(out))
 	}
 	return panes, nil
 }
@@ -74,11 +74,11 @@ func (z Zellij) Do(command Command) error {
 // The running is [tool.Run], which is where the WaitDelay, the check order and
 // the cleaning of whatever zellij printed all live (D-68). What is zellij's own
 // and stays here is the flag placement.
-func (z Zellij) run(session string, args ...string) ([]byte, error) {
+func (z Zellij) run(zellijSession string, args ...string) ([]byte, error) {
 	// --session before the subcommand: it is a flag of zellij itself, not of
 	// `action`, and without it a machine with two sessions renames a pane in
 	// whichever one zellij picks.
-	whole := append([]string{"--session", session}, args...)
+	whole := append([]string{"--session", zellijSession}, args...)
 	out, err := tool.Run(z.Binary, z.Timeout, whole...)
 	return out.Stdout, err
 }

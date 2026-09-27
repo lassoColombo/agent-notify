@@ -7,7 +7,7 @@ import (
 
 	fzf "github.com/junegunn/fzf/src"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // What is worth testing here is what this program decides, which is: what a row
@@ -16,11 +16,11 @@ import (
 
 var noon = time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
 
-func session() agentnotify.Record {
-	return agentnotify.Record{
-		Key:        agentnotify.Key{Host: "here", Agent: "claude", SessionID: "one"},
-		Kernel:     agentnotify.BlockedOnYou,
-		Rank:       agentnotify.RankBlockedOnYou,
+func aSession() session.Record {
+	return session.Record{
+		Key:        session.Key{Host: "here", Agent: "claude", SessionID: "one"},
+		Kernel:     session.BlockedOnYou,
+		Rank:       session.RankBlockedOnYou,
 		Detail:     "permission-prompt",
 		Name:       "agent-notify",
 		Cwd:        "/Users/somebody/projects/agent-notify",
@@ -28,8 +28,8 @@ func session() agentnotify.Record {
 		Model:      "claude-opus-5",
 		StateSince: noon.Add(-12 * time.Minute),
 		Message:    "May I run `rm -rf ./build`?",
-		Usage:      agentnotify.Usage{Input: 120_000, Output: 7_000},
-		Process:    agentnotify.Process{PID: 44182},
+		Usage:      session.Usage{Input: 120_000, Output: 7_000},
+		Process:    session.Process{PID: 44182},
 	}
 }
 
@@ -99,7 +99,7 @@ func TestTheRowCarriesWhatIsTypedAtIt(t *testing.T) {
 	homeDirectory = func() (string, error) { return "/Users/somebody", nil }
 	defer func() { homeDirectory = was }()
 
-	row := plain(Row(session(), noon, Measure([]agentnotify.Record{session()})))
+	row := plain(Row(aSession(), noon, Measure([]session.Record{aSession()})))
 	for _, want := range []string{
 		"agent-notify", "permission-prompt", "12m",
 		"~/projects/agent-notify", "worktree-view-changed",
@@ -125,7 +125,7 @@ func TestTheRowCarriesWhatIsTypedAtIt(t *testing.T) {
 // hue makes identity a moving target — a session's name would change colour
 // when its state did, so no name could be learned by its colour.
 func TestOnlyTheStateIsColouredByState(t *testing.T) {
-	row := Row(session(), noon, Measure([]agentnotify.Record{session()}))
+	row := Row(aSession(), noon, Measure([]session.Record{aSession()}))
 
 	name := strings.Index(row, "agent-notify")
 	if name < 0 {
@@ -146,8 +146,8 @@ func TestOnlyTheStateIsColouredByState(t *testing.T) {
 // pine (3.38:1) and muted (3.42:1) — the same weight, told apart only by hue,
 // at a contrast where hue barely resolves.
 func TestEveryStateIsADifferentWeight(t *testing.T) {
-	seen := map[string]agentnotify.Kernel{}
-	for _, kernel := range agentnotify.Kernels() {
+	seen := map[string]session.Kernel{}
+	for _, kernel := range session.Kernels() {
 		colour := StateColour(kernel.Rank())
 		if other, taken := seen[colour]; taken {
 			t.Errorf("%s and %s are both %s", kernel, other, colour)
@@ -159,7 +159,7 @@ func TestEveryStateIsADifferentWeight(t *testing.T) {
 // TestTheFactsAreTheOnesWorthScanning: what it is working on, with what, and
 // what it has spent — the things a row has no room for.
 func TestTheFactsAreTheOnesWorthScanning(t *testing.T) {
-	facts := plain(FactBlock(Facts(session()), 100))
+	facts := plain(FactBlock(Facts(aSession()), 100))
 	for _, want := range []string{
 		"projects/agent-notify", // where
 		"worktree-view-changed", // which branch
@@ -177,9 +177,9 @@ func TestTheFactsAreTheOnesWorthScanning(t *testing.T) {
 // model and no branch is the ordinary case for most agents, and every one of
 // those lines must simply not appear (§A7.4.3).
 func TestNothingIsInventedWhenNothingWasReported(t *testing.T) {
-	quiet := agentnotify.Record{
-		Key:    agentnotify.Key{Host: "here", Agent: "codex", SessionID: "two"},
-		Kernel: agentnotify.Idle,
+	quiet := session.Record{
+		Key:    session.Key{Host: "here", Agent: "codex", SessionID: "two"},
+		Kernel: session.Idle,
 		Name:   "quiet",
 	}
 	facts := plain(FactBlock(Facts(quiet), 100))
@@ -209,17 +209,17 @@ func TestTheMessageIsRenderedAsMarkdown(t *testing.T) {
 
 // TestPreviewSaysWhatTheAgentSaidAndWhatItSaidBefore.
 func TestPreviewSaysWhatTheAgentSaidAndWhatItSaidBefore(t *testing.T) {
-	history := agentnotify.History{
-		Changes: []agentnotify.StateChange{{
-			At: noon.Add(-12 * time.Minute), From: agentnotify.Working, To: agentnotify.BlockedOnYou,
+	history := session.History{
+		Changes: []session.StateChange{{
+			At: noon.Add(-12 * time.Minute), From: session.Working, To: session.BlockedOnYou,
 		}},
-		Messages: []agentnotify.SaidSomething{
+		Messages: []session.SaidSomething{
 			{At: noon.Add(-31 * time.Minute), Message: "tests are green"},
 			{At: noon.Add(-12 * time.Minute), Message: "May I run `rm -rf ./build`?"},
 		},
 	}
 
-	got := plain(Preview(session(), history, noon, 70))
+	got := plain(Preview(aSession(), history, noon, 70))
 	for _, want := range []string{
 		"rm -rf ./build", "earlier", "working → blocked-on-you", "tests are green",
 	} {
@@ -247,7 +247,7 @@ func TestPreviewSaysWhatTheAgentSaidAndWhatItSaidBefore(t *testing.T) {
 // so the canonical (kernel, detail) string has to be somewhere — it is here,
 // once, for the row the cursor is on.
 func TestTheLabelSaysWhoInCoresOwnWords(t *testing.T) {
-	label := plain(Label(session(), noon))
+	label := plain(Label(aSession(), noon))
 	for _, want := range []string{"agent-notify", "blocked-on-you/permission-prompt", "12m"} {
 		if !strings.Contains(label, want) {
 			t.Errorf("label is missing %q: %q", want, label)
@@ -303,9 +303,9 @@ func TestHomeIsWrittenTheWayPeopleWriteIt(t *testing.T) {
 // TestTheStateDecidesTheColour: the question this is opened to answer is which
 // session wants you, and the answer is a hue before it is a word (R24).
 func TestTheStateDecidesTheColour(t *testing.T) {
-	blocked := StateColour(agentnotify.RankBlockedOnYou)
-	working := StateColour(agentnotify.RankWorking)
-	ended := StateColour(agentnotify.RankEnded)
+	blocked := StateColour(session.RankBlockedOnYou)
+	working := StateColour(session.RankWorking)
+	ended := StateColour(session.RankEnded)
 
 	if blocked != base08 {
 		t.Errorf("blocked-on-you is %s, want love", blocked)
@@ -334,13 +334,13 @@ func TestALongNameDoesNotTearTheRowInTwo(t *testing.T) {
 	homeDirectory = func() (string, error) { return "/Users/somebody", nil }
 	defer func() { homeDirectory = was }()
 
-	long := session()
+	long := aSession()
 	long.Name = "dmilog3-rollout-dashboard-proposals"
 	long.Detail = "a detail nobody would ever sensibly write"
-	withANewline := session()
+	withANewline := aSession()
 	withANewline.Name = "two\nlines"
 
-	sessions := []agentnotify.Record{long, withANewline}
+	sessions := []session.Record{long, withANewline}
 	columns := Measure(sessions)
 	for _, record := range sessions {
 		row := Row(record, noon, columns)

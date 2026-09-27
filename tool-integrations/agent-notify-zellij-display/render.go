@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // This file is pure. It decides what should be run and returns it as data;
@@ -29,7 +29,7 @@ type Place struct {
 // A record with nothing captured is not an error and not a warning: an agent
 // running in a bare terminal is a perfectly ordinary session that this display
 // has nothing to say about, and it must cost nothing.
-func PlaceOf(record agentnotify.Record) (Place, bool) {
+func PlaceOf(record session.Record) (Place, bool) {
 	blob, present := record.CapturedContext.By[Name]
 	if !present {
 		return Place{}, false
@@ -38,12 +38,12 @@ func PlaceOf(record agentnotify.Record) (Place, bool) {
 	if err := json.Unmarshal(blob, &captured); err != nil {
 		return Place{}, false
 	}
-	session := captured[sessionVariable]
+	zellijSession := captured[sessionVariable]
 	pane, err := strconv.Atoi(captured[paneVariable])
-	if session == "" || err != nil {
+	if zellijSession == "" || err != nil {
 		return Place{}, false
 	}
-	return Place{Session: session, Pane: pane}, true
+	return Place{Session: zellijSession, Pane: pane}, true
 }
 
 // Command is one zellij invocation, as data rather than as an effect.
@@ -62,7 +62,7 @@ type Command struct {
 // only happen when a state actually moves — and buys three things memory cannot:
 // it is correct after its own restart, it is correct after a pane moves to
 // another tab, and it never issues a rename that would change nothing.
-func Plan(session string, records []agentnotify.Record, panes []Pane, glyphs agentnotify.Palette) []Command {
+func Plan(zellijSession string, records []session.Record, panes []Pane, glyphs session.Palette) []Command {
 	held := map[int]Pane{}
 	var tabs []int
 	tabNames := map[int]string{}
@@ -83,15 +83,15 @@ func Plan(session string, records []agentnotify.Record, panes []Pane, glyphs age
 	// function that gives different answers for the same set in a different
 	// order is not one.
 	ordered := slices.Clone(records)
-	agentnotify.ByUrgency(ordered)
+	session.ByUrgency(ordered)
 
 	var commands []Command
-	claimed := map[int]agentnotify.Record{}
+	claimed := map[int]session.Record{}
 	var claims []int
 
 	for _, record := range ordered {
 		place, found := PlaceOf(record)
-		if !found || place.Session != session || !record.Kernel.Live() {
+		if !found || place.Session != zellijSession || !record.Kernel.Live() {
 			continue
 		}
 		if _, taken := claimed[place.Pane]; taken {
@@ -116,7 +116,7 @@ func Plan(session string, records []agentnotify.Record, panes []Pane, glyphs age
 			continue
 		}
 		commands = append(commands, Command{
-			Session: session,
+			Session: zellijSession,
 			Args:    []string{"action", "rename-pane", "--pane-id", Address(id), want},
 			Why:     fmt.Sprintf("pane %d is %s: %q", id, record.State(), want),
 		})
@@ -130,7 +130,7 @@ func Plan(session string, records []agentnotify.Record, panes []Pane, glyphs age
 	released := map[int]bool{}
 	for _, record := range ordered {
 		place, found := PlaceOf(record)
-		if !found || place.Session != session || record.Kernel.Live() {
+		if !found || place.Session != zellijSession || record.Kernel.Live() {
 			continue
 		}
 		if _, taken := claimed[place.Pane]; taken || released[place.Pane] {
@@ -142,7 +142,7 @@ func Plan(session string, records []agentnotify.Record, panes []Pane, glyphs age
 		}
 		released[place.Pane] = true
 		commands = append(commands, Command{
-			Session: session,
+			Session: zellijSession,
 			Args:    []string{"action", "undo-rename-pane", "--pane-id", Address(place.Pane)},
 			Why:     fmt.Sprintf("pane %d is no longer an agent's", place.Pane),
 		})
@@ -151,7 +151,7 @@ func Plan(session string, records []agentnotify.Record, panes []Pane, glyphs age
 	// One glyph per tab, not one per agent: the most urgent thing in it. That
 	// is the same rule as an LED over the whole machine and a dock badge over
 	// everything, computed by the same function (§A5.5, §A12.1, R24).
-	inTab := map[int][]agentnotify.Record{}
+	inTab := map[int][]session.Record{}
 	for _, id := range claims {
 		tab := held[id].TabID
 		inTab[tab] = append(inTab[tab], claimed[id])
@@ -165,7 +165,7 @@ func Plan(session string, records []agentnotify.Record, panes []Pane, glyphs age
 		// stacking a second glyph on every tab.
 		base := strip(tabNames[tab], glyphs.Marks())
 		want := base
-		if here, found := agentnotify.MostUrgent(inTab[tab]); found {
+		if here, found := session.MostUrgent(inTab[tab]); found {
 			want = join(glyphs.For(here), base)
 		}
 		if want == tabNames[tab] {
@@ -175,14 +175,14 @@ func Plan(session string, records []agentnotify.Record, panes []Pane, glyphs age
 			// Never write an empty name: zellij has its own idea of what an
 			// unnamed tab is called, and undo is how you ask for it back.
 			commands = append(commands, Command{
-				Session: session,
+				Session: zellijSession,
 				Args:    []string{"action", "undo-rename-tab", "--tab-id", strconv.Itoa(tab)},
 				Why:     fmt.Sprintf("tab %d has nothing of ours left on it", tab),
 			})
 			continue
 		}
 		commands = append(commands, Command{
-			Session: session,
+			Session: zellijSession,
 			Args:    []string{"action", "rename-tab-by-id", strconv.Itoa(tab), want},
 			Why:     fmt.Sprintf("tab %d: %q", tab, want),
 		})
@@ -234,7 +234,7 @@ func strip(name string, marks []string) string {
 // Two ways to recognise it: it starts with one of our glyphs, or — for the
 // states whose glyph is deliberately empty — it is exactly the name we would
 // have written.
-func ours(title string, record agentnotify.Record, glyphs agentnotify.Palette) bool {
+func ours(title string, record session.Record, glyphs session.Palette) bool {
 	trimmed := strings.TrimSpace(title)
 	for _, mark := range glyphs.Marks() {
 		if strings.HasPrefix(trimmed, mark) {
@@ -246,8 +246,8 @@ func ours(title string, record agentnotify.Record, glyphs agentnotify.Palette) b
 
 // Group sorts sessions into the zellij sessions they live in, so that each one
 // is read and written once however many agents it holds.
-func Group(records []agentnotify.Record) map[string][]agentnotify.Record {
-	grouped := map[string][]agentnotify.Record{}
+func Group(records []session.Record) map[string][]session.Record {
+	grouped := map[string][]session.Record{}
 	for _, record := range records {
 		if place, found := PlaceOf(record); found {
 			grouped[place.Session] = append(grouped[place.Session], record)

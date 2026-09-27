@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // TestReplayOfRealCaptures runs every codex hook payload this machine has
@@ -39,26 +39,26 @@ func TestReplayOfRealCaptures(t *testing.T) {
 	t.Logf("replayed %d captured payloads across %d sessions", total, len(bySession))
 	t.Logf("ignored: %v", ignored)
 
-	endings := map[agentnotify.Kernel]int{}
+	endings := map[session.Kernel]int{}
 	var longest string
 	var longestSteps []replayed
-	for id, session := range bySession {
-		sort.Slice(session, func(i, j int) bool { return session[i].when < session[j].when })
-		kernel := agentnotify.Kernel("")
-		for _, step := range session {
-			kernel = agentnotify.Reduce(kernel, step.report.Event)
+	for id, events := range bySession {
+		sort.Slice(events, func(i, j int) bool { return events[i].when < events[j].when })
+		kernel := session.Kernel("")
+		for _, step := range events {
+			kernel = session.Reduce(kernel, step.report.Event)
 		}
 		endings[kernel]++
-		if len(session) > len(longestSteps) {
-			longest, longestSteps = id, session
+		if len(events) > len(longestSteps) {
+			longest, longestSteps = id, events
 		}
 	}
 	t.Logf("final states across %d sessions: %v", len(bySession), endings)
 
 	t.Logf("the busiest session (%s) had %d events; every transition:", longest[:8], len(longestSteps))
-	kernel := agentnotify.Kernel("")
+	kernel := session.Kernel("")
 	for _, step := range longestSteps {
-		next := agentnotify.Reduce(kernel, step.report.Event)
+		next := session.Reduce(kernel, step.report.Event)
 		if next != kernel {
 			detail := step.report.Detail
 			if detail != "" {
@@ -91,14 +91,14 @@ func TestNoRealSessionIsLeftClaimingToWork(t *testing.T) {
 		}
 	}
 
-	for id, session := range bySession {
-		sort.Slice(session, func(i, j int) bool { return session[i].when < session[j].when })
-		kernel := agentnotify.Kernel("")
-		for _, step := range session {
-			kernel = agentnotify.Reduce(kernel, step.report.Event)
+	for id, events := range bySession {
+		sort.Slice(events, func(i, j int) bool { return events[i].when < events[j].when })
+		kernel := session.Kernel("")
+		for _, step := range events {
+			kernel = session.Reduce(kernel, step.report.Event)
 		}
-		last := session[len(session)-1]
-		if kernel != agentnotify.Working {
+		last := events[len(events)-1]
+		if kernel != session.Working {
 			continue
 		}
 		// Working is only honest if the last thing that happened was the agent
@@ -117,7 +117,7 @@ func TestNoRealSessionIsLeftClaimingToWork(t *testing.T) {
 type replayed struct {
 	when   string
 	hook   string
-	report agentnotify.Report
+	report session.Report
 	worth  bool
 }
 

@@ -14,7 +14,7 @@ import (
 	"slices"
 	"strings"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // Codex writes one line per response into the rollout it keeps for each thread,
@@ -62,7 +62,7 @@ type Spending struct {
 	// Responses are the ones this read could see, oldest first. Core counts the
 	// ones it has not counted before, so handing it the same response on twenty
 	// hooks in a row costs nothing and misses nothing.
-	Responses []agentnotify.Spend
+	Responses []session.Spend
 }
 
 // WhatCodexHasSpent reads backwards from the end of the rollout until it has
@@ -141,9 +141,9 @@ type tokenUsage struct {
 
 // spend turns codex's shape into core's, which differ in one place: what codex
 // calls input includes what it read from the cache, and core's do not overlap.
-func (u tokenUsage) spend(responseID string) agentnotify.Spend {
+func (u tokenUsage) spend(responseID string) session.Spend {
 	cached := min(u.Cached, u.Input)
-	return agentnotify.Spend{
+	return session.Spend{
 		Response:   responseID,
 		Input:      u.Input - cached,
 		CacheRead:  cached,
@@ -181,20 +181,20 @@ var usageRecord = []byte(`"token_usage_record"`)
 // Codex is appending to this file while this runs and the read may have landed
 // mid-line, so a line that does not parse is ordinary and worth nothing more
 // than moving on to the next one.
-func whatThisLineCost(line []byte) (agentnotify.Spend, bool) {
+func whatThisLineCost(line []byte) (session.Spend, bool) {
 	if !bytes.Contains(line, usageRecord) {
-		return agentnotify.Spend{}, false
+		return session.Spend{}, false
 	}
 	var written rolloutLine
 	if err := json.Unmarshal(line, &written); err != nil {
-		return agentnotify.Spend{}, false
+		return session.Spend{}, false
 	}
 	if written.Type != "token_usage_record" || written.Payload.ResponseID == "" {
-		return agentnotify.Spend{}, false
+		return session.Spend{}, false
 	}
 	usage := written.Payload.Usage
 	if usage.Input == 0 && usage.Output == 0 && usage.CacheWrite == 0 {
-		return agentnotify.Spend{}, false
+		return session.Spend{}, false
 	}
 	return usage.spend(written.Payload.ResponseID), true
 }

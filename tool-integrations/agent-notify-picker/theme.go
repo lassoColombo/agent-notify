@@ -6,7 +6,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // Rosé Pine, by role rather than by hue — and each hue means ONE thing on this
@@ -117,15 +117,15 @@ func StateStyle(rank int) lipgloss.Style {
 // Bright pine is 6.03:1 and keeps the family.
 func StateColour(rank int) string {
 	switch {
-	case rank >= agentnotify.RankBlockedOnYou:
+	case rank >= session.RankBlockedOnYou:
 		return base08
-	case rank >= agentnotify.RankBroke:
+	case rank >= session.RankBroke:
 		return base09
-	case rank >= agentnotify.RankFinishedATurn:
+	case rank >= session.RankFinishedATurn:
 		return base0C
-	case rank >= agentnotify.RankWorking:
+	case rank >= session.RankWorking:
 		return base14
-	case rank >= agentnotify.RankIdle:
+	case rank >= session.RankIdle:
 		return base04
 	}
 	return base03
@@ -141,18 +141,18 @@ func StateColour(rank int) string {
 // rather than instead of it — a glyph-only column was tried, with a legend
 // above the list, and the legend read as a sixth row while three identical
 // speech bubbles still had to be looked up.
-var Glyphs = map[agentnotify.Kernel]string{
-	agentnotify.BlockedOnYou:  "", // warning triangle
-	agentnotify.Broke:         "", // a cross
-	agentnotify.FinishedATurn: "", // speech bubble
-	agentnotify.Working:       "", // circular arrows
-	agentnotify.Idle:          "", // a dot
-	agentnotify.Ended:         "", // a hollow dot
+var Glyphs = map[session.Kernel]string{
+	session.BlockedOnYou:  "", // warning triangle
+	session.Broke:         "", // a cross
+	session.FinishedATurn: "", // speech bubble
+	session.Working:       "", // circular arrows
+	session.Idle:          "", // a dot
+	session.Ended:         "", // a hollow dot
 }
 
 // Glyph is the mark for a state, falling back to a dot for a kernel this build
 // has never met — which is what the rank on the wire is for (§A5.5, R21).
-func Glyph(record agentnotify.Record) string {
+func Glyph(record session.Record) string {
 	if mark, known := Glyphs[record.Kernel]; known {
 		return mark
 	}
@@ -162,11 +162,11 @@ func Glyph(record agentnotify.Record) string {
 // short is the row's word for a kernel: core's own, except where core's own is
 // a sentence. "blocked-on-you" and "finished-a-turn" are exactly right on the
 // wire and too wide to repeat down a column beside a detail.
-func short(kernel agentnotify.Kernel) string {
+func short(kernel session.Kernel) string {
 	switch kernel {
-	case agentnotify.BlockedOnYou:
+	case session.BlockedOnYou:
 		return "blocked"
-	case agentnotify.FinishedATurn:
+	case session.FinishedATurn:
 		return "finished"
 	}
 	return string(kernel)

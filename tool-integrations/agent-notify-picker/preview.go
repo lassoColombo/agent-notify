@@ -10,7 +10,7 @@ import (
 	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // previewOf is this program run again by fzf, once per row somebody looks at,
@@ -21,10 +21,10 @@ import (
 // it is the only way the pane can show history, which is read on demand, for
 // one session, and never delivered with a delta (§A7.7).
 func previewOf(arguments []string) int {
-	return oneSession(arguments, func(record agentnotify.Record) string {
+	return oneSession(arguments, func(record session.Record) string {
 		history, err := me.History(record.Key)
 		if err != nil {
-			history = agentnotify.History{}
+			history = session.History{}
 		}
 		return Preview(record, history, now(), previewWidth())
 	})
@@ -40,7 +40,7 @@ func previewOf(arguments []string) int {
 // them, and a reader who has just moved the cursor does not need to be told
 // twice where the cursor is.
 func labelOf(arguments []string) int {
-	return oneSession(arguments, func(record agentnotify.Record) string {
+	return oneSession(arguments, func(record session.Record) string {
 		return " " + Label(record, now()) + " "
 	})
 }
@@ -48,11 +48,11 @@ func labelOf(arguments []string) int {
 // oneSession finds the record a key names and prints what is asked of it. A
 // key that no longer names anything is a session that ended between the
 // keypress and the read, which is ordinary and not an error.
-func oneSession(arguments []string, render func(agentnotify.Record) string) int {
+func oneSession(arguments []string, render func(session.Record) string) int {
 	if len(arguments) == 0 {
 		return 2
 	}
-	key, err := agentnotify.ParseKey(arguments[0])
+	key, err := session.ParseKey(arguments[0])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
@@ -90,11 +90,11 @@ func previewWidth() int {
 // facts here, on the grounds that the facts block below can be off the bottom
 // of a pane an eighty-line message has pushed down. Both numbers are gone from
 // the record, and nothing in the chrome replaced them.
-func Label(record agentnotify.Record, at time.Time) string {
+func Label(record session.Record, at time.Time) string {
 	return strings.Join([]string{
 		Text.Render(fit(record.DisplayName(), widestName)),
 		StateStyle(record.Rank).Render(record.State()),
-		Subtle.Render(agentnotify.Ago(record.Elapsed(at))),
+		Subtle.Render(session.Ago(record.Elapsed(at))),
 	}, Rule.Render(" · "))
 }
 
@@ -111,7 +111,7 @@ func Label(record agentnotify.Record, at time.Time) string {
 // It is handed its history rather than fetching it, so that what it renders is
 // a function of what it was given.
 func Preview(
-	record agentnotify.Record, history agentnotify.History, at time.Time, width int,
+	record session.Record, history session.History, at time.Time, width int,
 ) string {
 	var parts []string
 
@@ -172,7 +172,7 @@ func FactBlock(facts []Fact, width int) string {
 // tidiness: a zero token count almost always means an agent-integration that
 // does not report usage, and printing "0 tokens" would state as a fact
 // something nobody measured (§A7.4.3).
-func Facts(record agentnotify.Record) []Fact {
+func Facts(record session.Record) []Fact {
 	var facts []Fact
 
 	if Home(record.Cwd) != "" {
@@ -232,7 +232,7 @@ func Markdowned(message string, width int) string {
 // Both halves are bounded by count where they are written (§A7.7), so this
 // prints what it is given and never decides how much to keep.
 func Earlier(
-	record agentnotify.Record, history agentnotify.History, at time.Time, width int,
+	record session.Record, history session.History, at time.Time, width int,
 ) []string {
 	type moment struct {
 		when time.Time
@@ -274,7 +274,7 @@ func Earlier(
 	for _, one := range moments {
 		ago := "now"
 		if !one.when.IsZero() && at.After(one.when) {
-			ago = agentnotify.Ago(at.Sub(one.when))
+			ago = session.Ago(at.Sub(one.when))
 		}
 		// One line each, cut rather than wrapped. This is a timeline, not a
 		// transcript: an agent's last-but-one message can be four hundred

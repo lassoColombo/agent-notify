@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
 	"github.com/lassoColombo/agent-notify/internal/process"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // invented is a machine that does not exist, which is the point: every rule in
@@ -158,7 +158,7 @@ func TestTheDecisionTable(t *testing.T) {
 
 	cases := []struct {
 		name    string
-		record  agentnotify.Record
+		record  session.Record
 		boot    string
 		machine process.ReadsProcessFacts
 		want    process.Verdict
@@ -219,21 +219,21 @@ func TestEndedFindsWhatNobodyAnnounced(t *testing.T) {
 	}}
 
 	live := recordFor(500, started, boot)
-	live.Key = agentnotify.Key{Host: "mac", Agent: "claude", SessionID: "live"}
+	live.Key = session.Key{Host: "mac", Agent: "claude", SessionID: "live"}
 	live.UpdatedAt = started.Add(time.Hour)
 
 	killed := recordFor(999, started, boot)
-	killed.Key = agentnotify.Key{Host: "mac", Agent: "claude", SessionID: "killed"}
+	killed.Key = session.Key{Host: "mac", Agent: "claude", SessionID: "killed"}
 
 	closed := recordFor(500, started, boot)
-	closed.Key = agentnotify.Key{Host: "mac", Agent: "claude", SessionID: "cleared"}
+	closed.Key = session.Key{Host: "mac", Agent: "claude", SessionID: "cleared"}
 	closed.UpdatedAt = started // older than live, same process: /clear happened
 
 	already := recordFor(500, started, boot)
-	already.Key = agentnotify.Key{Host: "mac", Agent: "claude", SessionID: "already"}
-	already.Kernel = agentnotify.Ended
+	already.Key = session.Key{Host: "mac", Agent: "claude", SessionID: "already"}
+	already.Kernel = session.Ended
 
-	ending := process.Ended([]agentnotify.Record{live, killed, closed, already}, boot, machine.self, machine)
+	ending := process.Ended([]session.Record{live, killed, closed, already}, boot, machine.self, machine)
 
 	found := map[string]string{}
 	for _, end := range ending {
@@ -262,18 +262,18 @@ func TestASnapshotThatCannotSeeUsIsNotASnapshot(t *testing.T) {
 		500: {PID: 500, StartedAt: started},
 	}}
 	killed := recordFor(999, started, boot)
-	killed.Key = agentnotify.Key{Host: "mac", Agent: "claude", SessionID: "killed"}
+	killed.Key = session.Key{Host: "mac", Agent: "claude", SessionID: "killed"}
 
-	if ending := process.Ended([]agentnotify.Record{killed}, boot, blind.self, blind); len(ending) != 0 {
+	if ending := process.Ended([]session.Record{killed}, boot, blind.self, blind); len(ending) != 0 {
 		t.Errorf("ended %d sessions on a machine that cannot see this process", len(ending))
 	}
 }
 
-func recordFor(pid int, startedAt time.Time, bootID string) agentnotify.Record {
-	return agentnotify.Record{
-		Key:    agentnotify.Key{Host: "mac", Agent: "claude", SessionID: "s"},
-		Kernel: agentnotify.Working,
-		Process: agentnotify.Process{
+func recordFor(pid int, startedAt time.Time, bootID string) session.Record {
+	return session.Record{
+		Key:    session.Key{Host: "mac", Agent: "claude", SessionID: "s"},
+		Kernel: session.Working,
+		Process: session.Process{
 			PID: pid, StartedAt: startedAt, BootID: bootID,
 		},
 	}

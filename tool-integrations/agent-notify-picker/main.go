@@ -34,7 +34,7 @@ import (
 	fzf "github.com/junegunn/fzf/src"
 	"golang.org/x/term"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
@@ -128,8 +128,8 @@ func run(arguments []string, complaints []string) int {
 // chooseOne runs fzf over the sessions and answers with the one that was
 // picked, or nil.
 func chooseOne(
-	sessions []agentnotify.Record, all bool, complaints []string,
-) (*agentnotify.Record, int) {
+	sessions []session.Record, all bool, complaints []string,
+) (*session.Record, int) {
 	me, err := os.Executable()
 	if err != nil {
 		me = "agent-notify-picker"
@@ -256,7 +256,7 @@ func terminalHeight() int {
 // would be one that disagrees with the bar beside it. Its output is left on the
 // terminal on purpose: a jump that fails says why, in the words the container
 // that refused it wrote.
-func jump(record agentnotify.Record) int {
+func jump(record session.Record) int {
 	core, err := me.CoreBinary()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %v\n", Name, err)

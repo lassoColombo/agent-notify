@@ -1,7 +1,7 @@
 package process
 
 import (
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // Verdict is what can be said about a session's process. Three values, not two,
@@ -34,7 +34,7 @@ func (v Verdict) String() string {
 // The reboot rule comes first and probes nothing: pids from a previous boot
 // either do not exist or belong to something else entirely, so a machine that
 // has restarted would otherwise show ghosts forever (§A8.3).
-func LivenessOf(record agentnotify.Record, boot string, prober ReadsProcessFacts) Verdict {
+func LivenessOf(record session.Record, boot string, prober ReadsProcessFacts) Verdict {
 	if record.Process.PID <= 0 {
 		// A record with no process can never be proved dead. That is the right
 		// answer and not a gap: it is what the lease is for, one day (§A8.5).
@@ -60,7 +60,7 @@ func LivenessOf(record agentnotify.Record, boot string, prober ReadsProcessFacts
 // Ending is one session that has ended without anyone saying so, and why. The
 // reason becomes the detail on the `ended` kernel (§A5.6).
 type Ending struct {
-	Key    agentnotify.Key
+	Key    session.Key
 	Detail string
 }
 
@@ -82,7 +82,7 @@ const (
 // `self` is the caller's own pid, passed in rather than read here so that this
 // stays a function of its arguments and nothing else.
 func Ended(
-	records []agentnotify.Record, boot string, self int, prober ReadsProcessFacts,
+	records []session.Record, boot string, self int, prober ReadsProcessFacts,
 ) []Ending {
 	// The rail that makes every verdict below meaningful: if the prober cannot
 	// see the process asking, it is not looking at this machine, and nothing it
@@ -92,9 +92,9 @@ func Ended(
 		return nil
 	}
 
-	judgeable := make([]agentnotify.Record, 0, len(records))
+	judgeable := make([]session.Record, 0, len(records))
 	for _, record := range records {
-		if record.Kernel == agentnotify.Ended || record.Process.PID <= 0 {
+		if record.Kernel == session.Ended || record.Process.PID <= 0 {
 			continue
 		}
 		judgeable = append(judgeable, record)
@@ -120,7 +120,7 @@ func Ended(
 	return ending
 }
 
-func supersededBy(record agentnotify.Record, others []agentnotify.Record) bool {
+func supersededBy(record session.Record, others []session.Record) bool {
 	for _, other := range others {
 		if other.Key == record.Key {
 			continue

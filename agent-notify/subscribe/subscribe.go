@@ -32,11 +32,11 @@ import (
 	"net"
 	"time"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
 	"github.com/lassoColombo/agent-notify/internal/config"
 	"github.com/lassoColombo/agent-notify/internal/core"
 	"github.com/lassoColombo/agent-notify/internal/paths"
-	"github.com/lassoColombo/agent-notify/internal/watcher"
+	"github.com/lassoColombo/agent-notify/internal/sessionwatcher"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // Integration is what an author fills in.
@@ -71,7 +71,7 @@ type Integration struct {
 type View struct {
 	// Sessions is everything, most urgent first, already ordered by the rule
 	// every display would otherwise write for itself (R24).
-	Sessions []agentnotify.Record
+	Sessions []session.Record
 	// Changed is what moved since the last call, most urgent first. A renderer
 	// ignores it; a notifier reads it and nothing else.
 	//
@@ -103,16 +103,16 @@ type View struct {
 // change missing.
 type Change struct {
 	// Record is the session as it now stands.
-	Record agentnotify.Record
+	Record session.Record
 	// PreviousKernel is the kernel this subscriber last saw it in, in the
-	// vocabulary [agentnotify.Delta] uses for the same fact. It is empty for a
+	// vocabulary [session.Delta] uses for the same fact. It is empty for a
 	// session this subscriber has never seen before, which is not a transition
 	// at all — it is an arrival.
 	//
 	// `PreviousKernel == Record.Kernel` is the ordinary case and means
 	// something other than the state moved: a new message, a rename, a fresh
 	// token count. A notifier skips those; a preview pane wants them.
-	PreviousKernel agentnotify.Kernel
+	PreviousKernel session.Kernel
 	// Event is what the agent-integration reported, when this change arrived
 	// as a delta and something reported it.
 	//
@@ -121,7 +121,7 @@ type Change struct {
 	// no event (D-12 — death and supersession), and a change first seen in a
 	// snapshot was never accompanied by one. PreviousKernel is the field to
 	// reason from; this one is for saying why out loud.
-	Event agentnotify.Event
+	Event session.Event
 }
 
 // Refused is what a version mismatch returns, and it is permanent.
@@ -151,7 +151,7 @@ func Run(ctx context.Context, integration Integration) error {
 	// record, so it knows exactly which names its author can use, where a
 	// watcher one version behind cannot tell a typo from a field the record
 	// has since gained (D-70).
-	if err := agentnotify.ReasonTheseFieldsCannotBeWokenOn(integration.WakeOn); err != nil {
+	if err := session.ReasonTheseFieldsCannotBeWokenOn(integration.WakeOn); err != nil {
 		return fmt.Errorf("%s: %w", integration.Name, err)
 	}
 	logger := integration.Logger
@@ -164,7 +164,7 @@ func Run(ctx context.Context, integration Integration) error {
 		return err
 	}
 
-	holding := &held{sessions: map[string]agentnotify.Record{}}
+	holding := &held{sessions: map[string]session.Record{}}
 
 	wait := 50 * time.Millisecond
 	for ctx.Err() == nil {
@@ -217,7 +217,7 @@ func (i Integration) layout() (paths.Layout, error) {
 // A notifier written to the documented contract would therefore post a banner
 // per live agent every time the daemon came back.
 type held struct {
-	sessions map[string]agentnotify.Record
+	sessions map[string]session.Record
 	// shown is false until a view has been handed over. The first one carries
 	// no changes: "since the last call" is nothing when there was no last call.
 	shown bool
@@ -236,7 +236,7 @@ func attach(
 		// is exactly the case the design names (§A9.2). The lock makes the race
 		// with every other starter harmless.
 		settings, _ := config.Load(layout.ConfigFile)
-		if starting := watcher.StartIfNobodyIs(layout, settings.AgentNotifyBinary); starting != nil {
+		if starting := sessionwatcher.StartIfNobodyIs(layout, settings.AgentNotifyBinary); starting != nil {
 			return fmt.Errorf("no session-watcher, and cannot start one: %w", starting)
 		}
 		return err
@@ -248,8 +248,8 @@ func attach(
 		_ = connection.Close()
 	}()
 
-	hello, err := json.Marshal(agentnotify.Hello{
-		Kind: agentnotify.KindHello, Name: integration.Name, Version: agentnotify.Version,
+	hello, err := json.Marshal(session.Hello{
+		Kind: session.KindHello, Name: integration.Name, Version: session.Version,
 		Roles: integration.Roles, WakeOn: integration.WakeOn,
 		WantEnded: integration.WantEnded,
 	})
@@ -275,24 +275,24 @@ func attach(
 			return err
 		}
 
-		kind, err := agentnotify.KindOf(line)
+		kind, err := session.KindOf(line)
 		if err != nil {
 			logger.Warn("unreadable message", "problem", err.Error())
 			continue
 		}
 
 		switch kind {
-		case agentnotify.KindRefused:
-			var refused agentnotify.Refused
+		case session.KindRefused:
+			var refused session.Refused
 			_ = json.Unmarshal(line, &refused)
 			return &Refused{Reason: refused.Reason}
 
-		case agentnotify.KindWelcome:
+		case session.KindWelcome:
 			welcomed = true
 			logger.Info("connected", "as", integration.Name)
 
-		case agentnotify.KindSnapshot:
-			var snapshot agentnotify.Snapshot
+		case session.KindSnapshot:
+			var snapshot session.Snapshot
 			if err := json.Unmarshal(line, &snapshot); err != nil {
 				logger.Warn("unreadable snapshot", "problem", err.Error())
 				continue
@@ -302,14 +302,14 @@ func attach(
 			changed := replaceAll(holding, snapshot.Sessions, integration.WakeOn)
 			deliver(integration, logger, holding, changed, "snapshot")
 
-		case agentnotify.KindDelta:
-			var delta agentnotify.Delta
+		case session.KindDelta:
+			var delta session.Delta
 			if err := json.Unmarshal(line, &delta); err != nil {
 				logger.Warn("unreadable delta", "problem", err.Error())
 				continue
 			}
 			key := delta.Session.Key.String()
-			if !integration.WantEnded && delta.Session.Kernel == agentnotify.Ended {
+			if !integration.WantEnded && delta.Session.Kernel == session.Ended {
 				// It ended, and this subscriber said it did not want ended
 				// sessions. It leaves the view now rather than sitting in it
 				// until the store prunes it days later, so that WantEnded
@@ -340,8 +340,8 @@ func attach(
 				Event:          delta.Event,
 			}}, "delta")
 
-		case agentnotify.KindGone:
-			var gone agentnotify.Gone
+		case session.KindGone:
+			var gone session.Gone
 			if err := json.Unmarshal(line, &gone); err != nil {
 				continue
 			}
@@ -363,7 +363,7 @@ func attach(
 //
 // It compares on the fields the subscriber asked to be woken for, which is the
 // same rule the session-watcher applies before it sends a delta at all
-// (internal/watcher, Subscribers.Publish). Comparing on everything here instead
+// (internal/sessionwatcher, Subscribers.Publish). Comparing on everything here instead
 // meant the two ends of one field disagreed about what "changed" means: a
 // display that declared `wake_on = ["kernel"]` is never woken by a new message,
 // and used to find one in Changed anyway if it arrived while disconnected.
@@ -371,15 +371,15 @@ func attach(
 // The previous kernel is carried out with each one. A snapshot says nothing
 // about how a session got where it is, but a subscriber that has been shown a
 // view before knows what it last saw, and that is the same fact.
-func replaceAll(holding *held, fresh []agentnotify.Record, wakeOn []string) []Change {
-	was := make(map[string]agentnotify.Kernel, len(fresh))
-	var moved []agentnotify.Record
+func replaceAll(holding *held, fresh []session.Record, wakeOn []string) []Change {
+	was := make(map[string]session.Kernel, len(fresh))
+	var moved []session.Record
 	arrived := make(map[string]bool, len(fresh))
 
 	for _, record := range fresh {
 		key := record.Key.String()
 		arrived[key] = true
-		if previous, have := holding.sessions[key]; !have || agentnotify.Differs(previous, record, wakeOn) {
+		if previous, have := holding.sessions[key]; !have || session.Differs(previous, record, wakeOn) {
 			was[key] = previous.Kernel
 			moved = append(moved, record)
 		}
@@ -393,7 +393,7 @@ func replaceAll(holding *held, fresh []agentnotify.Record, wakeOn []string) []Ch
 
 	// Ordered here, while these are still records, so that the one urgency
 	// rule does the work rather than a second spelling of it (R24).
-	agentnotify.ByUrgency(moved)
+	session.ByUrgency(moved)
 	changed := make([]Change, 0, len(moved))
 	for _, record := range moved {
 		changed = append(changed, Change{Record: record, PreviousKernel: was[record.Key.String()]})
@@ -405,11 +405,11 @@ func deliver(
 	integration Integration, logger *slog.Logger,
 	holding *held, changed []Change, why string,
 ) {
-	all := make([]agentnotify.Record, 0, len(holding.sessions))
+	all := make([]session.Record, 0, len(holding.sessions))
 	for _, record := range holding.sessions {
 		all = append(all, record)
 	}
-	agentnotify.ByUrgency(all)
+	session.ByUrgency(all)
 
 	if !holding.shown {
 		// The first view is the world arriving, not the world moving. Every
@@ -440,7 +440,7 @@ func deliver(
 // filing it (D-30). An integration that had to do that for itself would be the
 // second implementation of it, and the two would disagree about somebody's
 // screen (R24).
-func (i Integration) Read() ([]agentnotify.Record, error) {
+func (i Integration) Read() ([]session.Record, error) {
 	return i.read(false)
 }
 
@@ -450,11 +450,11 @@ func (i Integration) Read() ([]agentnotify.Record, error) {
 // It is a separate method rather than a flag because the two callers are
 // different things: a bar asks the first question and a picker asks the
 // second, whose entire job is offering you something to resume (§A7.5).
-func (i Integration) ReadIncludingEnded() ([]agentnotify.Record, error) {
+func (i Integration) ReadIncludingEnded() ([]session.Record, error) {
 	return i.read(true)
 }
 
-func (i Integration) read(includeEnded bool) ([]agentnotify.Record, error) {
+func (i Integration) read(includeEnded bool) ([]session.Record, error) {
 	layout, err := i.layout()
 	if err != nil {
 		return nil, err
@@ -478,14 +478,14 @@ func (i Integration) read(includeEnded bool) ([]agentnotify.Record, error) {
 //
 // A session with nothing recorded yet is an empty History and no error, which
 // is the ordinary case for one that has only just started.
-func (i Integration) History(key agentnotify.Key) (agentnotify.History, error) {
+func (i Integration) History(key session.Key) (session.History, error) {
 	layout, err := i.layout()
 	if err != nil {
-		return agentnotify.History{}, err
+		return session.History{}, err
 	}
 	opened, err := core.OpenAt(layout, "subscribe")
 	if err != nil {
-		return agentnotify.History{}, err
+		return session.History{}, err
 	}
 	defer opened.Close()
 

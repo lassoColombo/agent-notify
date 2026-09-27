@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // TestTheMarkIsDrawnInTheStatesColour, which is the whole point of it: a banner
@@ -16,7 +16,7 @@ func TestTheMarkIsDrawnInTheStatesColour(t *testing.T) {
 		t.Skip("nothing to draw with here")
 	}
 	marks := &InvaderPNGs{Size: 128, Directory: t.TempDir()}
-	path := marks.PathOfTheInvaderDrawnIn(DefaultColours[agentnotify.BlockedOnYou])
+	path := marks.PathOfTheInvaderDrawnIn(DefaultColours[session.BlockedOnYou])
 	if path == "" {
 		t.Fatal("no mark was drawn")
 	}

@@ -9,7 +9,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // AgentName is what every record this writes says it is, and what the user's
@@ -91,15 +91,15 @@ type Payload struct {
 // call instead of waiting for one that happens to be special.
 //
 // The bool is false for a hook that should be reported as nothing at all.
-func Translate(payload Payload, whatCodexCallsIt string, spent Spending) (agentnotify.Report, bool) {
+func Translate(payload Payload, whatCodexCallsIt string, spent Spending) (session.Report, bool) {
 	hook := payload.HookEventName
 	if payload.SessionID == "" {
 		// Nothing can be written about a session nobody can name.
-		return agentnotify.Report{}, false
+		return session.Report{}, false
 	}
 
-	report := agentnotify.Report{
-		Key:  agentnotify.Key{Agent: AgentName, SessionID: payload.SessionID},
+	report := session.Report{
+		Key:  session.Key{Agent: AgentName, SessionID: payload.SessionID},
 		Name: whatCodexCallsIt,
 		Cwd:  payload.Cwd,
 		// The model comes off the payload, which carries it on every hook, and
@@ -124,16 +124,16 @@ func Translate(payload Payload, whatCodexCallsIt string, spent Spending) (agentn
 		// indistinguishable in kind on one bar: a codex session reading
 		// `idle/startup` beside a claude one reading `idle` would be a
 		// difference with nothing behind it.
-		report.Event = agentnotify.SessionStarted
+		report.Event = session.SessionStarted
 
 	case "UserPromptSubmit":
-		report.Event = agentnotify.UserSentPrompt
+		report.Event = session.UserSentPrompt
 		report.Message = said(payload.Prompt)
 
 	case "PostToolUse":
 		// Hundreds a turn. Saying the same thing every time is what lets the
 		// session-watcher coalesce them into one render.
-		report.Event = agentnotify.AgentProgressed
+		report.Event = session.AgentProgressed
 
 	case "PermissionRequest":
 		// The one moment codex genuinely needs you, and the only hook here that
@@ -144,12 +144,12 @@ func Translate(payload Payload, whatCodexCallsIt string, spent Spending) (agentn
 		//
 		// It clears itself: approving runs the tool, and the PostToolUse behind
 		// it says working again.
-		report.Event = agentnotify.BlockedOnHuman
+		report.Event = session.BlockedOnHuman
 		report.Detail = "permission-prompt"
 		report.Message = said(whatNeedsApproving(payload))
 
 	case "Stop":
-		report.Event = agentnotify.TurnFinished
+		report.Event = session.TurnFinished
 		if payload.LastAssistantMessage != nil {
 			report.Message = said(*payload.LastAssistantMessage)
 		}
@@ -163,15 +163,15 @@ func Translate(payload Payload, whatCodexCallsIt string, spent Spending) (agentn
 		//
 		// It carries no message, because codex sends none and the person who
 		// pressed Esc knows why they pressed it.
-		report.Event = agentnotify.TurnInterrupted
+		report.Event = session.TurnInterrupted
 		report.Detail = "interrupted"
 
 	case "SessionEnd":
-		report.Event = agentnotify.SessionEnded
+		report.Event = session.SessionEnded
 		report.Detail = endedBecause(payload.Reason)
 
 	default:
-		return agentnotify.Report{}, false
+		return session.Report{}, false
 	}
 	return report, true
 }

@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
 	"github.com/lassoColombo/agent-notify/container"
 	"github.com/lassoColombo/agent-notify/internal/config"
 	"github.com/lassoColombo/agent-notify/internal/containers"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // fake writes a program that answers whatever this test needs it to.
@@ -49,11 +49,11 @@ func settingsWith(order []string, integrations map[string]config.Integration) co
 	return settings
 }
 
-func placed(coordinates map[string]json.RawMessage) agentnotify.Record {
-	return agentnotify.Record{
-		Key:            agentnotify.Key{Host: "mac", Agent: "claude", SessionID: "s1"},
+func placed(coordinates map[string]json.RawMessage) session.Record {
+	return session.Record{
+		Key:            session.Key{Host: "mac", Agent: "claude", SessionID: "s1"},
 		Name:           "thing",
-		Kernel:         agentnotify.Working,
+		Kernel:         session.Working,
 		DerivedContext: coordinates,
 	}
 }

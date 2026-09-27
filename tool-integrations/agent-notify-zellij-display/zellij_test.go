@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
@@ -34,9 +34,9 @@ func realZellij(t *testing.T) Zellij {
 	return Zellij{Binary: binary, Timeout: 5 * time.Second}
 }
 
-// session brings up a detached zellij with two panes in it and returns their
+// zellijSession brings up a detached zellij with two panes in it and returns their
 // ids, having taken them out of whatever layout the machine's default produced.
-func session(t *testing.T, zellij Zellij) (string, int, int) {
+func zellijSession(t *testing.T, zellij Zellij) (string, int, int) {
 	t.Helper()
 	name := fmt.Sprintf("an-test-%d", os.Getpid())
 
@@ -175,7 +175,7 @@ func TestAMissingSessionFails(t *testing.T) {
 
 func TestPaintingARealZellij(t *testing.T) {
 	zellij := realZellij(t)
-	name, first, second := session(t, zellij)
+	name, first, second := zellijSession(t, zellij)
 	tab := tabOf(t, zellij, name, first)
 
 	_, before := titles(t, zellij, name)
@@ -184,10 +184,10 @@ func TestPaintingARealZellij(t *testing.T) {
 	display := &Display{Zellij: zellij, Glyphs: testGlyphs,
 		Logger: slog.New(slog.DiscardHandler)}
 
-	working := placed("alpha", agentnotify.Working, name, first)
-	blocked := placed("beta", agentnotify.BlockedOnYou, name, second)
+	working := placed("alpha", session.Working, name, first)
+	blocked := placed("beta", session.BlockedOnYou, name, second)
 
-	if err := display.Render(subscribe.View{Sessions: []agentnotify.Record{working, blocked}}); err != nil {
+	if err := display.Render(subscribe.View{Sessions: []session.Record{working, blocked}}); err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 	panes, tabs := titles(t, zellij, name)
@@ -203,8 +203,8 @@ func TestPaintingARealZellij(t *testing.T) {
 
 	// The blocked one is answered and goes back to work. The tab follows the
 	// aggregate down, which is the half of max(rank) that is easy to get wrong.
-	answered := placed("beta", agentnotify.Working, name, second)
-	if err := display.Render(subscribe.View{Sessions: []agentnotify.Record{working, answered}}); err != nil {
+	answered := placed("beta", session.Working, name, second)
+	if err := display.Render(subscribe.View{Sessions: []session.Record{working, answered}}); err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 	_, tabs = titles(t, zellij, name)
@@ -214,8 +214,8 @@ func TestPaintingARealZellij(t *testing.T) {
 
 	// One ends. Its pane is handed back — to zellij's own title, not to a
 	// leftover of ours — and the tab keeps the other one's glyph.
-	ended := placed("beta", agentnotify.Ended, name, second)
-	if err := display.Render(subscribe.View{Sessions: []agentnotify.Record{working, ended}}); err != nil {
+	ended := placed("beta", session.Ended, name, second)
+	if err := display.Render(subscribe.View{Sessions: []session.Record{working, ended}}); err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 	panes, tabs = titles(t, zellij, name)
@@ -227,8 +227,8 @@ func TestPaintingARealZellij(t *testing.T) {
 	}
 
 	// Both end: the tab is the user's again, exactly as it was.
-	done := placed("alpha", agentnotify.Ended, name, first)
-	if err := display.Render(subscribe.View{Sessions: []agentnotify.Record{done, ended}}); err != nil {
+	done := placed("alpha", session.Ended, name, first)
+	if err := display.Render(subscribe.View{Sessions: []session.Record{done, ended}}); err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 	_, tabs = titles(t, zellij, name)
@@ -242,9 +242,9 @@ func TestPaintingARealZellij(t *testing.T) {
 // called on every change: a render is the difference, not the state.
 func TestRenderingTwiceRunsNothingTheSecondTime(t *testing.T) {
 	zellij := realZellij(t)
-	name, first, _ := session(t, zellij)
+	name, first, _ := zellijSession(t, zellij)
 
-	records := []agentnotify.Record{placed("alpha", agentnotify.Working, name, first)}
+	records := []session.Record{placed("alpha", session.Working, name, first)}
 	display := &Display{Zellij: zellij, Glyphs: testGlyphs, Logger: slog.New(slog.DiscardHandler)}
 	if err := display.Render(subscribe.View{Sessions: records}); err != nil {
 		t.Fatalf("Render: %v", err)
@@ -264,7 +264,7 @@ func TestRenderingTwiceRunsNothingTheSecondTime(t *testing.T) {
 // real fan-out, the real subscriber lifecycle, the real render function.
 func TestPanesCarryLiveStateGlyphs(t *testing.T) {
 	zellij := realZellij(t)
-	name, first, second := session(t, zellij)
+	name, first, second := zellijSession(t, zellij)
 
 	root, err := os.MkdirTemp("/tmp", "an-zellij")
 	if err != nil {
@@ -289,25 +289,25 @@ func TestPanesCarryLiveStateGlyphs(t *testing.T) {
 	})
 	waitUntil(t, "the display connects", func() bool { return len(fake.Connected()) == 1 })
 
-	fake.Publish(placed("alpha", agentnotify.Working, name, first))
+	fake.Publish(placed("alpha", session.Working, name, first))
 	waitUntil(t, "the pane to say it is working", func() bool {
 		panes, _ := titles(t, zellij, name)
 		return panes[first] == "* alpha"
 	})
 
-	fake.Publish(placed("alpha", agentnotify.BlockedOnYou, name, first))
+	fake.Publish(placed("alpha", session.BlockedOnYou, name, first))
 	waitUntil(t, "the pane to say it is blocked", func() bool {
 		panes, _ := titles(t, zellij, name)
 		return panes[first] == "! alpha"
 	})
 
-	fake.Publish(placed("beta", agentnotify.FinishedATurn, name, second))
+	fake.Publish(placed("beta", session.FinishedATurn, name, second))
 	waitUntil(t, "the second pane", func() bool {
 		panes, _ := titles(t, zellij, name)
 		return panes[second] == "> beta"
 	})
 
-	fake.Publish(placed("alpha", agentnotify.Ended, name, first))
+	fake.Publish(placed("alpha", session.Ended, name, first))
 	waitUntil(t, "the first pane to be handed back", func() bool {
 		panes, _ := titles(t, zellij, name)
 		return panes[first] != "! alpha"

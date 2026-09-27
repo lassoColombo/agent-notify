@@ -211,7 +211,7 @@ git clone git@github.com:lassoColombo/agent-notify.git ~/projects/agent-notify
 cd ~/projects/agent-notify
 
 # core first — the CLI everything else talks to
-go -C agent-notify build -o /opt/homebrew/bin/agent-notify ./cmd/agent-notify
+go -C agent-notify build -o /opt/homebrew/bin/agent-notify .
 
 # then this display
 go -C tool-integrations/agent-notify-macos-bar build -o /opt/homebrew/bin/agent-notify-macos-bar .

@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -46,13 +46,13 @@ type Config struct {
 	//
 	// It is also the only duration left in this file, and it is written the way
 	// a person writes one: "168h" is the week it defaults to, "30m" is half an
-	// hour (agentnotify.Duration, D-78). Everything else that was once configurable
+	// hour (session.Duration, D-78). Everything else that was once configurable
 	// here was a timeout, an interval or a lock wait — mechanism rather than
 	// preference — and mechanism now lives as a named constant beside the code
 	// it bounds. R18 is satisfied the same way it always was: every duration
 	// has a name and a defined behaviour on expiry; the name is simply in the
 	// source now rather than in the file.
-	KeepEndedSessions agentnotify.Duration `toml:"keep-ended-sessions"`
+	KeepEndedSessions session.Duration `toml:"keep-ended-sessions"`
 
 	// HistoryMessages and HistoryChanges bound the per-session history by
 	// count, not by time (§A7.7). Zero keeps none, which §A15 requires to be
@@ -156,7 +156,7 @@ type Container struct {
 // because a package-level map is a package-level map somebody will mutate.
 func Defaults() Config {
 	return Config{
-		KeepEndedSessions: agentnotify.NewDuration(7 * 24 * time.Hour),
+		KeepEndedSessions: session.NewDuration(7 * 24 * time.Hour),
 		IntegrationTries:  5,
 		HistoryMessages:   20,
 		HistoryChanges:    100,

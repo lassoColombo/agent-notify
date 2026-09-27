@@ -7,24 +7,24 @@ import (
 	"testing"
 	"time"
 
-	agentnotify "github.com/lassoColombo/agent-notify"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // The glyphs under test are ASCII, on purpose: what is being asserted is the
 // shape of the plan, and a test that carries private-use codepoints around in
 // its own expectations proves nothing about the ones that ship.
-var testGlyphs = agentnotify.NewPalette(map[agentnotify.Kernel]string{
-	agentnotify.BlockedOnYou:  "!",
-	agentnotify.Broke:         "x",
-	agentnotify.FinishedATurn: ">",
-	agentnotify.Working:       "*",
-	agentnotify.Idle:          "",
-	agentnotify.Ended:         "",
+var testGlyphs = session.NewPalette(map[session.Kernel]string{
+	session.BlockedOnYou:  "!",
+	session.Broke:         "x",
+	session.FinishedATurn: ">",
+	session.Working:       "*",
+	session.Idle:          "",
+	session.Ended:         "",
 }, nil)
 
 var nine = time.Date(2026, 9, 18, 9, 0, 0, 0, time.UTC)
 
-func placed(name string, kernel agentnotify.Kernel, zellijSession string, pane int) agentnotify.Record {
+func placed(name string, kernel session.Kernel, zellijSession string, pane int) session.Record {
 	blob, err := json.Marshal(map[string]string{
 		sessionVariable: zellijSession,
 		paneVariable:    fmt.Sprint(pane),
@@ -32,13 +32,13 @@ func placed(name string, kernel agentnotify.Kernel, zellijSession string, pane i
 	if err != nil {
 		panic(err)
 	}
-	return agentnotify.Record{
-		Key:        agentnotify.Key{Host: "mac", Agent: "claude", SessionID: name},
+	return session.Record{
+		Key:        session.Key{Host: "mac", Agent: "claude", SessionID: name},
 		Name:       name,
 		Kernel:     kernel,
 		Rank:       kernel.Rank(),
 		StateSince: nine,
-		CapturedContext: agentnotify.CapturedContext{
+		CapturedContext: session.CapturedContext{
 			CapturedAt: nine,
 			By:         map[string]json.RawMessage{Name: blob},
 		},
@@ -75,7 +75,7 @@ func same(t *testing.T, got, want []string) {
 
 func TestAPaneAndItsTabCarryTheState(t *testing.T) {
 	plan := Plan("home",
-		[]agentnotify.Record{placed("monomodules", agentnotify.Working, "home", 3)},
+		[]session.Record{placed("monomodules", session.Working, "home", 3)},
 		[]Pane{pane(3, "~", 1, "root"), pane(0, "notes", 0, "notes")},
 		testGlyphs)
 
@@ -89,7 +89,7 @@ func TestAPaneAndItsTabCarryTheState(t *testing.T) {
 // enough to do on every change: the plan is the difference, not the state.
 func TestNothingIsRunWhenNothingMoved(t *testing.T) {
 	plan := Plan("home",
-		[]agentnotify.Record{placed("monomodules", agentnotify.Working, "home", 3)},
+		[]session.Record{placed("monomodules", session.Working, "home", 3)},
 		[]Pane{pane(3, "* monomodules", 1, "* root")},
 		testGlyphs)
 
@@ -103,7 +103,7 @@ func TestNothingIsRunWhenNothingMoved(t *testing.T) {
 // it off, and puts the current one on — rather than adding a second.
 func TestARestartDoesNotStackGlyphs(t *testing.T) {
 	plan := Plan("home",
-		[]agentnotify.Record{placed("monomodules", agentnotify.BlockedOnYou, "home", 3)},
+		[]session.Record{placed("monomodules", session.BlockedOnYou, "home", 3)},
 		[]Pane{pane(3, "* monomodules", 1, "* root")},
 		testGlyphs)
 
@@ -117,10 +117,10 @@ func TestARestartDoesNotStackGlyphs(t *testing.T) {
 // panes, the same aggregate an LED over the whole machine computes.
 func TestATabWearsItsMostUrgentAgent(t *testing.T) {
 	plan := Plan("home",
-		[]agentnotify.Record{
-			placed("one", agentnotify.Working, "home", 3),
-			placed("two", agentnotify.BlockedOnYou, "home", 4),
-			placed("three", agentnotify.Idle, "home", 5),
+		[]session.Record{
+			placed("one", session.Working, "home", 3),
+			placed("two", session.BlockedOnYou, "home", 4),
+			placed("three", session.Idle, "home", 5),
 		},
 		[]Pane{pane(3, "~", 1, "root"), pane(4, "~", 1, "root"), pane(5, "~", 2, "other")},
 		testGlyphs)
@@ -140,9 +140,9 @@ func TestATabWearsItsMostUrgentAgent(t *testing.T) {
 // sessions it will never draw: it owns a piece of somebody else's UI and the
 // record is the only thing that remembers which piece.
 func TestAnEndedSessionGivesItsPaneBack(t *testing.T) {
-	gone := placed("monomodules", agentnotify.Ended, "home", 3)
+	gone := placed("monomodules", session.Ended, "home", 3)
 	plan := Plan("home",
-		[]agentnotify.Record{gone},
+		[]session.Record{gone},
 		[]Pane{pane(3, "* monomodules", 1, "* root")},
 		testGlyphs)
 
@@ -156,7 +156,7 @@ func TestAnEndedSessionGivesItsPaneBack(t *testing.T) {
 // name somebody else chose.
 func TestAPaneNobodyPaintedIsLeftAlone(t *testing.T) {
 	plan := Plan("home",
-		[]agentnotify.Record{placed("monomodules", agentnotify.Ended, "home", 3)},
+		[]session.Record{placed("monomodules", session.Ended, "home", 3)},
 		[]Pane{pane(3, "my notes", 1, "root")},
 		testGlyphs)
 
@@ -169,7 +169,7 @@ func TestAPaneNobodyPaintedIsLeftAlone(t *testing.T) {
 // on purpose: there is no mark to recognise, so the name is the evidence.
 func TestAnIdlePaneIsStillRecognisedAsOurs(t *testing.T) {
 	plan := Plan("home",
-		[]agentnotify.Record{placed("monomodules", agentnotify.Ended, "home", 3)},
+		[]session.Record{placed("monomodules", session.Ended, "home", 3)},
 		[]Pane{pane(3, "monomodules", 1, "root")},
 		testGlyphs)
 
@@ -183,7 +183,7 @@ func TestAnIdlePaneIsStillRecognisedAsOurs(t *testing.T) {
 // what makes that true.
 func TestATabRenamedByHandKeepsItsNewName(t *testing.T) {
 	plan := Plan("home",
-		[]agentnotify.Record{placed("monomodules", agentnotify.Working, "home", 3)},
+		[]session.Record{placed("monomodules", session.Working, "home", 3)},
 		[]Pane{pane(3, "* monomodules", 1, "* the interesting one")},
 		testGlyphs)
 
@@ -197,7 +197,7 @@ func TestATabWithNothingLeftOnItGoesBackToItsOwnName(t *testing.T) {
 	// Nothing of ours in this zellij session any more, and a tab still wearing
 	// a glyph: the glyph comes off and the user's name stays.
 	plan := Plan("home",
-		[]agentnotify.Record{placed("monomodules", agentnotify.Ended, "home", 9)},
+		[]session.Record{placed("monomodules", session.Ended, "home", 9)},
 		[]Pane{pane(3, "~", 1, "! root")},
 		testGlyphs)
 
@@ -208,7 +208,7 @@ func TestATabWithNothingLeftOnItGoesBackToItsOwnName(t *testing.T) {
 
 func TestATabWhoseNameWasOnlyEverAGlyphIsHandedBack(t *testing.T) {
 	plan := Plan("home",
-		[]agentnotify.Record{placed("monomodules", agentnotify.Ended, "home", 9)},
+		[]session.Record{placed("monomodules", session.Ended, "home", 9)},
 		[]Pane{pane(3, "~", 1, "!")},
 		testGlyphs)
 
@@ -218,14 +218,14 @@ func TestATabWhoseNameWasOnlyEverAGlyphIsHandedBack(t *testing.T) {
 }
 
 func TestASessionOutsideZellijCostsNothing(t *testing.T) {
-	bare := agentnotify.Record{
-		Key:    agentnotify.Key{Host: "mac", Agent: "claude", SessionID: "bare"},
-		Kernel: agentnotify.Working, Rank: agentnotify.RankWorking,
+	bare := session.Record{
+		Key:    session.Key{Host: "mac", Agent: "claude", SessionID: "bare"},
+		Kernel: session.Working, Rank: session.RankWorking,
 	}
-	if grouped := Group([]agentnotify.Record{bare}); len(grouped) != 0 {
+	if grouped := Group([]session.Record{bare}); len(grouped) != 0 {
 		t.Errorf("a session with nothing captured was grouped into %v", grouped)
 	}
-	if plan := Plan("home", []agentnotify.Record{bare}, []Pane{pane(3, "~", 1, "root")}, testGlyphs); len(plan) != 0 {
+	if plan := Plan("home", []session.Record{bare}, []Pane{pane(3, "~", 1, "root")}, testGlyphs); len(plan) != 0 {
 		t.Errorf("planned %v for a session that is not in zellij", ran(plan))
 	}
 }
@@ -235,7 +235,7 @@ func TestASessionOutsideZellijCostsNothing(t *testing.T) {
 // from a missing pane would eventually disagree with it (R4).
 func TestAPaneThatIsGoneIsNotAnOpinion(t *testing.T) {
 	plan := Plan("home",
-		[]agentnotify.Record{placed("monomodules", agentnotify.Working, "home", 42)},
+		[]session.Record{placed("monomodules", session.Working, "home", 42)},
 		[]Pane{pane(3, "~", 1, "root")},
 		testGlyphs)
 
@@ -248,9 +248,9 @@ func TestTwoSessionsInOnePaneGoToTheMoreUrgent(t *testing.T) {
 	// A pane that hosted one session and now hosts another — /clear does this
 	// — can be claimed twice. Most urgent wins, and only one rename is run.
 	plan := Plan("home",
-		[]agentnotify.Record{
-			placed("old", agentnotify.Working, "home", 3),
-			placed("new", agentnotify.BlockedOnYou, "home", 3),
+		[]session.Record{
+			placed("old", session.Working, "home", 3),
+			placed("new", session.BlockedOnYou, "home", 3),
 		},
 		[]Pane{pane(3, "~", 1, "root")},
 		testGlyphs)
@@ -263,7 +263,7 @@ func TestTwoSessionsInOnePaneGoToTheMoreUrgent(t *testing.T) {
 
 func TestPanesInAnotherZellijSessionAreNotOurs(t *testing.T) {
 	plan := Plan("home",
-		[]agentnotify.Record{placed("elsewhere", agentnotify.Working, "work", 3)},
+		[]session.Record{placed("elsewhere", session.Working, "work", 3)},
 		[]Pane{pane(3, "~", 1, "root")},
 		testGlyphs)
 
@@ -276,7 +276,7 @@ func TestPluginPanesAreNotPanes(t *testing.T) {
 	// Pane ids are unique per kind, so plugin_3 and terminal_3 both exist and
 	// only one of them is a place an agent can be.
 	plan := Plan("home",
-		[]agentnotify.Record{placed("monomodules", agentnotify.Working, "home", 3)},
+		[]session.Record{placed("monomodules", session.Working, "home", 3)},
 		[]Pane{{ID: 3, Plugin: true, Title: "zellij:tab-bar", TabID: 1, TabName: "root"}},
 		testGlyphs)
 
@@ -286,15 +286,15 @@ func TestPluginPanesAreNotPanes(t *testing.T) {
 }
 
 func TestTheOrderOfTheRecordsDoesNotChangeThePlan(t *testing.T) {
-	records := []agentnotify.Record{
-		placed("one", agentnotify.Idle, "home", 5),
-		placed("two", agentnotify.BlockedOnYou, "home", 4),
-		placed("three", agentnotify.Working, "home", 3),
+	records := []session.Record{
+		placed("one", session.Idle, "home", 5),
+		placed("two", session.BlockedOnYou, "home", 4),
+		placed("three", session.Working, "home", 3),
 	}
 	panes := []Pane{pane(3, "~", 1, "root"), pane(4, "~", 1, "root"), pane(5, "~", 1, "root")}
 
 	first := ran(Plan("home", records, panes, testGlyphs))
-	shuffled := []agentnotify.Record{records[2], records[0], records[1]}
+	shuffled := []session.Record{records[2], records[0], records[1]}
 	second := ran(Plan("home", shuffled, panes, testGlyphs))
 	same(t, second, first)
 }
