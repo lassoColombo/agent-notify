@@ -4449,6 +4449,44 @@ of this section is that it prevents re-litigating.
     an absent key, so it took the eight-second default instead. The pointer that
     separates absent from `"0s"` is what fixes it.
 
+- **D-79** (2026-09-27) — **agent-notify-sketchybar is deprecated, and deprecated
+  by deletion.** *Retires* the module delivered in M14. Does not amend D-37,
+  D-51 or D-72, whose reasoning stands.
+
+  - **Unmaintained and still in the tree is the worst of the three states.** The
+    module is not published, so it cannot rot quietly in somebody else's copy;
+    it is in this repository, and this repository's core breaks its own API
+    freely because nothing is published (D-77). An integration left in the tree
+    therefore has to be kept compiling on every core change — which is
+    maintenance, and is exactly the thing "unmaintained" is meant to stop. The
+    choice was never deprecate-or-delete; it was delete, or keep paying.
+  - **It already cost something on every run.** Three of its tests drive a live
+    `sketchybar` process and fail on any machine without one, so a full test
+    sweep across the monorepo has been red for reasons nobody was going to fix.
+  - **A banner in the README would not have held.** The rule needed is "exclude
+    it from every change", and the things that do not read banners are a `grep`,
+    a sweep across `tool-integrations/*`, and a build of everything. Removing the
+    directory is the only form of the rule that those obey.
+  - **Nothing depended on it.** No production code in any module names it. The
+    only non-comment references were test fixtures in core and in the SDK using
+    `sketchybar` as the name of an example integration, which is arbitrary —
+    core has no registry of integration names and discovers them on PATH.
+  - **The references that remain are history and stay.** Thirty-nine mentions in
+    this file, and comments across the other modules, record reasoning that is
+    still true: D-72 above all, which is the story of a display that drew the
+    agent's message and did not ask to be woken when it changed, and which is
+    why `WhatToWakeFor` exists in the shape it does. §A19's rule is that a
+    decision that was reversed stays here with its reason; the same applies to a
+    module that was removed. They are not a to-do list.
+  - **What was left unfinished with it**: the preview had an off switch no config
+    file could reach — `on()` was false only for dimensions that `sane()`
+    refused — so `[…preview]` could never be turned off, and the display always
+    declared it read `message`. It is recorded here rather than fixed.
+  - **Where it is**: `tool-integrations/agent-notify-sketchybar/` in `827ccc4`
+    and every commit before it.
+  - **The macOS menu bar is `agent-notify-macos-bar` alone now.** It needs
+    nothing installed, which was always the argument for it (M15a).
+
 
 **The payload discussion of 2026-09-17 is now ratified** in D-10 through D-18.
 What is still marked [proposed] elsewhere — the field list of §A7.4, the event

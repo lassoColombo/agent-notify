@@ -3,9 +3,10 @@
 // listing them, most urgent first, with the one you choose brought to the
 // front.
 //
-// It needs nothing installed. Where the sketchybar display needs sketchybar and
-// the zellij display needs zellij, this one needs the menu bar every Mac
-// already has — which is the reason it exists (M15a).
+// It needs nothing installed. Where the zellij display needs zellij, this one
+// needs the menu bar every Mac already has — which is the reason it exists
+// (M15a). It is the only menu-bar display: the sketchybar one was removed on
+// 2026-09-27 (D-79).
 //
 // It is a display and nothing else. It never talks to an agent, and nothing an
 // agent does waits on it (R13).

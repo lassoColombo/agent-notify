@@ -5,8 +5,7 @@ semaphore in the real macOS menu bar: one mark per state your agents are in,
 the ones waiting on you flickering, and a menu behind it listing every session
 with the one you choose brought to the front.
 
-It needs nothing installed first. The [sketchybar
-display](../agent-notify-sketchybar) needs sketchybar and the [zellij
+It needs nothing installed first. The [zellij
 display](../agent-notify-zellij-display) needs zellij; this one needs the menu
 bar every Mac already has, which is the reason it exists.
 
@@ -159,19 +158,15 @@ the same state, and renders it wherever it renders.
 | | what it draws | what it needs |
 | --- | --- | --- |
 | **agent-notify-macos-bar** | one item, one mark per live state, a menu of sessions behind it | nothing — the system menu bar |
-| [agent-notify-sketchybar](../agent-notify-sketchybar) | a counter per state on sketchybar, a chip per counter, the agent's last message under a hovered row | sketchybar, running and configured |
 | [agent-notify-macos-notifications](../agent-notify-macos-notifications) | a notification when an agent wants you | nothing, but a properly signed bundle |
 
-**This and sketchybar are alternatives, not layers.** They draw the same
-semaphore on the same strip of screen, so running both means two of everything;
-pick the one whose bar you already live with. They differ in more than their
-host: sketchybar's chip opens by itself when something happens and shows what
-the agent last said, where this one leaves the message to the notifier and never
-opens its menu — an `NSMenu` opening starts a modal tracking loop that takes the
-keyboard for as long as it is up, so a display that opened one by itself would
-eat what you were typing several times an hour. What a paint costs is the reason
-they even subscribe differently: there, a paint is a process, and here it is a
-JSON encode and a dispatch onto a queue.
+**This is the menu bar now.** There was a second one, on sketchybar, whose chip
+opened by itself when something happened and showed what the agent last said. It
+was removed on 2026-09-27 (D-79) and is unmaintained. This display leaves the
+message to the notifier and never opens its menu by itself — an `NSMenu` opening
+starts a modal tracking loop that takes the keyboard for as long as it is up, so
+a display that opened one on its own would eat what you were typing several
+times an hour.
 
 The notifications program is a genuinely different surface and is installed
 separately or not at all — its own binary, its own bundle, its own

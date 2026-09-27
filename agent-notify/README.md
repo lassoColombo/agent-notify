@@ -122,7 +122,6 @@ separately.
 | [agent-notify-macos-bar](../tool-integrations/agent-notify-macos-bar) | display | the semaphore on the macOS menu bar |
 | [agent-notify-macos-notifications](../tool-integrations/agent-notify-macos-notifications) | display | a macOS notification when an agent wants you |
 | [agent-notify-zellij-display](../tool-integrations/agent-notify-zellij-display) | display | pane and tab titles |
-| [agent-notify-sketchybar](../tool-integrations/agent-notify-sketchybar) | display | counters and chips on the menu bar |
 | [agent-notify-picker](../tool-integrations/agent-notify-picker) | display | every session in a terminal, and a way into one |
 | [agent-notify-zellij-container](../tool-integrations/agent-notify-zellij-container) | container | placing and focusing a session |
 | [agent-notify-aerospace-container](../tool-integrations/agent-notify-aerospace-container) | container | finding and raising the window a session is in |
@@ -213,7 +212,7 @@ in a pane, and must not.
 configuration, which is exactly the gap this split opens:
 
 ```
-installed    --    1 on your PATH and not mentioned here: sketchybar
+installed    --    1 on your PATH and not mentioned here: picker
                    `agent-notify install <name>` hands over to each: a tool-integration prints
                    the table for you to add, an agent-integration writes its agent's hooks.
 ```
@@ -417,7 +416,7 @@ and a session-watcher would otherwise keep them in memory for days.
 | `history-changes` | integer | `100` | How many state transitions are kept, same rules. |
 | `integration-tries` | integer | `5` | How many consecutive failures an integration is allowed before the session-watcher stops starting it and says why in `doctor`. "Consecutive" means since the child last stayed connected long enough to count as working. Must be at least 1. |
 | `subscriber-queue` | integer | `128` | How many changed sessions may wait for one subscriber before its queue is thrown away and replaced by a single snapshot. Overflow degrades to a full redraw, never to a wrong render, so this trades bytes on the wire against redraws and nothing else. Must be at least 1. |
-| `agent-notify-binary` | string | empty, meaning "work it out" | Where the `agent-notify` binary is, for the one job that needs to start it: a hook whose poke found no session-watcher, and a display that offers a click. A hook's PATH is not your shell's PATH, and a sketchybar click runs from launchd's, which is `/usr/bin:/bin` and nothing else. |
+| `agent-notify-binary` | string | empty, meaning "work it out" | Where the `agent-notify` binary is, for the one job that needs to start it: a hook whose poke found no session-watcher, and a display that offers a click. A hook's PATH is not your shell's PATH, and a click on a menu-bar item runs from launchd's, which is `/usr/bin:/bin` and nothing else. |
 
 `keep-ended-sessions` is written the way a person writes a duration. It is
 `time.ParseDuration`'s spelling and the only one in this system: core's file and
@@ -491,7 +490,8 @@ enabled = false
 ### `[integration.<name>.settings]`
 
 Everything under here belongs to that integration alone. Core never reads it,
-never validates it, and must not know what sketchybar's colour keys are called.
+never validates it, and must not know what the zellij display's glyph keys are
+called.
 
 The integration decodes it through the SDK, which refuses a key it never
 declared **by name** — because a misspelled setting that changes nothing and
