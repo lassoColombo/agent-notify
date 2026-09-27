@@ -410,29 +410,34 @@ and a session-watcher would otherwise keep them in memory for days.
 
 | Key | Type | Default | What it changes |
 | --- | --- | --- | --- |
-| `keep-ended-sessions` | integer, **nanoseconds** | `604800000000000` (7 days) | How long an ended session's record survives, so that resuming it is recognised as a return rather than a birth. It is also the set `list --all` and a picker offer you. Must be positive. |
+| `keep-ended-sessions` | duration | `"168h"` (7 days) | How long an ended session's record survives, so that resuming it is recognised as a return rather than a birth. It is also the set `list --all` and a picker offer you. Must be positive. |
 | `history-messages` | integer | `20` | How many of a session's messages are kept in its history file. `0` keeps none, which is the point of it being expressible. |
 | `history-changes` | integer | `100` | How many state transitions are kept, same rules. |
 | `integration-tries` | integer | `5` | How many consecutive failures an integration is allowed before the session-watcher stops starting it and says why in `doctor`. "Consecutive" means since the child last stayed connected long enough to count as working. Must be at least 1. |
 | `subscriber-queue` | integer | `128` | How many changed sessions may wait for one subscriber before its queue is thrown away and replaced by a single snapshot. Overflow degrades to a full redraw, never to a wrong render, so this trades bytes on the wire against redraws and nothing else. Must be at least 1. |
 | `agent-notify-binary` | string | empty, meaning "work it out" | Where the `agent-notify` binary is, for the one job that needs to start it: a hook whose poke found no session-watcher, and a display that offers a click. A hook's PATH is not your shell's PATH, and a sketchybar click runs from launchd's, which is `/usr/bin:/bin` and nothing else. |
 
-`keep-ended-sessions` is written in nanoseconds because that is what a Go
-`time.Duration` natively is — the standard library gives the type no text codec,
-so a number decodes and a string does not, loudly:
+`keep-ended-sessions` is written the way a person writes a duration. It is
+`time.ParseDuration`'s spelling and the only one in this system: core's file and
+every integration's table read the same (D-78).
 
 ```toml
-keep-ended-sessions = 86400000000000   # one day
+keep-ended-sessions = "24h"    # one day
+keep-ended-sessions = "168h"   # the default week
+keep-ended-sessions = "30m"    # half an hour, if you want the list short
 ```
 
-```
-keep-ended-sessions = "24h"
-                      ~~~~~ cannot decode TOML string into struct field
-                            config.Config.KeepEndedSessions of type time.Duration
-```
+A bare number is refused, and deliberately: there is no way to accept
+`= 8` that does not also accept somebody who meant eight seconds writing what a
+`time.Duration` reads as eight nanoseconds. The one number that survives is `0`,
+which means the same however it is spelled. Getting it wrong costs the value and
+not the file it is written in:
 
-That one is a whole-file refusal, not a note — see [What happens when the file
-is wrong](#what-happens-when-the-file-is-wrong).
+```
+config       FAIL  ~/.config/agent-notify/config.toml: keep-ended-sessions = "7 days",
+                   which is not a duration; write it as "168h" or "30m"; using 168h0m0s
+                  running with: 2 agent(s), 6 integration(s), keep-ended-sessions 168h0m0s
+```
 
 Every duration that is not this one — timeouts, sweep intervals, lock waits — is
 deliberately not configurable. Each was mechanism rather than preference, and a

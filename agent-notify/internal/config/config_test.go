@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	agentnotify "github.com/lassoColombo/agent-notify"
 	"github.com/lassoColombo/agent-notify/internal/config"
 )
 
@@ -38,9 +39,7 @@ func TestMalformedFileIsRefusedWhole(t *testing.T) {
 
 func TestAWholeFileIsRead(t *testing.T) {
 	settings, problems := config.Parse([]byte(`
-# Three days, in nanoseconds: a time.Duration has no text form, so a number is
-# the only thing that decodes (see config.Config).
-keep-ended-sessions = 259200000000000
+keep-ended-sessions = "72h"
 
 [agent.claude]
 binary = "claude"
@@ -64,7 +63,7 @@ order = ["aerospace", "zellij"]
 	for _, problem := range problems {
 		t.Errorf("unexpected complaint: %v", problem)
 	}
-	if got := settings.KeepEndedSessions; got != 3*24*time.Hour {
+	if got := settings.KeepEndedSessions.Duration(); got != 3*24*time.Hour {
 		t.Errorf("KeepEndedSessions = %s, want 72h", got)
 	}
 	if settings.Agent["claude"].Binary != "claude" {
@@ -96,7 +95,7 @@ order = ["aerospace", "zellij"]
 
 func TestUnknownKeysAreReportedAndTheRestSurvives(t *testing.T) {
 	settings, problems := config.Parse([]byte(`
-keep-ended-sessions = 172800000000000
+keep-ended-sessions = "48h"
 retention-visible   = "1m"
 
 [integration.zellij]
@@ -113,7 +112,7 @@ colour = "blue"
 			t.Errorf("the complaint does not mention %q:\n%s", want, text)
 		}
 	}
-	if got := settings.KeepEndedSessions; got != 2*24*time.Hour {
+	if got := settings.KeepEndedSessions.Duration(); got != 2*24*time.Hour {
 		t.Errorf("a typo elsewhere cost us keep-ended-sessions: %s", got)
 	}
 	if settings.Integration["zellij"].Binary != "agent-notify-zellij" {
@@ -153,7 +152,7 @@ func durationKeys() []string {
 	var keys []string
 	for i := range structure.NumField() {
 		field := structure.Field(i)
-		if field.Type == reflect.TypeOf(time.Duration(0)) {
+		if field.Type == reflect.TypeOf(agentnotify.Duration{}) {
 			keys = append(keys, field.Tag.Get("toml"))
 		}
 	}
@@ -269,7 +268,7 @@ func TestDisabledIntegrationsAreNotNagged(t *testing.T) {
 func TestUnreadableFileIsAComplaintNotACrash(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
-	if err := os.WriteFile(path, []byte("keep-ended-sessions = 86400000000000\n"), 0o000); err != nil {
+	if err := os.WriteFile(path, []byte("keep-ended-sessions = \"24h\"\n"), 0o000); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	if os.Geteuid() == 0 {

@@ -492,7 +492,7 @@ All of it optional.
 ```toml
 [integration.macos-bar.settings]
 rows     = 8                          # sessions per state before "and n more"
-announce = 0                          # nanoseconds; 0 keeps the item passive
+announce = "0s"                       # "8s" spells the name out for eight seconds
 resting  = "0xff8c88a6"               # the mark's colour when nothing is running
 font     = ""                         # the menu bar's own
 sign     = "agent-notify self-signed" # remembered for the next `install`
@@ -501,14 +501,15 @@ sign     = "agent-notify self-signed" # remembered for the next `install`
 | Key | Type | Default | What it changes |
 | --- | --- | --- | --- |
 | `rows` | int | `8` | How many sessions a state lists before it says `and n more`. A menu scrolls when it has to, so this is about a menu being readable rather than one fitting. Any value `> 0` is taken; `0` and below leave the default. |
-| `announce` | int, **nanoseconds** | `0` (off) | How long a state change adds the name of the session it happened to, after the marks, in that state's colour. `8000000000` is eight seconds. Negative is refused at startup. |
+| `announce` | duration | `"0s"` (off) | How long a state change adds the name of the session it happened to, after the marks, in that state's colour. `"8s"` is eight seconds. Negative, and anything that is not a duration, is refused at startup. |
 | `resting` | colour | `0xff8c88a6` (Subtle) | The mark's colour when nothing is running at all. The one hue no state wears, so an empty machine cannot be mistaken for an agent doing something. |
 | `font` | string | `""` | The family the **item** is drawn in. Empty is the menu bar's own font, which is right for the shapes that ship. Name one if you want Nerd Font glyphs. Refused at startup if this machine does not have it. |
 | `sign` | string | `""` (ad-hoc) | The code signing identity `install` gives the bundle, remembered so a re-install after a rebuild does not need the flag again. **Nothing at runtime reads it.** |
 
-`announce` is in nanoseconds because that is what a Go `time.Duration` natively
-is and Go gives the type no text codec, so `= "8s"` does not decode and a number
-does. It is off by default, and that is a retraction: the item taking itself over
+`announce` is written the way a person writes a duration — the same spelling as
+every other duration in this system, because this display imports core's type
+rather than growing one of its own (D-78). A bare number is refused, since
+`announce = 8` would otherwise be eight nanoseconds. It is off by default, and that is a retraction: the item taking itself over
 to spell out a session's name was this display's own idea of a notification and
 it was a bad one — invisible unless you are looking at the menu bar, and it
 changes the item's width on a bar where width is the scarcest thing there is.

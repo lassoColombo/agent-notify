@@ -92,12 +92,16 @@ type Settings struct {
 
 	// Announce is how long a state change lights the bar up: the counter
 	// highlighted, its chip opened on the agent's own words, and the row
-	// highlighted inside it. 0 turns it off and leaves the bar passive.
+	// highlighted inside it. "0s" turns it off and leaves the bar passive.
 	//
-	// In NANOSECONDS, because that is what a time.Duration natively is: Go
-	// gives the type no text codec, so `= "8s"` does not decode and a number
-	// does. Eight seconds is 8000000000.
-	Announce time.Duration `toml:"announce"`
+	// Written the way a person writes a duration, which is one spelling for
+	// every duration in this system rather than this display's own
+	// (agentnotify.Duration, D-78).
+	//
+	// A POINTER because "0s" and an absent key are different requests and a
+	// value cannot tell them apart: absent takes the default below, "0s" is the
+	// bar staying passive.
+	Announce *agentnotify.Duration `toml:"announce"`
 
 	// Preview is the agent's last message, shown under the chip's rows when you
 	// hover one.
@@ -232,16 +236,23 @@ func Read(given subscribe.Integration) (Resolved, error) {
 				"and the counters can only be in one place", settings.Before, settings.After)
 	}
 	resolved.Before, resolved.After = settings.Before, settings.After
-	if settings.Announce != 0 {
-		// Zero is not "unset" here, it is a request: "the bar stays passive".
-		// So the only thing left to refuse is a negative one.
-		if settings.Announce < 0 {
+	if settings.Announce != nil {
+		// An absent key takes the default; "0s" is not "unset", it is a request —
+		// "the bar stays passive" — and is honoured. What is left to refuse is
+		// text that is not a duration at all, and a negative one.
+		if bad := settings.Announce.Unreadable(); bad != "" {
 			return Resolved{}, fmt.Errorf(
-				"[integration.sketchybar.settings] announce = %d cannot be negative "+
-					"(it is nanoseconds: 8000000000 is eight seconds, 0 keeps the bar passive)",
+				"[integration.sketchybar.settings] announce = %s "+
+					"(\"8s\" is eight seconds, \"0s\" keeps the bar passive)",
 				settings.Announce)
 		}
-		resolved.Announce = settings.Announce
+		if settings.Announce.Duration() < 0 {
+			return Resolved{}, fmt.Errorf(
+				"[integration.sketchybar.settings] announce = %s cannot be negative "+
+					"(\"8s\" is eight seconds, \"0s\" keeps the bar passive)",
+				settings.Announce)
+		}
+		resolved.Announce = settings.Announce.Duration()
 	}
 
 	binary, err := TheSketchybarToRun(settings.Sketchybar)

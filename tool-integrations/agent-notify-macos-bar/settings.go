@@ -125,10 +125,13 @@ type Settings struct {
 	// they are. Off by default — see the constant — because macOS has a
 	// notification system and this is not it.
 	//
-	// In NANOSECONDS, because that is what a time.Duration natively is: Go
-	// gives the type no text codec, so `= "8s"` does not decode and a number
-	// does. Eight seconds is 8000000000; 0 keeps the item passive.
-	Announce time.Duration `toml:"announce"`
+	// Written the way a person writes a duration, which is one spelling for
+	// every duration in this system rather than this display's own: "8s" is
+	// eight seconds, "0s" keeps the item passive (agentnotify.Duration, D-78).
+	//
+	// A POINTER because "0s" and an absent key are different requests and a
+	// value cannot tell them apart.
+	Announce *agentnotify.Duration `toml:"announce"`
 	// Resting is the colour of the mark on the bar while nothing wants you.
 	Resting string `toml:"resting"`
 	// Sign is the code signing identity `install` gives the bundle, remembered
@@ -172,7 +175,7 @@ const (
 	// invisible if you are not looking at the menu bar, it changes the item's
 	// width on a bar where width is the scarcest thing there is, and macOS has
 	// a notification system that does all of it better and is configurable in
-	// System Settings. Set `announce = 8000000000` to have it back.
+	// System Settings. Set `announce = "8s"` to have it back.
 	defaultAnnounce = 0
 	// Subtle, the palette's dim text tone, and the one place in this display
 	// where it is the right answer: with nothing running at all the mark is pure
@@ -231,16 +234,23 @@ func Read(given subscribe.Integration) (Resolved, error) {
 		resolved.Resting = settings.Resting
 	}
 	resolved.Font = settings.Font
-	if settings.Announce != 0 {
-		// Zero is not "unset" here, it is a request: the item stays passive.
-		// So the only thing left to refuse is a negative one.
-		if settings.Announce < 0 {
+	if settings.Announce != nil {
+		// An absent key takes the default; "0s" is not "unset", it is a request —
+		// the item stays passive — and is honoured. What is left to refuse is
+		// text that is not a duration at all, and a negative one.
+		if bad := settings.Announce.Unreadable(); bad != "" {
 			return Resolved{}, fmt.Errorf(
-				"[integration.%s.settings] announce = %d cannot be negative "+
-					"(it is nanoseconds: 8000000000 is eight seconds, 0 keeps the item passive)",
+				"[integration.%s.settings] announce = %s "+
+					"(\"8s\" is eight seconds, \"0s\" keeps the item passive)",
 				Name, settings.Announce)
 		}
-		resolved.Announce = settings.Announce
+		if settings.Announce.Duration() < 0 {
+			return Resolved{}, fmt.Errorf(
+				"[integration.%s.settings] announce = %s cannot be negative "+
+					"(\"8s\" is eight seconds, \"0s\" keeps the item passive)",
+				Name, settings.Announce)
+		}
+		resolved.Announce = settings.Announce.Duration()
 	}
 
 	// What choosing a row runs. Without it the menu is a list you cannot act

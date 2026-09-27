@@ -1055,7 +1055,7 @@ a display that named no fields at all.
 **[decided 2026-09-17 — D-26]** There is **one** retention duration.
 
 ```toml
-keep-ended-sessions = 604800000000000   # seven days, in nanoseconds
+keep-ended-sessions = "168h"   # seven days (D-78)
 ```
 
 It is how long an ended session's record survives, so that resuming it is
@@ -2102,7 +2102,7 @@ or only "this session changed, re-read".
 **[decided]** TOML, at `~/.config/agent-notify/config.toml`.
 
 ```toml
-keep-ended-sessions = 604800000000000   # seven days, in nanoseconds (D-62)
+keep-ended-sessions = "168h"   # seven days, ParseDuration's spelling (D-78)
 history-messages    = 20       # per session, by count; 0 keeps none
 history-changes     = 100
 
@@ -2434,6 +2434,11 @@ meta-plan can be compiled.
   `time.Duration` written in nanoseconds. The reading that held up is the one
   about what a timeout *is* — a pattern the integrations shared, not a
   preference any of them was asking a person about.
+
+  **[reopened and answered yes 2026-09-27 — D-78]** Not because an integration
+  wants day units, but because a person should not have to know which table they
+  are in to know how to write eight seconds. `agentnotify.Duration` is exported;
+  the two bars that still have a duration import it.
 
 Nothing is open as of M15, which is a statement about this moment rather than a
 milestone: building raises more, and each gets a number here and an entry in
@@ -4393,6 +4398,56 @@ of this section is that it prevents re-litigating.
     core. There is no newer core, so the watcher could refuse a typo at the
     handshake instead of leaving a display correct at startup and stale an hour
     later. That is an addition and is not in this decision.
+
+- **D-78** (2026-09-27) — **One duration type, exported and imported rather than
+  reinvented, and every duration a person writes is spelled the way people write
+  one.** *Amends* D-62, *answers* Q16 with the opposite answer for a reason Q16
+  did not consider.
+
+  - **D-62 had the principle right and left the spelling unreadable.** It took
+    four bespoke `timeout` settings and core's own `Duration` out, correctly, on
+    the grounds that a timeout is mechanism rather than preference — and it
+    priced the cost in one line: `keep-ended-sessions = 604800000000000` where
+    `"7d"` used to be. The cost it priced was ugliness.
+  - **The cost it did not price is that the natural spelling destroys the file.**
+    [measured 2026-09-23] `keep-ended-sessions = "24h"` is not a bad value, it is
+    a decode error, and `Parse` answers a decode error by discarding the whole
+    document — every unrelated key with it — and saying `cannot decode TOML
+    string into ... time.Duration`, which names no key and offers no remedy. A
+    misspelled key name costs one line. So the plausible mistake was fatal and
+    the careless one was not.
+  - **And it kept the trap it had itself named.** D-62 observed that
+    `timeout = 2` decodes to two nanoseconds without complaint. `announce` on
+    both bars inherited exactly that: `announce = 8` is eight nanoseconds, and
+    nothing anywhere says so.
+  - **The type is a struct, and that is mechanism rather than taste.**
+    [verified 2026-09-27, go-toml v2.4.3] go-toml decodes a bare number natively
+    into any type whose kind is an integer, so a named `time.Duration` never sees
+    it. A struct has no native decoding, so EVERY scalar — number, string,
+    boolean — reaches `UnmarshalText`, and one codec owns every message. `0`
+    still reads, because `time.ParseDuration` takes it and it means the same
+    thing however it is spelled.
+  - **Text it cannot read is a complaint, not a refusal.** This is what
+    `subscribe/settings.go` already promised in a comment — "a duration that is
+    not one", listed among core's notes about a file that was otherwise used —
+    and what `problemsWith` already does for every other bad value in the file.
+    The code now agrees with the comment.
+  - **Q16 asked whether an integration needs core's `Duration` and said no**,
+    because core's existed to understand `7d` and no timeout is measured in days.
+    The answer is yes now, for a reason Q16 did not weigh: not day units, but
+    that nobody should have to know which table they are in to know how to write
+    eight seconds. `agentnotify.Duration` is exported, the two bars import it,
+    and nothing reinvents it.
+  - **No day unit.** A week is `"168h"`. `7d` is precisely what made core's
+    spelling disagree with every integration's, and supporting it properly means
+    owning a parser and its compounds instead of deferring to the standard
+    library.
+  - **What it cost**: three keys change spelling — `keep-ended-sessions`, and
+    `announce` on both bars — in a file nobody outside this machine has (D-77).
+    One bug came out with it: sketchybar's `announce = 0` was documented and
+    commented as "the bar stays passive" and was in fact indistinguishable from
+    an absent key, so it took the eight-second default instead. The pointer that
+    separates absent from `"0s"` is what fixes it.
 
 
 **The payload discussion of 2026-09-17 is now ratified** in D-10 through D-18.

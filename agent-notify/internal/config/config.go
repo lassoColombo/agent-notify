@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	agentnotify "github.com/lassoColombo/agent-notify"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -43,16 +44,15 @@ type Config struct {
 	// sessions you can still resume. Whether an ended session is rendered is
 	// the subscriber's own decision (D-26).
 	//
-	// It is also the only duration left in this file, and it is written in
-	// NANOSECONDS because that is what a time.Duration natively is: the
-	// standard library gives the type no text codec at all, so `= "7d"` does
-	// not decode and a number does. Everything else that was once configurable
+	// It is also the only duration left in this file, and it is written the way
+	// a person writes one: "168h" is the week it defaults to, "30m" is half an
+	// hour (agentnotify.Duration, D-78). Everything else that was once configurable
 	// here was a timeout, an interval or a lock wait — mechanism rather than
 	// preference — and mechanism now lives as a named constant beside the code
 	// it bounds. R18 is satisfied the same way it always was: every duration
 	// has a name and a defined behaviour on expiry; the name is simply in the
 	// source now rather than in the file.
-	KeepEndedSessions time.Duration `toml:"keep-ended-sessions"`
+	KeepEndedSessions agentnotify.Duration `toml:"keep-ended-sessions"`
 
 	// HistoryMessages and HistoryChanges bound the per-session history by
 	// count, not by time (§A7.7). Zero keeps none, which §A15 requires to be
@@ -156,7 +156,7 @@ type Container struct {
 // because a package-level map is a package-level map somebody will mutate.
 func Defaults() Config {
 	return Config{
-		KeepEndedSessions: 7 * 24 * time.Hour,
+		KeepEndedSessions: agentnotify.NewDuration(7 * 24 * time.Hour),
 		IntegrationTries:  5,
 		HistoryMessages:   20,
 		HistoryChanges:    100,
@@ -292,7 +292,12 @@ func (c *Config) problemsWith(name string) []error {
 	defaults := Defaults()
 	var problems []error
 
-	if c.KeepEndedSessions <= 0 {
+	if bad := c.KeepEndedSessions.Unreadable(); bad != "" {
+		problems = append(problems, fmt.Errorf(
+			"%s: keep-ended-sessions = %s; write it as \"168h\" or \"30m\"; using %s",
+			name, c.KeepEndedSessions, defaults.KeepEndedSessions))
+		c.KeepEndedSessions = defaults.KeepEndedSessions
+	} else if c.KeepEndedSessions.Duration() <= 0 {
 		problems = append(problems, fmt.Errorf(
 			"%s: keep-ended-sessions must be positive, not %s; using %s",
 			name, c.KeepEndedSessions, defaults.KeepEndedSessions))

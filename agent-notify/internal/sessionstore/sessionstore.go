@@ -47,7 +47,7 @@ func Open(layout paths.Layout, settings config.Config) (*SessionStore, error) {
 		layout:   layout,
 		patience: LockPatience,
 		bounds:   agentnotify.Bounds{Messages: settings.HistoryMessages, Changes: settings.HistoryChanges},
-		keep:     settings.KeepEndedSessions,
+		keep:     settings.KeepEndedSessions.Duration(),
 	}, nil
 }
 

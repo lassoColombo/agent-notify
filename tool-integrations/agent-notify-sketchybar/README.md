@@ -311,7 +311,7 @@ sketchybar = "/opt/homebrew/bin/sketchybar" # required, absolute
 position   = "left"
 rows       = 8
 before     = "sep_agents"
-announce   = 8000000000
+announce   = "8s"
 ```
 
 | key | type | default | what it does |
@@ -321,11 +321,16 @@ announce   = 8000000000
 | `rows` | int | `8` | how many sessions a chip lists before its last row says `and n more`. Values below 1 are ignored and the default stands. |
 | `before` | string | `""` | put the counters immediately before an item of yours. |
 | `after` | string | `""` | put them immediately after one. Naming both is an error. |
-| `announce` | duration, in **nanoseconds** | `8000000000` (8s) | how long a state change lights the bar up. `0` turns the announcement off entirely and leaves you with counters that only count. Negative is an error. |
+| `announce` | duration | `"8s"` | how long a state change lights the bar up. `"0s"` turns the announcement off entirely and leaves you with counters that only count. Negative, and anything that is not a duration, is an error. |
 
-`announce` is nanoseconds because that is what a Go `time.Duration` natively is:
-the standard library gives the type no text codec at all, so `announce = "8s"`
-does not decode and a number does. Eight seconds is `8000000000`.
+`announce` is written the way a person writes a duration — the same spelling as
+every other duration in this system, because this display imports core's type
+rather than growing one of its own (D-78). A bare number is refused, since
+`announce = 8` would otherwise be eight nanoseconds rather than the eight
+seconds whoever wrote it meant.
+
+An absent key and `"0s"` are different answers: absent takes the eight-second
+default, `"0s"` is a request for a bar that stays passive.
 
 ### Glyphs and colours
 
@@ -405,7 +410,7 @@ reported to a person. The program prints the complaint and exits 1.
 
 - `sketchybar` unset, not absolute, or not there.
 - `before` and `after` both named — the counters can only be in one place.
-- `announce` negative.
+- `announce` negative, or text that is not a duration.
 - `preview.lines` under 2, `preview.depth` under `preview.lines`, or
   `preview.width` under 16.
 - a key in the settings table that nobody declared, named in the message.
@@ -486,7 +491,7 @@ Eight seconds later all of it goes away again. `working` never announces itself
 — an agent getting on with it is the state the bar is in most of the day, and a
 bar lit up all day means nothing — and neither does `idle`; anything more urgent
 than working does, which is core's own rule and exactly what earns a
-notification elsewhere. `announce = 0` turns the whole thing off.
+notification elsewhere. `announce = "0s"` turns the whole thing off.
 
 The deadline is a fact about the record — the moment the state began, plus the
 window — and not the moment this display noticed. That is what stops an

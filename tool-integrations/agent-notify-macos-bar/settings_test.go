@@ -95,7 +95,7 @@ font = "No Such Face"
 func TestZeroIsAnAnswerForAnnounce(t *testing.T) {
 	settings, err := settingsIn(t, `
 [integration.macos-bar.settings]
-announce = 0
+announce = "0s"
 `)
 	if err != nil {
 		t.Fatalf("Read: %v", err)
@@ -104,10 +104,9 @@ announce = 0
 		t.Errorf("announce = %v, want it turned off", settings.Announce)
 	}
 
-	// Eight seconds, in the nanoseconds a time.Duration is written in.
 	settings, err = settingsIn(t, `
 [integration.macos-bar.settings]
-announce = 8000000000
+announce = "8s"
 `)
 	if err != nil {
 		t.Fatalf("Read: %v", err)
@@ -118,7 +117,7 @@ announce = 8000000000
 
 	if _, err := settingsIn(t, `
 [integration.macos-bar.settings]
-announce = -1
+announce = "-1s"
 `); err == nil {
 		t.Errorf("a negative announce was accepted")
 	}
