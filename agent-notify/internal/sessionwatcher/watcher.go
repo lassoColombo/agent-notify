@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net"
 	"os"
 	"os/signal"
 	"slices"
@@ -25,76 +24,45 @@ import (
 	"github.com/lassoColombo/agent-notify/session"
 )
 
-// SweepInterval is the safety net behind the exit watches: the longest a
-// session that died without saying so can sit in the store looking alive.
-//
-// It is a var and it is exported for one reason, and it is not configuration:
-// these are the pace of a loop a test has to watch go round several times, and
-// waiting the real interval would make that test a minute long. Nothing at
-// runtime writes it, and no user can — this package is internal.
+// SweepInterval is the safety net behind the exit and store watches: the
+// longest a session that died without saying so can sit in the store looking
+// alive. A var so a test can shorten it.
 var SweepInterval = 5 * time.Second
 
-// interpretTimeout bounds one `interpret-environment`, which runs here and may
-// talk to the tool it is asking about (§A11.1). On expiry that container has no
-// coordinates for that session, and the next capture or configuration reload
-// tries again.
+// interpretTimeout bounds one `interpret-environment`, which may talk to the
+// tool it is asking about (§A11.1).
 const interpretTimeout = 5 * time.Second
 
-// Watcher is the long-lived process.
-//
-// What it owns today is the half M8 delivers: one exit watch per live session,
-// the sweep behind it, and the reducer for transitions it *observes* rather than
-// is told about — which means death and supersession, and never the passage of
-// time (D-12). Fan-out to subscribers and supervising integrations arrive in M9
-// and M13.
+// Watcher is the one long-lived process: it watches agents for death, derives
+// coordinates from what the hook captured, and runs displays when the store
+// moves.
 type Watcher struct {
 	opened *core.Core
 	held   *TheOnlyRunningWatcher
 	exits  *Exits
-	socket *net.UnixConn
-	subs   *Subscribers
+	store  *DirWatch
 	boot   string
 	prober process.ReadsProcessFacts
 	logger *slog.Logger
 
-	// known is every live session as this process last saw it. It exists so
-	// that a snapshot can be served from memory rather than from the disk
-	// (§A7.6), and so that fan-out can skip a change nobody can see (§A9.3).
 	mu    sync.Mutex
 	known map[string]session.Record
 	// refused counts how often a container failed to interpret one session, so
-	// that a broken one stops being run every sweep. It is a count and not a
-	// flag because the first failure is not evidence: a session-watcher can
-	// easily ask zellij about a pane a moment before zellij is ready. Cleared
-	// on reload, which is how a person retries after fixing something.
+	// that a broken one stops being run every sweep. Cleared on reload.
 	refused map[string]int
-	// complained remembers a configuration mistake already reported, because
-	// it will be the same mistake every sweep until somebody edits the file.
+	// complained remembers a configuration mistake already reported.
 	complained map[string]bool
 
-	// answers is what each integration said when it was asked what it answers,
-	// as of this configuration. Filled at startup and on reload and read
-	// everywhere else, because asking is a process per integration and the
-	// answer cannot change without the program on disk changing.
+	// answers is what each integration said to `capabilities`, asked at
+	// startup and on reload.
 	answers map[string]WhatAnIntegrationAnswers
 
-	// renderers is one per display core runs, each with the goroutine that
-	// runs it and its own picture of what it was last handed.
-	//
-	// There used to be a supervisor here instead — children, consecutive
-	// failures, a grace period, a count of attempts before giving up — and it
-	// is gone with the last long-lived integration. A display core runs is a
-	// program it runs when something moves; a display that must own a process
-	// is started by launchd and connects on its own (§A10.2).
+	// renderers is one per display core runs.
 	renderers map[string]*renderer
 }
 
-// Start takes the lock, binds the socket, and opens the exit queue.
-//
-// Losing the race for the lock is not a failure. Anyone may start a
-// session-watcher — a hook whose poke found nobody, a subscriber that lost its
-// connection — and the lock is what makes that race harmless, so the loser
-// simply has nothing to do (§A9.2).
+// Start takes the lock and opens the watches. Losing the race for the lock is
+// not a failure: anyone may start a session-watcher (§A9.2).
 func Start(layout paths.Layout, toTerminal bool) (*Watcher, error) {
 	held, err := TakeIfNobodyElseHasIt(layout)
 	if err != nil {
@@ -111,16 +79,15 @@ func Start(layout paths.Layout, toTerminal bool) (*Watcher, error) {
 		logger = slog.New(slog.NewTextHandler(os.Stderr, nil))
 	}
 
-	socket, err := Listen(layout, held)
+	exits, err := WatchExits()
 	if err != nil {
 		opened.Close()
 		held.Release()
 		return nil, err
 	}
-
-	exits, err := WatchExits()
+	store, err := WatchDirectories(layout.Sessions(), layout.Ended())
 	if err != nil {
-		socket.Close()
+		exits.Close()
 		opened.Close()
 		held.Release()
 		return nil, err
@@ -128,36 +95,20 @@ func Start(layout paths.Layout, toTerminal bool) (*Watcher, error) {
 
 	boot, err := process.BootIdentity()
 	if err != nil {
-		// Not fatal: without it the reboot rule cannot apply and every session
-		// is judged by probing instead, which is slower and still correct.
+		// Without it the reboot rule cannot apply and every session is judged
+		// by probing instead, which is slower and still correct.
 		logger.Warn("cannot read this boot's identity", "problem", err.Error())
 	}
 
-	watching := &Watcher{
-		opened: opened, held: held, exits: exits, socket: socket,
+	return &Watcher{
+		opened: opened, held: held, exits: exits, store: store,
 		boot: boot, prober: process.ProcessesOnThisMachine{}, logger: logger,
 		known: map[string]session.Record{},
-	}
-
-	subs, err := Serve(layout, held, logger, watching.snapshotFor)
-	if err != nil {
-		exits.Close()
-		socket.Close()
-		opened.Close()
-		held.Release()
-		return nil, err
-	}
-	watching.subs = subs
-	return watching, nil
+	}, nil
 }
 
-// snapshotFor is what a subscriber gets on connect, on asking, and after
-// falling behind.
-//
-// It is served from memory, which is the whole reason there is no snapshot file
-// to keep correct (§A7.6, Q3). Ended sessions are included only for a
-// subscriber that asked for them: a bar says no, a picker says yes, and the
-// transition to ended reaches both regardless (D-26).
+// snapshotFor is the world a display is handed, from memory. Ended sessions
+// only for a display that asked (D-26).
 func (w *Watcher) snapshotFor(wantEnded bool) []session.Record {
 	w.mu.Lock()
 	sessions := make([]session.Record, 0, len(w.known))
@@ -192,20 +143,15 @@ func (w *Watcher) Run(ctx context.Context) error {
 		"pid", os.Getpid(), "version", session.Version,
 		"state", w.opened.Layout.State, "runtime", w.opened.Layout.Runtime)
 
-	// Before anything is run, what is there to run. Everything core does with
-	// an integration from here on is decided by what it said here.
 	w.askWhatEachIntegrationAnswers()
 	w.startRenderers(ctx)
-
-	// Reconciling from the store at startup is what makes every poke losable:
-	// a session-watcher that has just started knows everything a session-watcher
-	// that has been running all day knows (§A9.1, R4).
+	// Reconciling from the store at startup is what makes every missed wake-up
+	// harmless (§A9.1, R4).
 	w.reconcile("startup")
 
 	woken := make(chan string, 64)
-	go w.listenForPokes(ctx, woken)
+	go w.listenForStoreChanges(ctx, woken)
 	go w.listenForExits(ctx, woken)
-	go w.subs.Accept()
 
 	tick := time.NewTicker(SweepInterval)
 	defer tick.Stop()
@@ -226,30 +172,23 @@ func (w *Watcher) Run(ctx context.Context) error {
 					"state", w.opened.Layout.State)
 				return nil
 			}
-			w.reconcile("sweep")
 			w.prune()
+			w.reconcile("sweep")
 		}
 	}
 }
 
-// listenForPokes turns datagrams into wake-ups. What the poke says is not used:
-// the store is the truth, and re-reading it is both simpler and correct after
-// any number of lost messages (R4).
-func (w *Watcher) listenForPokes(ctx context.Context, woken chan<- string) {
+func (w *Watcher) listenForStoreChanges(ctx context.Context, woken chan<- string) {
 	for ctx.Err() == nil {
-		if _, arrived := Receive(w.socket, time.Second); arrived {
+		if w.store.Changed(time.Second) {
 			select {
-			case woken <- "poke":
+			case woken <- "store":
 			default:
-				// The queue is full, so a reconcile is already coming. One
-				// reconcile answers every poke that is waiting.
 			}
 		}
 	}
 }
 
-// listenForExits turns a process going away into a wake-up, which is what makes
-// `kill -9` visible in milliseconds rather than at the next tick.
 func (w *Watcher) listenForExits(ctx context.Context, woken chan<- string) {
 	for ctx.Err() == nil {
 		gone, err := w.exits.WhichPidsExited(time.Second)
@@ -273,11 +212,8 @@ func (w *Watcher) listenForExits(ctx context.Context, woken chan<- string) {
 }
 
 // reconcile is the whole of the watcher's work: read the store, watch what is
-// alive, end what is provably gone.
-//
-// It is the same function whatever woke it, because the store is the truth and
-// there is nothing else to consult. A poke, a process exit and a tick therefore
-// differ only in latency.
+// alive, end what is provably gone, draw. It is the same function whatever
+// woke it, because the store is the truth (R4).
 func (w *Watcher) reconcile(why string) {
 	live, err := w.opened.Store.List()
 	if err != nil {
@@ -290,8 +226,7 @@ func (w *Watcher) reconcile(why string) {
 	for _, record := range live {
 		if record.Process.PID > 0 {
 			// A pid that has already gone fails to register, and the sweep
-			// below judges it anyway. Registration is an optimisation on top
-			// of a correct mechanism, never the mechanism (R5).
+			// judges it anyway (R5).
 			_ = w.exits.Watch(record.Process.PID)
 		}
 		seen[record.Key.String()] = true
@@ -299,32 +234,19 @@ func (w *Watcher) reconcile(why string) {
 	}
 	w.forgetWhatLeft(seen)
 
-	ending := process.Ended(live, w.boot, process.Self(), w.prober)
-	for _, end := range ending {
+	for _, end := range process.Ended(live, w.boot, process.Self(), w.prober) {
 		w.end(end)
 	}
 
-	// Once, at the end, rather than once per record: everything core hands a
-	// display carries the whole world, so a sweep that touched nine sessions is
-	// still one render and one write. Each display works out for itself whether
-	// anything it watches moved, and most of the time nothing did — no process
-	// is started and nothing goes down the socket.
+	// Once, at the end: every display is handed the whole world and decides
+	// for itself whether anything it watches moved.
 	w.drawEverythingAgain()
 }
 
-// derive turns what the hook captured into coordinates, by running each
-// configured container's `interpret-environment` (§A11.1, D-38).
-//
-// It happens HERE and not in the hook for the reason D-27 gives: this is the
-// half that talks to the tool, and asking zellij which tab holds pane 7 is
-// exactly the kind of question that hangs when the tool is wedged. Here it costs
-// a sweep; there it would cost the agent.
-//
-// A container is asked once per session per capture. Replacing a captured
-// context voids everything derived from it in the same write (§A7.4.1), so the
-// question "does this record have coordinates from this container" is the whole
-// of the scheduling: no timers, no queue, and a container enabled today places a
-// session that started on Tuesday.
+// derive runs each container's `interpret-environment` on what the hook
+// captured, here rather than in the hook because this half talks to the tool
+// (D-27). A container is asked once per session per capture: replacing a
+// capture voids what was derived from it (§A7.4.1).
 func (w *Watcher) derive(live []session.Record) []session.Record {
 	configured, problems := containers.Configured(w.opened.Settings, w.methodsByIntegration())
 	for _, problem := range problems {
@@ -339,9 +261,6 @@ func (w *Watcher) derive(live []session.Record) []session.Record {
 		for _, one := range configured {
 			captured, present := record.CapturedContext.By[one.Name]
 			if !present {
-				// This container never saw this session — it started outside
-				// zellij, or before the container was installed. Not a
-				// failure, and not something to retry (§A11.7).
 				continue
 			}
 			if _, already := record.DerivedContext[one.Name]; already {
@@ -351,18 +270,11 @@ func (w *Watcher) derive(live []session.Record) []session.Record {
 				continue
 			}
 			if !slices.Contains(one.Methods, session.MethodInterpret) {
-				// It places sessions but cannot turn a capture into
-				// coordinates. Asking anyway would cost a process to be told
-				// so, once per session per sweep.
 				continue
 			}
 
 			coordinates, err := containers.Interpret(one, captured, interpretTimeout)
 			if err != nil {
-				// One container failing says nothing about the others and
-				// nothing about the session (R13). Remembered so that a broken
-				// container is not run again every sweep; forgotten on reload,
-				// which is how a person retries after fixing it.
 				failures := w.giveUpOn(record.Key.String(), one.Name)
 				level := w.logger.Warn
 				if failures >= attemptsBeforeGivingUp {
@@ -377,9 +289,8 @@ func (w *Watcher) derive(live []session.Record) []session.Record {
 			written, err := w.opened.Store.Update(record.Key, time.Now().UTC(),
 				func(previous session.Record) session.Record {
 					next := previous.Clone()
-					// Against the record as it is NOW, not as it was read: a
-					// capture that was replaced while this ran must not have
-					// coordinates from the old one written over it.
+					// A capture replaced while this ran must not get the old
+					// one's coordinates.
 					if !bytes.Equal(next.CapturedContext.By[one.Name], captured) {
 						return previous
 					}
@@ -402,13 +313,8 @@ func (w *Watcher) derive(live []session.Record) []session.Record {
 	return updated
 }
 
-// gaveUpOn and giveUpOn remember a container that could not interpret one
-// session, so that a broken one is not run every sweep for ever.
-// attemptsBeforeGivingUp is deliberately small and deliberately not one. One
-// failure is usually a race — the session-watcher asking zellij about a pane a
-// moment before zellij is listening — and three sweeps is long enough for that
-// to settle and short enough that a genuinely broken container is not run for
-// ever.
+// attemptsBeforeGivingUp is small and not one: the first failure is usually
+// the session-watcher asking zellij about a pane a moment before it exists.
 const attemptsBeforeGivingUp = 3
 
 func (w *Watcher) gaveUpOn(session, container string) bool {
@@ -428,8 +334,6 @@ func (w *Watcher) giveUpOn(session, container string) int {
 	return w.refused[key]
 }
 
-// complainOnce keeps a configuration mistake from filling the log: it is the
-// same mistake every sweep until somebody edits the file.
 func (w *Watcher) complainOnce(message string) {
 	w.mu.Lock()
 	if w.complained == nil {
@@ -443,31 +347,12 @@ func (w *Watcher) complainOnce(message string) {
 	}
 }
 
-// remember keeps one record as this process last saw it, which is what every
-// world handed to a display is built from.
-//
-// It decides nothing. It used to ask whether a change was worth offering around
-// at all before offering it, which was the generous half of a two-gate
-// arrangement — the narrow half being whether THIS display asked about the
-// fields that moved. There is one gate now, the narrow one, asked by each
-// display of its own copy of what it last saw, which is the only place the
-// answer was ever knowable (§A7.4.3).
 func (w *Watcher) remember(record session.Record) {
 	w.mu.Lock()
 	w.known[record.Key.String()] = record
 	w.mu.Unlock()
 }
 
-// forgetWhatLeft drops a session that has left sessions/ since the last look.
-//
-// It used to matter a great deal whether it ended and was filed or was pruned
-// and is gone: the first was a delta carrying the ended record, the second a
-// `gone` telling everybody to drop the key. Both took a read of the store.
-//
-// Neither is a question now. A filed session is in ListEnded and reaches
-// whoever asked for ended sessions; a pruned one is in neither place and leaves
-// everybody's world at once. The distinction lives in snapshotFor, where it was
-// always going to be looked up anyway.
 func (w *Watcher) forgetWhatLeft(seen map[string]bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -478,11 +363,8 @@ func (w *Watcher) forgetWhatLeft(seen map[string]bool) {
 	}
 }
 
-// end files a session that stopped without saying so.
-//
-// It goes through the same reducer as everything else. A transition discovered
-// by observation and one reported by an agent are the same transition, and
-// having two ways to make one would be having two state machines (D-8).
+// end files a session that stopped without saying so, through the same
+// reducer as everything else (D-8).
 func (w *Watcher) end(ending process.Ending) {
 	written, err := w.opened.Store.Apply(session.Report{
 		Key:    ending.Key,
@@ -502,8 +384,8 @@ func (w *Watcher) end(ending process.Ending) {
 	w.mu.Unlock()
 }
 
-// prune forgets what has outlived keep-ended-sessions. It runs on the tick
-// only: it is the one thing here that is genuinely periodic.
+// prune forgets what has outlived keep-ended-sessions. It runs before the
+// sweep's reconcile, whose draw then shows the departures.
 func (w *Watcher) prune() {
 	removed, err := w.opened.Store.ForgetWhatIsTooOld(time.Now().UTC())
 	if err != nil {
@@ -512,19 +394,10 @@ func (w *Watcher) prune() {
 	for _, key := range removed {
 		w.logger.Info("forgot an ended session past its welcome", "session", key.String())
 	}
-	if len(removed) > 0 {
-		// A display that asked for ended sessions has just lost some, and this
-		// is the one change that does not come through the store as a record
-		// moving: it comes through as a record ceasing to exist.
-		w.drawEverythingAgain()
-	}
 }
 
-// reloadConfiguration re-reads the file on SIGHUP.
-//
-// Values that cannot change under a running process say so rather than
-// pretending to apply: the paths were fixed when this process started, and a
-// socket cannot move without every client being told (§A14).
+// reloadConfiguration re-reads the file on SIGHUP, asks every integration
+// again, and retries anything that had failed.
 func (w *Watcher) reloadConfiguration(ctx context.Context) {
 	settings, problems := config.Load(w.opened.Layout.ConfigFile)
 	for _, problem := range problems {
@@ -532,35 +405,23 @@ func (w *Watcher) reloadConfiguration(ctx context.Context) {
 	}
 	w.opened.Settings = settings
 
-	// Asked again, on the new file and on whatever binary is at each path now.
-	// This is the gesture a person makes after rebuilding an integration, so it
-	// is the one place a changed answer can be noticed.
 	w.askWhatEachIntegrationAnswers()
 	w.startRenderers(ctx)
 
-	// Reload is also how a person retries: a container that was broken, or
-	// missing, or misspelled, gets another go on the next sweep rather than
-	// being written off for the life of this process.
 	w.mu.Lock()
 	w.refused, w.complained = nil, nil
 	w.mu.Unlock()
 
 	w.writeReport(w.opened.Settings)
-	w.logger.Info("configuration re-read",
-		"note", "paths and sockets are fixed for the life of this process; "+
-			"every integration was asked again what it answers, on whatever "+
-			"binary is at its path now, and anything that had failed will be tried again")
+	w.logger.Info("configuration re-read")
 }
 
 func (w *Watcher) close() {
-	if w.subs != nil {
-		_ = w.subs.Close()
+	if w.store != nil {
+		_ = w.store.Close()
 	}
 	if w.exits != nil {
 		_ = w.exits.Close()
-	}
-	if w.socket != nil {
-		_ = w.socket.Close()
 	}
 	if w.opened != nil {
 		w.opened.Close()
@@ -570,11 +431,8 @@ func (w *Watcher) close() {
 	}
 }
 
-// StartIfNobodyIs starts a detached session-watcher unless one is already
-// running, and is what a hook calls when its poke finds nobody listening.
-//
-// A race here is harmless by construction: several hooks may decide at once,
-// several may spawn, and the lock means exactly one survives to do any work.
+// StartIfNobodyIs starts a detached session-watcher unless one holds the lock.
+// Several callers may race; the lock means exactly one survives.
 func StartIfNobodyIs(layout paths.Layout, configured string) error {
 	if Running(layout) {
 		return nil
@@ -582,10 +440,8 @@ func StartIfNobodyIs(layout paths.Layout, configured string) error {
 	return Spawn(layout, configured)
 }
 
-// Stop asks a running session-watcher to shut down cleanly.
-//
-// Nothing here ever auto-kills: this is SIGTERM to a process whose pid the lock
-// file names, sent because a person asked (§A9.2).
+// Stop asks a running session-watcher to shut down: SIGTERM to the pid the
+// lock file names, sent because a person asked. Nothing here ever kills.
 func Stop(layout paths.Layout, within time.Duration) error {
 	if !Running(layout) {
 		return fmt.Errorf("no session-watcher is running")
@@ -611,14 +467,8 @@ func Stop(layout paths.Layout, within time.Duration) error {
 	return fmt.Errorf("pid %d still holds the lock %s after being asked to stop", held.PID, within)
 }
 
-// worldIsGone reports that the state directory has been removed under us.
-//
-// It is the one condition that ends this process without being asked. A
-// session-watcher whose store has been deleted has nothing to watch, nothing to
-// write, and no way to be useful; staying would mean holding a lock on a
-// directory that no longer exists. Deleting the state directory is also exactly
-// how a person resets this system, and how a test throws its temporary one
-// away.
+// worldIsGone reports that the state directory has been removed under us, the
+// one condition that ends this process without being asked.
 func (w *Watcher) worldIsGone() bool {
 	_, err := os.Stat(w.opened.Layout.Sessions())
 	return os.IsNotExist(err)

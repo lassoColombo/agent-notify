@@ -10,10 +10,10 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"os"
 	"slices"
 	"strings"
 
+	"github.com/lassoColombo/agent-notify/hook"
 	"github.com/lassoColombo/agent-notify/session"
 )
 
@@ -76,47 +76,15 @@ func WhatCodexHasSpent(rolloutPath string) Spending {
 	if rolloutPath == "" {
 		return Spending{}
 	}
-	file, err := os.Open(rolloutPath)
-	if err != nil {
-		return Spending{}
-	}
-	defer file.Close()
-	facts, err := file.Stat()
-	if err != nil {
-		return Spending{}
-	}
-
 	var spending Spending
-	// carried is the head of a line the previous read landed in the middle of.
-	// It belongs to a line that begins earlier in the file, so it waits here for
-	// the read that brings the rest of it.
-	var carried []byte
-	var readSoFar int64
-
-	for end := facts.Size(); end > 0 && readSoFar < asFarBackAsARolloutIsWorthReading; {
-		start := max(end-oneReadWorthOfRollout, 0)
-		block := make([]byte, end-start)
-		if _, err := file.ReadAt(block, start); err != nil {
-			break
-		}
-		readSoFar += int64(len(block))
-
-		lines := bytes.Split(slices.Concat(block, carried), []byte("\n"))
-		if start > 0 {
-			carried, lines = lines[0], lines[1:]
-		}
-		for i := len(lines) - 1; i >= 0 && len(spending.Responses) < enoughResponses; i-- {
-			response, itCost := whatThisLineCost(lines[i])
-			if !itCost {
-				continue
+	_ = hook.ReadBackwards(rolloutPath, oneReadWorthOfRollout, asFarBackAsARolloutIsWorthReading,
+		func(line []byte) bool {
+			response, itCost := whatThisLineCost(line)
+			if itCost {
+				spending.Responses = append(spending.Responses, response)
 			}
-			spending.Responses = append(spending.Responses, response)
-		}
-		if len(spending.Responses) >= enoughResponses {
-			break
-		}
-		end = start
-	}
+			return len(spending.Responses) < enoughResponses
+		})
 
 	// Oldest first, which is the order core walks them in and the order they
 	// were written in.

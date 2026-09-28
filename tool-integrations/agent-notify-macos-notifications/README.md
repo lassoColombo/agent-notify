@@ -385,10 +385,9 @@ agent-notify install macos-notifications      # re-signs the bundle with the rem
 agent-notify watcher reload
 ```
 
-To remove it, delete its table from the config, run `agent-notify watcher reload`, and drag
-`~/Applications/agent-notify-macos-notifications.app` to the bin. `enabled = false` in the
-table does the same thing reversibly. macOS keeps its decision about the identifier either
-way; reinstalling later does not have to ask again.
+To remove it, unload the launch agent, delete its table from the config, and drag
+`~/Applications/agent-notify-macos-notifications.app` to the bin. macOS keeps its decision
+about the identifier either way; reinstalling later does not have to ask again.
 
 ## Configuration
 
@@ -550,8 +549,8 @@ This program reads no environment variable of its own. Three reach it anyway:
 
 The path to `agent-notify` itself is not found on PATH, because a launchd job's PATH is
 `/usr/bin:/bin` and nothing else. It comes from core's own `agent-notify-binary` setting, and
-it is needed twice over: it is what tapping a banner runs, and it is what this display watches
-(`agent-notify tail --json`). A display that cannot locate it refuses to start rather than
+it is needed twice over: it is what tapping a banner runs, and it is what this display starts
+when no session-watcher is running. A display that cannot locate it refuses to start rather than
 discovering it when somebody taps a banner.
 
 ## Commands

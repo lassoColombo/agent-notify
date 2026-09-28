@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"github.com/lassoColombo/agent-notify/container"
+	"github.com/lassoColombo/agent-notify/subscribe"
+	"github.com/lassoColombo/agent-notify/tool"
 )
 
 // Settings is `[integration.aerospace-container.settings]`, and nothing else in
@@ -59,16 +61,15 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "install" {
 		os.Exit(install(os.Args[2:]))
 	}
-
 	settings, err := resolve()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %v\n", Name, err)
 		os.Exit(1)
 	}
 
-	os.Exit(container.Main(container.Integration{
-		Name:      Name,
-		Capture:   func() (any, error) { return Capture(settings.Title) },
+	me.Reads = func() (any, error) { return Capture(settings.Title) }
+	os.Exit(subscribe.Main(me, subscribe.Commands{
+		Named:     map[string]func([]string) int{"install": install},
 		Interpret: func(captured json.RawMessage) (any, error) { return Interpret(settings.Title, captured) },
 
 		// The binary is looked up HERE and not before dispatch, which is the
@@ -91,7 +92,7 @@ func main() {
 			}
 			return Focused(aerospace, coordinates)
 		},
-	}))
+	}, os.Args[1:]))
 }
 
 // resolve reads this integration's own section of agent-notify's config.
@@ -108,7 +109,7 @@ func resolve() (Settings, error) {
 }
 
 func (s Settings) aerospace() (Aerospace, error) {
-	binary, err := TheAerospaceToRun(s.Aerospace)
+	binary, err := tool.AbsolutePath("[integration."+Name+".settings] aerospace", s.Aerospace)
 	if err != nil {
 		return Aerospace{}, err
 	}

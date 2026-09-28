@@ -43,9 +43,6 @@ func TestAUserWithNoOpinionGetsTheDefaults(t *testing.T) {
 	if settings.Preview != defaultPreview {
 		t.Errorf("the defaults did not survive an empty file: %+v", settings)
 	}
-	if settings.Core == "" {
-		t.Errorf("nothing was found to run when a banner is tapped")
-	}
 	if settings.Sound != (Sound{Plays: true}) {
 		t.Errorf("sound = %+v for a file that says nothing, want the default chime", settings.Sound)
 	}

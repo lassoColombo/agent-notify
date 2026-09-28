@@ -1,26 +1,11 @@
-// Command agent-notify-picker is the picker: every session [agent-notify]
-// knows about, what each one last said underneath, and enter to be taken to the
-// one you choose.
+// Command agent-notify-picker is the picker: every session agent-notify knows
+// about, what each one last said underneath, and enter to be taken to the one
+// you choose. It is run from a keybinding and never by core, which is what its
+// table having no `binary` says.
 //
-// It is a **display**, in the sense §A10.2 means it: it reads through the SDK,
-// declares itself in the config, and renders the answer core computed. What
-// makes it unlike the bar and the pane titles is only that it is not a daemon —
-// it needs a terminal, so it is run when somebody presses a key and it goes
-// away when they have chosen. That is why its table says `enabled = false`: not
-// "off", but "not something to start behind my back" (see install.go).
-//
-// **fzf owns the screen, as a library rather than as a binary.** A first
-// version of this was a terminal UI of its own — a model, an update, a view, a
-// keymap, a layout, and the three separate bugs that come of measuring columns
-// in somebody else's terminal. A second used a fuzzy-finder library whose
-// preview is hardcoded to the right half of the window. fzf is imported here
-// and driven through channels, which keeps the screen somebody else's problem
-// and still leaves the layout, the palette and the preview ours.
-//
-// The preview is this same program, run again with `--preview`. That is how
-// every fzf preview works, and it is what makes the pane a full renderer —
-// markdown, metadata and history — rather than a string squeezed through a
-// callback.
+// fzf owns the screen, as a library driven through channels; the preview is
+// this same program run again with `--preview`, which is how every fzf
+// preview works.
 package main
 
 import (
@@ -34,33 +19,13 @@ import (
 	fzf "github.com/junegunn/fzf/src"
 	"golang.org/x/term"
 
-	"github.com/lassoColombo/agent-notify/capture"
 	"github.com/lassoColombo/agent-notify/session"
 	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
-// Name is what this integration calls itself: its config table, and the word
-// after `agent-notify install`.
 const Name = "picker"
 
-// me is this integration: how everything here asks where agent-notify's files
-// are, and what its own settings say.
-//
-// Root is left empty on purpose — empty means "wherever this process's
-// environment says", which is right everywhere but a test (D-69).
 var me = subscribe.Integration{Name: Name}
-
-// capabilities is what this answers `capabilities` with, and the answer is
-// "nothing".
-//
-// The picker is not something core runs. It is something a person runs, from a
-// keybinding, and it reads the store and exits — so there is no method here for
-// core to call and no wake list, because nothing wakes it. Its table has no
-// `binary` for the same reason, which means core will not ask this question
-// either; it is answered anyway, because a program that cannot answer is
-// indistinguishable from one that is broken, and because somebody debugging
-// deserves to be able to ask.
-var capabilities = session.Capabilities{}
 
 // separator divides the key from what is drawn. A tab, because a session's name
 // is somebody else's string and may contain anything else.
@@ -69,41 +34,17 @@ const separator = "\t"
 func now() time.Time { return time.Now().UTC() }
 
 func main() {
-	// The two core asks, answered before the config is read. Both are the same
-	// answer whatever the file says, and both are run by something that is
-	// waiting — the session-watcher, or an agent's hook — so doing less is the
-	// whole point.
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case session.CapabilitiesCommand:
-			os.Exit(capabilities.Answer(os.Stdout))
-		case capture.Command:
-			// The picker reads nothing out of the agent's process: it is the
-			// one program here that runs long after the agent has stopped
-			// waiting.
-			os.Exit(capture.Main(Name, nil))
-		}
-	}
-
-	// The config next, because all three jobs below draw with it and each of
-	// them is a separate process: the list, a preview fzf runs per row, and a
-	// label it runs per move of the cursor. What could not be used comes back
-	// as complaints, which only the window has anywhere to put.
-	complaints := Apply(me)
-
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case "install":
-			os.Exit(install(os.Args[2:]))
-		case "--preview":
-			// Run by fzf, once per row somebody looks at.
-			os.Exit(previewOf(os.Args[2:]))
-		case "--label":
-			// Run by fzf's `focus` binding, for the preview pane's label.
-			os.Exit(labelOf(os.Args[2:]))
-		}
-	}
-	os.Exit(run(os.Args[1:], complaints))
+	// The config is read once per process, and each of the three jobs — the
+	// list, a preview fzf runs per row, a label per move of the cursor — is a
+	// separate process.
+	os.Exit(subscribe.Main(me, subscribe.Commands{
+		Named: map[string]func([]string) int{
+			"install":   install,
+			"--preview": func(arguments []string) int { Apply(me); return previewOf(arguments) },
+			"--label":   func(arguments []string) int { Apply(me); return labelOf(arguments) },
+		},
+		Default: func(arguments []string) int { return run(arguments, Apply(me)) },
+	}, os.Args[1:]))
 }
 
 func run(arguments []string, complaints []string) int {

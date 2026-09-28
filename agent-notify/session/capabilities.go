@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"slices"
 )
 
 // The handshake: what core asks a tool-integration about itself, before it
@@ -77,13 +76,6 @@ type Capabilities struct {
 	// is the only thing that remembers which pane it was.
 	WantEnded bool `json:"want_ended,omitempty"`
 }
-
-// Answers reports whether this integration said it answers that method.
-//
-// Asking is free and calling is a fork, which is the reason this exists: an
-// unimplemented verb used to cost a process and come back indistinguishable
-// from a real "I cannot tell".
-func (c Capabilities) Answers(method string) bool { return slices.Contains(c.Methods, method) }
 
 // Answer writes these capabilities as the answer to `capabilities` and returns
 // the exit code, so that the case in every integration's main is one line.

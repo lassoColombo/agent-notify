@@ -30,35 +30,19 @@ func OneLinePerSession(records []session.Record, now time.Time) {
 		widestValueInTheColumn(records, 34, session.Record.State)
 
 	for _, record := range records {
+		age := ""
+		if !record.StateSince.IsZero() {
+			age = session.Ago(now.Sub(record.StateSince))
+		}
 		row := fmt.Sprintf("%-3d %-*s  %-*s  %-7s",
 			record.Rank,
 			names, CutToWidthWithAnEllipsis(record.DisplayName(), names),
 			states, CutToWidthWithAnEllipsis(record.State(), states),
-			howLongItHasBeenInThisState(record.StateSince, now))
+			age)
 		if message := OneLine(record.Message); message != "" {
 			row += "  " + CutToWidthWithAnEllipsis(message, 60)
 		}
 		fmt.Println(strings.TrimRight(row, " "))
-	}
-}
-
-// howLongItHasBeenInThisState is rendering rather than state. A display may
-// show elapsed time however it likes; the state itself never moves because the
-// clock moved (D-12).
-func howLongItHasBeenInThisState(at, now time.Time) string {
-	if at.IsZero() {
-		return ""
-	}
-	elapsed := now.Sub(at)
-	switch {
-	case elapsed < time.Minute:
-		return fmt.Sprintf("%ds", int(elapsed.Seconds()))
-	case elapsed < time.Hour:
-		return fmt.Sprintf("%dm", int(elapsed.Minutes()))
-	case elapsed < 24*time.Hour:
-		return fmt.Sprintf("%dh%dm", int(elapsed.Hours()), int(elapsed.Minutes())%60)
-	default:
-		return fmt.Sprintf("%dd", int(elapsed.Hours())/24)
 	}
 }
 

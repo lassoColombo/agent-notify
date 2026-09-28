@@ -21,51 +21,38 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/lassoColombo/agent-notify/capture"
 	"github.com/lassoColombo/agent-notify/logs"
 	"github.com/lassoColombo/agent-notify/session"
 	"github.com/lassoColombo/agent-notify/subscribe"
-	"github.com/lassoColombo/agent-notify/tool"
 )
 
-// AppKit will only be driven from the thread the process started on, and it is
-// not enough to be "a" thread: NSApplication checks. Locking it here, in the
-// init of package main, is the earliest moment there is and the only one that
-// is guaranteed to be before the runtime has moved the main goroutine anywhere.
+// AppKit will only be driven from the thread the process started on, and
+// NSApplication checks.
 func init() { runtime.LockOSThread() }
 
 func main() {
-	arguments := os.Args[1:]
-	if len(arguments) > 0 {
-		switch arguments[0] {
-		case session.CapabilitiesCommand:
-			// The handshake, and the first thing core ever runs here.
-			os.Exit(capabilities.Answer(os.Stdout))
-		case capture.Command:
-			// A notifier reads nothing out of the agent's process, and says so
-			// rather than failing: every integration is asked this one, and
-			// answering `{}` is what "nothing to add" sounds like.
-			os.Exit(capture.Main(Name, nil))
-		case "install":
-			os.Exit(install(arguments[1:]))
-		case "check":
-			os.Exit(check(arguments[1:]))
-		case "-h", "--help", "help":
-			usage(os.Stdout)
-			os.Exit(0)
-		default:
-			fmt.Fprintf(os.Stderr, "%s: %q is not a command\n\n", program, arguments[0])
-			usage(os.Stderr)
-			os.Exit(1)
-		}
-	}
-	os.Exit(notify())
+	help := func([]string) int { usage(os.Stdout); return 0 }
+	os.Exit(subscribe.Main(me, subscribe.Commands{
+		Named: map[string]func([]string) int{
+			"install": install,
+			"check":   check,
+			"help":    help, "-h": help, "--help": help,
+		},
+		Default: func(arguments []string) int {
+			if len(arguments) > 0 {
+				fmt.Fprintf(os.Stderr, "%s: %q is not a command\n\n", program, arguments[0])
+				usage(os.Stderr)
+				return 1
+			}
+			return notify()
+		},
+	}, os.Args[1:]))
 }
 
 func usage(to *os.File) {
 	fmt.Fprintf(to, `%s — a macOS notification when an agent wants you
 
-  %s            stay connected and notify
+  %s            watch the store and notify
   %s check      say whether macOS will deliver them, and post a test banner
   %s check --sound NAME   post it with that sound, to hear one before
                           writing it into the config
@@ -114,7 +101,7 @@ func check(arguments []string) int {
 	if bundle == "" {
 		fmt.Printf("%-16s none — this is the bare binary, and macOS will not take a\n", "bundle")
 		fmt.Printf("%-16s notification from one at all\n", "")
-		if where, err := DefaultBundle(theValueOrAQuestionMark(os.Executable)); err == nil {
+		if where, err := subscribe.DefaultBundle(program, Identifier, theValueOrAQuestionMark(os.Executable)); err == nil {
 			fmt.Printf("%-16s run %s install, then %s check\n",
 				"", program, where.PathOfTheBinaryInside())
 		}
@@ -219,15 +206,13 @@ func notify() int {
 		// UNUserNotificationCenter anything without a bundle identifier
 		// terminates the process.
 		fmt.Fprintf(os.Stderr, "this is the bare binary, and macOS will not take a "+
-			"notification from one: run `%s install` and let the session-watcher start "+
-			"the copy inside the bundle\n", program)
+			"notification from one: run `%s install` and run the copy inside the bundle\n", program)
 		return 1
 	}
 
 	banners := &Banners{
 		Notifier:    NewNotifier(settings.Preview, settings.Colours),
 		InvaderPNGs: &InvaderPNGs{},
-		Core:        settings.Core,
 		Sound:       settings.Sound,
 		Logger:      log,
 	}
@@ -262,13 +247,7 @@ func notify() int {
 
 	outcome := make(chan error, 1)
 	go func() {
-		outcome <- subscribe.RunThroughTheCLI(ctx, subscribe.Integration{
-			Name:     Name,
-			WakeOn:   capabilities.WakeOn,
-			OnChange: banners.Post,
-			Logger:   log,
-		})
-		// Ends the run loop below, which is what lets this process exit.
+		outcome <- subscribe.Run(ctx, me, banners.Post)
 		Stop()
 	}()
 
@@ -295,21 +274,11 @@ func notify() int {
 	return 0
 }
 
-// WhatToWakeFor is what this display asks the session-watcher to wake it for.
-//
-// The message is on this list because it is the BODY of the banner. There is
-// no clock in this program and no ages to keep true: a notification is an
-// edge, and nothing about time passing is one.
-//
-// `state_since` came off it in D-73. It was there when this program worked out
-// for itself what had moved, by comparing the state_since it remembered per
-// session against the one in hand — and D-71 deleted all of that in favour of
-// the previous kernel the SDK already carries. Nothing here has read the field
-// since, so asking for it was a wake for something nobody would look at (R23).
-//
-// It is a function so a test can read it, and the test is the point: it moves
-// one record field at a time, calls Fresh twice, and fails when a banner comes
-// out different for something not named here (D-73).
+// WhatToWakeFor is what this display asks to be woken for. The message is
+// here because it is the body of the banner; `state_since` is not, because a
+// notification is an edge and nothing about time passing is one. A test moves
+// one record field at a time and fails when a banner comes out different for
+// something not named here (D-73).
 func WhatToWakeFor() []string {
 	return []string{"kernel", "detail", "rank", "name", "cwd", "message"}
 }
@@ -318,7 +287,6 @@ func WhatToWakeFor() []string {
 type Banners struct {
 	Notifier    *Notifier
 	InvaderPNGs *InvaderPNGs
-	Core        string
 	// Sound is what a banner plays. Held here rather than on the Notifier
 	// because it is not part of deciding what is worth saying — notify.go's
 	// answer is the same either way — only of how it is said.
@@ -340,24 +308,10 @@ func (b *Banners) Post(view session.View) error {
 	return nil
 }
 
-// focusTimeout bounds one `agent-notify focus-session`, and it is not a
-// performance bound — it is there so that this goroutine cannot be lost.
-//
-// Generous on purpose. Core walks the container order and gives each step five
-// seconds of its own, so a focus through a window manager and a multiplexer can
-// legitimately take three times that. A bound shorter than what it is waiting
-// on would kill focuses that were about to succeed, which is worse than the
-// unbounded wait it replaces.
-const focusTimeout = 30 * time.Second
-
-// focus is what tapping a banner does.
-//
-// It runs the same `focus-session` every other integration runs, for the reason
-// D-37 gives: where a session lives is the containers' business, and anything
-// that went and looked would be a second implementation of it, wrong in its own
-// way (R24).
+// focus is what tapping a banner does: `agent-notify focus-session`, and not a
+// second implementation of where a session lives (R24).
 func (b *Banners) focus(key string) {
-	if _, err := tool.Run(b.Core, focusTimeout, "focus-session", "--quiet", key); err != nil {
+	if err := me.Focus(key); err != nil {
 		b.Logger.Warn("focusing", "session", key, "problem", err.Error())
 	}
 }

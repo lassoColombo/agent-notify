@@ -9,10 +9,10 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"os"
 	"slices"
 	"strings"
 
+	"github.com/lassoColombo/agent-notify/hook"
 	"github.com/lassoColombo/agent-notify/session"
 )
 
@@ -93,61 +93,26 @@ func WhatTheTranscriptSays(transcriptPath string) ClaudeTranscript {
 	if transcriptPath == "" {
 		return ClaudeTranscript{}
 	}
-	file, err := os.Open(transcriptPath)
-	if err != nil {
-		return ClaudeTranscript{}
-	}
-	defer file.Close()
-	facts, err := file.Stat()
-	if err != nil {
-		return ClaudeTranscript{}
-	}
-
 	var said ClaudeTranscript
-	// carried is the head of a line the previous read landed in the middle of.
-	// It belongs to a line that begins earlier in the file, so it waits here for
-	// the read that brings the rest of it.
-	var carried []byte
-	var readSoFar int64
-
-	for end := facts.Size(); end > 0 && readSoFar < asFarBackAsItIsWorthGoing; {
-		start := max(end-oneReadWorthOfTranscript, 0)
-		block := make([]byte, end-start)
-		if _, err := file.ReadAt(block, start); err != nil {
-			break
-		}
-		readSoFar += int64(len(block))
-
-		lines := bytes.Split(slices.Concat(block, carried), []byte("\n"))
-		if start > 0 {
-			carried, lines = lines[0], lines[1:]
-		}
-		for i := len(lines) - 1; i >= 0 && len(said.Responses) < enoughResponses; i-- {
-			response, model, itCost := whatThisLineCost(lines[i])
+	_ = hook.ReadBackwards(transcriptPath, oneReadWorthOfTranscript, asFarBackAsItIsWorthGoing,
+		func(line []byte) bool {
+			response, model, itCost := whatThisLineCost(line)
 			if !itCost {
-				continue
+				return true
 			}
 			if newest := len(said.Responses) - 1; newest >= 0 &&
 				said.Responses[newest].Response == response.Response {
-				// The same response written across another content block. Core
-				// would discard it anyway; dropping it here is what makes the
-				// count above eight responses rather than eight lines.
-				continue
+				// The same response written across another content block.
+				return true
 			}
 			if len(said.Responses) == 0 {
-				// The first one found reading backwards is the newest in the
-				// file, and the only one whose model is still true: a `/model`
-				// halfway through a session leaves the older lines saying what
-				// used to be the case.
+				// The newest response is the only one whose model is still
+				// true after a `/model` halfway through.
 				said.Model = model
 			}
 			said.Responses = append(said.Responses, response)
-		}
-		if len(said.Responses) >= enoughResponses {
-			break
-		}
-		end = start
-	}
+			return len(said.Responses) < enoughResponses
+		})
 
 	// Oldest first, which is the order core walks them in and the order they
 	// were written in.

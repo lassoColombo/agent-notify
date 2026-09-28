@@ -4711,6 +4711,49 @@ of this section is that it prevents re-litigating.
     says so accurately.
 
 
+- **D-83** (2026-09-28) — **The store is the bus, and one SDK answers every
+  subcommand.** There are no sockets. A hook writes its record and makes sure a
+  session-watcher holds the lock; the session-watcher and every display that
+  owns its process watch `state/sessions` and `state/ended` with kqueue and
+  re-read the store when an entry moves. *Amends* §A13 (there is no IPC beyond
+  files and exec), §A9.2 (no sockets to unlink and rebind; the lock alone),
+  §A12.2 and D-82 (a world is read, never sent), §A10.2 (an unsolicited
+  subscriber is a program that watches the directory). *Retires* R15 (there is
+  no backlog), D-19's poke, `record`/`replay` and `watcher status`. *Reverses*
+  D-37: zellij is one program, `agent-notify-zellij`.
+
+  - **Both channels had become the filesystem's own notification, spelled
+    twice.** Since D-82 the poke carried nothing and the stream carried whole
+    worlds every reader diffed for itself, so each said "something in the store
+    changed", which is what a directory watch says. Deleting them deleted
+    `poke.go`, `subscribers.go`, `internal/subscriber`, `session/protocol.go`,
+    `subscribe/client.go`, the socket-length checks and doctor's socket probe;
+    what arrived is `DirWatch`, fifty lines beside `Exits` on the same kqueue
+    call, and `subscribe.Run`, which is the loop `tail` and both macOS
+    displays share. The macOS displays link it rather than forking
+    `agent-notify tail --json` and parsing its stdout.
+  - **The read path was already the truth (R4).** A display reads through
+    `WhatIsRunning`, which applies liveness as `list` does, so a client and a
+    cold read can no longer disagree about a killed agent.
+  - **One SDK.** `subscribe.Main(integration, commands, args)` answers
+    `capabilities` (derived from which functions are filled in), `capture-
+    environment`, `render` and the three container verbs, then the program's
+    own subcommands. `container.Main` went; `container` is the vocabulary. The
+    `.app` bundle writer, the launch agent and the tool-path check
+    (`tool.AbsolutePath`) are core's, because five programs had copies.
+  - **The hook asks the config, not the report.** Every runnable integration
+    answers `capture-environment`, so `integrations.json` bought the hook
+    nothing; `focus` and `doctor` still read it.
+  - **zellij is one program.** Of D-37's four reasons for two, two died with
+    D-81 (nothing is supervised or retired), one with the monorepo (a shared
+    library is a package), and the last — titles without focus — is leaving
+    `zellij` out of `[container] order`. One capture instead of two on every
+    session start, one zellij client instead of two.
+  - **The store is the only stamper.** `session.Apply` no longer sets `Key`,
+    `Sequence`, `CreatedAt` or `UpdatedAt`; the store did already, on every
+    write, and the tests that read them off the pure reducer now read them
+    off the store.
+
 **The payload discussion of 2026-09-17 is now ratified**
  in D-10 through D-18.
 What is still marked [proposed] elsewhere — the field list of §A7.4, the event

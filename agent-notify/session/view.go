@@ -1,108 +1,44 @@
 package session
 
-// What a display is handed: everything, and what moved.
-//
-// It lives here rather than in the SDK because it stopped being a Go type. It
-// is what `render` reads on its stdin and what `agent-notify tail --json`
-// prints, which makes it a published shape somebody can render from in any
-// language — the same move [Hello] made, and for the same reason.
-
-// View is the world as it stands.
+// View is what a display is handed: the world, and what moved in it since this
+// display last looked. It is what `render` reads on stdin and what
+// `agent-notify tail --json` prints, so it is a published shape.
 type View struct {
-	// Sessions is everything, most urgent first, already ordered by the rule
-	// every display would otherwise write for itself (R24).
+	// Sessions is everything, most urgent first (R24).
 	Sessions []Record `json:"sessions"`
 
-	// Changed is what moved since the last call, most urgent first. A renderer
-	// ignores it; a notifier reads it and nothing else.
-	//
-	// "Since the last call" is meant literally, and it is the whole contract:
-	// it survives a reconnection and a session-watcher restart, because what it
-	// is compared against is what this display was last SHOWN rather than what
-	// arrived on this particular connection. On the very first call it is
-	// empty — nothing has moved when there was no previous call — which is
-	// what stops a display that started thirty seconds ago opening with a
-	// banner for every agent that happens to be blocked.
+	// Changed is what moved since the last view, most urgent first. A renderer
+	// ignores it; a notifier reads it and nothing else. It is empty on the
+	// first view: nothing has moved when there was no previous one.
 	Changed []Change `json:"changed,omitempty"`
 }
 
 // Change is one session that moved, and what it moved from.
-//
-// It exists because a notifier is the one display that genuinely needs the
-// transition rather than the state (§A12.1), and the fact that gives it one is
-// already here: whoever holds the last view knows what kernel it last showed.
-// Before this, the previous kernel was decoded and dropped one line before it
-// would have been handed over, and the one notifier in the world rebuilt a
-// weaker version of it from remembered timestamps.
-//
-// The record is a named field rather than an embedded one on purpose: Record
-// has a MarshalJSON, and embedding it would mean a Change logged as JSON
-// silently came out as the record alone, with the two fields that make it a
-// change missing.
 type Change struct {
-	// Record is the session as it now stands.
 	Record Record `json:"record"`
 
-	// PreviousKernel is the kernel this display last saw it in. It is empty for
-	// a session it has never seen before, which is not a transition at all — it
-	// is an arrival.
-	//
-	// `PreviousKernel == Record.Kernel` is the ordinary case and means
-	// something other than the state moved: a new message, a rename, a fresh
-	// token count. A notifier skips those; a preview pane wants them.
+	// PreviousKernel is the kernel this display last saw it in; empty for a
+	// session it has never seen, which is an arrival rather than a
+	// transition. Equal to Record.Kernel means something other than the state
+	// moved.
 	PreviousKernel Kernel `json:"previous_kernel,omitempty"`
 }
 
-// LastShown is the world as one display was last handed it.
-//
-// It exists so that [View.Changed] can mean "since the last view" rather than
-// "since this connection opened", and it is kept by whoever has the memory that
-// outlives the change: core, for a display it RUNS, because a process forked to
-// paint once remembers nothing; the display itself, for one that connects,
-// because it outlives both its own connection and the session-watcher.
-//
-// The session-watcher keeps one per connection as well, for a narrower job — it
-// answers "is this worth writing", never "what changed" — and that one dies
-// with the connection, which is exactly why it cannot answer the second
-// question. A session-watcher
-// restarting hands out a fresh picture of the world, and a picture that began
-// empty at the same moment reports every session in it as changed — so a
-// notifier written to the documented contract would post a banner per live
-// agent every time the daemon came back.
+// LastShown is the world as one display was last handed it. It is kept by
+// whoever has the memory that outlives the change: core for a display it
+// runs, the display itself for one that owns its process.
 type LastShown struct {
 	sessions map[string]Record
-	// shown is false until a view has been handed over. The first one carries
-	// no changes: "since the last view" is nothing when there was no last view.
-	shown bool
+	shown    bool
 }
 
-// HasSeenAView reports whether anything has been handed over yet.
-//
-// It is asked by a caller deciding whether there is any point handing one over
-// now: the first view is always worth it — it is the world arriving — and after
-// that only a view with something in it is.
 func (l *LastShown) HasSeenAView() bool { return l.shown }
 
-// Replace swaps the whole world in and reports what actually moved, and
-// separately whether anything LEFT.
-//
-// The second value is not a detail. A departure is not a change to any record —
-// there is no record any more — so it can never appear in the first, and a
-// caller deciding whether a view is worth handing over will otherwise conclude
-// that a session vanishing was nothing happening at all. That is how a bar ends
-// up with a row for an agent that finished ten minutes ago: it was woken, it
-// compared every record it still had against every record it was given, found
-// them all identical, and drew nothing.
-//
-// It compares on the fields this display asked to be woken for, which is the
-// same rule applied before it is woken at all. Comparing on everything instead
-// meant the two ends of one field disagreed about what "changed" means: a
-// display that declared `wake_on = ["kernel"]` is never woken by a new message,
-// and used to find one in Changed anyway if it arrived while it was away.
-//
-// The previous kernel is carried out with each one. A whole world says nothing
-// about how a session got where it is, but whoever has been shown a view before
-// knows what it last saw, and that is the same fact.
+// Replace swaps the whole world in and reports what moved, on the fields this
+// display asked to be woken for, and separately whether anything LEFT. A
+// departure is not a change to any record, so a caller deciding whether a view
+// is worth handing over would otherwise take a session vanishing for nothing
+// happening.
 func (l *LastShown) Replace(fresh []Record, wakeOn []string) (changed []Change, departed bool) {
 	if l.sessions == nil {
 		l.sessions = make(map[string]Record, len(fresh))
@@ -127,8 +63,6 @@ func (l *LastShown) Replace(fresh []Record, wakeOn []string) (changed []Change, 
 		}
 	}
 
-	// Ordered here, while these are still records, so that the one urgency
-	// rule does the work rather than a second spelling of it (R24).
 	ByUrgency(moved)
 	changed = make([]Change, 0, len(moved))
 	for _, record := range moved {
@@ -137,16 +71,8 @@ func (l *LastShown) Replace(fresh []Record, wakeOn []string) (changed []Change, 
 	return changed, departed
 }
 
-// There were two more methods here, Applied and Forget, and they put one record
-// in or took one out. Both existed for deltas: one to stop a late delta undoing
-// a fresher picture (R16), one to drop a session a `gone` had announced.
-//
-// Replace does both by construction. A world that arrives is the whole truth,
-// so there is no such thing as a stale part of it to guard against, and a
-// session missing from it is a session that is gone.
-
 // ViewOf is the view to hand over: everything held, most urgent first, with
-// these changes — or with none at all if this is the first.
+// these changes, or with none if this is the first.
 func (l *LastShown) ViewOf(changed []Change) View {
 	all := make([]Record, 0, len(l.sessions))
 	for _, record := range l.sessions {
@@ -155,9 +81,6 @@ func (l *LastShown) ViewOf(changed []Change) View {
 	ByUrgency(all)
 
 	if !l.shown {
-		// The first view is the world arriving, not the world moving. Every
-		// session in it would otherwise read as a change, which is a restart
-		// telling you about the past.
 		changed = nil
 		l.shown = true
 	}

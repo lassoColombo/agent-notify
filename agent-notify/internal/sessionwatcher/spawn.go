@@ -88,10 +88,8 @@ func Spawn(layout paths.Layout, configured string) error {
 // not your shell's PATH, which is exactly why `agent-notify-binary` exists in
 // the configuration.
 //
-// Its first caller was Spawn, and the second is an integration that wants to
-// run `agent-notify focus-session` when somebody clicks a chip — the same
-// problem in a different costume, since a supervised child's PATH is not your
-// shell's PATH either.
+// An integration that runs `agent-notify focus-session` on a click has the
+// same problem: a launchd job's PATH is not your shell's either.
 //
 // Failing to find it is not fatal to anything. The record is already written,
 // `list` still reads it and still applies liveness as it reads; what is lost is

@@ -142,7 +142,7 @@ func merge(settings map[string]json.RawMessage, program string) (map[string]json
 
 	var changes []string
 	for _, event := range SubscribedHooks {
-		wanted := command{Type: "command", Command: fmt.Sprintf("%q %s", program, event)}
+		wanted := command{Type: "command", Command: fmt.Sprintf("%q", program)}
 		groups := hooks[event]
 
 		if updated, what := place(groups, wanted, program); what != "" {

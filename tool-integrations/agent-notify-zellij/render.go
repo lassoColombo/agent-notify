@@ -1,8 +1,8 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strconv"
 	"strings"
@@ -10,41 +10,7 @@ import (
 	"github.com/lassoColombo/agent-notify/session"
 )
 
-// This file is pure. It decides what should be run and returns it as data;
-// nothing here runs anything.
-//
-// That is what makes a display testable without a zellij: every case below —
-// two agents in one tab, a pane that moved, a session that ended, a tab the
-// user renamed underneath us — is a table of records and a table of panes, and
-// the assertion is a list of commands.
-
-// Place is where a session lives, as its own hook captured it.
-type Place struct {
-	Session string
-	Pane    int
-}
-
-// PlaceOf reads this integration's own captured blob off a record.
-//
-// A record with nothing captured is not an error and not a warning: an agent
-// running in a bare terminal is a perfectly ordinary session that this display
-// has nothing to say about, and it must cost nothing.
-func PlaceOf(record session.Record) (Place, bool) {
-	blob, present := record.CapturedContext.By[Name]
-	if !present {
-		return Place{}, false
-	}
-	var captured map[string]string
-	if err := json.Unmarshal(blob, &captured); err != nil {
-		return Place{}, false
-	}
-	zellijSession := captured[sessionVariable]
-	pane, err := strconv.Atoi(captured[paneVariable])
-	if zellijSession == "" || err != nil {
-		return Place{}, false
-	}
-	return Place{Session: zellijSession, Pane: pane}, true
-}
+// This file is pure: it decides what should be run and returns it as data.
 
 // Command is one zellij invocation, as data rather than as an effect.
 type Command struct {
@@ -54,14 +20,9 @@ type Command struct {
 }
 
 // Plan is the whole display: what this zellij session's panes and tabs should
-// say, minus what they already say.
-//
-// It reads the observed titles rather than remembering what it last wrote, and
-// that choice is the difference between a daemon and the per-event process this
-// replaces. Reading costs one subprocess per render — about 15ms, and renders
-// only happen when a state actually moves — and buys three things memory cannot:
-// it is correct after its own restart, it is correct after a pane moves to
-// another tab, and it never issues a rename that would change nothing.
+// say, minus what they already say. It reads the observed titles rather than
+// remembering what it last wrote, so it is correct after a restart and after a
+// pane moves, and never issues a rename that would change nothing.
 func Plan(zellijSession string, records []session.Record, panes []Pane, glyphs session.Palette) []Command {
 	held := map[int]Pane{}
 	var tabs []int
@@ -158,11 +119,8 @@ func Plan(zellijSession string, records []session.Record, panes []Pane, glyphs s
 	}
 
 	for _, tab := range tabs {
-		// The tab's name is the user's, not ours, so it is recovered rather
-		// than remembered: whatever it says now, minus any glyph of ours on
-		// the front. That makes a tab the user renamed by hand keep its new
-		// name, and it makes a restart of this daemon idempotent instead of
-		// stacking a second glyph on every tab.
+		// The tab's name is the user's, recovered rather than remembered:
+		// whatever it says now, minus any glyph of ours on the front.
 		base := strip(tabNames[tab], glyphs.Marks())
 		want := base
 		if here, found := session.MostUrgent(inTab[tab]); found {
@@ -254,4 +212,33 @@ func Group(records []session.Record) map[string][]session.Record {
 		}
 	}
 	return grouped
+}
+
+// Display is the render function and what it needs.
+type Display struct {
+	Zellij Zellij
+	Glyphs session.Palette
+	Logger *slog.Logger
+}
+
+// Render is called with the current state, never with a transition (R22).
+func (d *Display) Render(view session.View) error {
+	for zellijSession, records := range Group(view.Sessions) {
+		panes, err := d.Zellij.Panes(zellijSession)
+		if err != nil {
+			// A failed read is what guarantees no rename is attempted against
+			// a session that is not there (R13).
+			d.Logger.Debug("skipped a zellij session", "session", zellijSession, "why", err.Error())
+			continue
+		}
+		for _, command := range Plan(zellijSession, records, panes, d.Glyphs) {
+			if err := d.Zellij.Do(command); err != nil {
+				d.Logger.Warn("zellij refused", "session", zellijSession, "why", command.Why,
+					"problem", err.Error())
+				continue
+			}
+			d.Logger.Debug("painted", "session", zellijSession, "what", command.Why)
+		}
+	}
+	return nil
 }

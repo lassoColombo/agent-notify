@@ -48,9 +48,3 @@ func Ask(binary, command string, input json.RawMessage, timeout time.Duration) (
 	}
 	return json.RawMessage(answer), nil
 }
-
-// Summarise is [tool.Summarise], re-exported for the two callers in
-// internal/containers that summarise an answer this package handed back. It is
-// an alias rather than a copy because a second implementation of "one short
-// line" is how the four that existed before D-68 came to disagree.
-var Summarise = tool.Summarise

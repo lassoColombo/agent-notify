@@ -81,12 +81,6 @@ waiting on, the session-watcher runs it to render or to focus — and every one 
 those is a picker with nowhere to draw. The path lives in the keybinding
 instead, which is the only thing that runs this and where you would look for it.
 
-It used to say the same thing with `enabled = false`, which was a workaround
-rather than a statement: the old rule was "started if enabled and has a binary",
-so the only way to say "do not start this" was to say "this is off" about a
-thing that was on. The table is on now, and there is simply nothing in it for
-core to run.
-
 ### fzf owns the screen, as a library
 
 This program is about a thousand lines and none of them draw anything. It builds
@@ -143,7 +137,7 @@ section does all four.
   or [codex](../../agent-integrations/agent-notify-codex) — installed and
   reporting, so that `agent-notify list` has rows.
 - **A container integration**, if you want enter to actually take you
-  somewhere: [zellij](../agent-notify-zellij-container) and
+  somewhere: [zellij](../agent-notify-zellij) and
   [aerospace](../agent-notify-aerospace-container). Without one, enter runs
   `focus-session` and `focus-session` says it cannot.
 - **Go 1.26 or newer** to build. `.tool-versions` pins 1.26.2.

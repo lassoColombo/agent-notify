@@ -3,8 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strconv"
 	"time"
 
@@ -99,32 +97,4 @@ func (a Aerospace) Focus(id int) error {
 func (a Aerospace) run(args ...string) ([]byte, error) {
 	out, err := tool.Run(a.Binary, a.Timeout, args...)
 	return out.Stdout, err
-}
-
-// TheAerospaceToRun is the path out of the configuration, checked.
-//
-// There is no search here and no PATH fallback, and the absence is the design
-// (D-67). This program is run by the session-watcher, whose PATH is not your
-// shell's — a launchd job's is /usr/bin:/bin and nothing else — so a lookup
-// performed HERE is performed in the one context that cannot answer it. The
-// list of Homebrew prefixes that used to sit at this line was an attempt to
-// guess what the environment would not say.
-//
-// The lookup happens at install instead, which runs in your shell, where the
-// answer is simply available.
-func TheAerospaceToRun(given string) (string, error) {
-	const key = "[integration." + Name + ".settings] aerospace"
-	switch {
-	case given == "":
-		return "", fmt.Errorf("%s is not set — run `agent-notify install %s`, which finds "+
-			"aerospace in your own shell and prints the line to add", key, Name)
-	case !filepath.IsAbs(given):
-		return "", fmt.Errorf("%s = %q must be an absolute path: a supervised child's PATH "+
-			"is not yours, so a bare name means something different here than it does to you",
-			key, given)
-	}
-	if _, err := os.Stat(given); err != nil {
-		return "", fmt.Errorf("%s = %q: %w", key, given, err)
-	}
-	return given, nil
 }

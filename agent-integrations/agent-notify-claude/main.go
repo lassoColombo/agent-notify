@@ -16,24 +16,23 @@ import (
 // program is silent on both streams and exits 0 from every path that runs as a
 // hook. Diagnostics go to agent-notify's log (R2).
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "agent-notify-claude <HookEventName> | install [--print] [--settings PATH]")
-		os.Exit(1)
-	}
-
 	// install is not a hook. It is run by a person, so it may speak and it may
 	// fail.
-	if os.Args[1] == "install" {
+	if len(os.Args) > 1 && os.Args[1] == "install" {
 		os.Exit(install(os.Args[2:]))
+	}
+	if len(os.Args) > 1 {
+		fmt.Fprintln(os.Stderr, "agent-notify-claude reads one hook payload on stdin.")
+		fmt.Fprintln(os.Stderr, "  agent-notify-claude install [--print] [--settings PATH]")
+		os.Exit(1)
 	}
 
 	var payload Payload
 	// A payload that does not parse is not an error: Claude sends different
-	// shapes per hook and adds fields between releases, and the hooks this
-	// program ignores may send anything at all.
+	// shapes per hook and adds fields between releases.
 	_ = json.NewDecoder(os.Stdin).Decode(&payload)
 
-	report, worth := Translate(os.Args[1], payload,
+	report, worth := Translate(payload.HookEventName, payload,
 		WhatClaudeKnowsAboutThisSession(payload.SessionID),
 		WhatTheTranscriptSays(payload.TranscriptPath),
 		WhatClaudeTitlesThisSession(payload.TranscriptPath))

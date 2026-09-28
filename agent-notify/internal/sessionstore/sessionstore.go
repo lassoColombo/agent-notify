@@ -109,7 +109,7 @@ func (s *SessionStore) Apply(
 // The change function receives the record as it is on disk and returns what it
 // should become. It runs under the lock, so it may read anything in the record
 // and rely on it still being true when it returns. The store stamps `sequence`,
-// `updated_at`, `schema` and `key` afterwards, unconditionally — a caller never
+// `updated_at` and `key` afterwards, unconditionally — a caller never
 // gets to decide those (§A7.3).
 func (s *SessionStore) Update(
 	key session.Key,

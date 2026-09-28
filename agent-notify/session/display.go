@@ -128,16 +128,6 @@ func MostUrgent(records []Record) (Record, bool) {
 	return highest, true
 }
 
-// Urgency is the rank of the most urgent record in a set — the aggregate that
-// §A5.5 says every display computes and R24 says it should not have to.
-func Urgency(records []Record) int {
-	highest, found := MostUrgent(records)
-	if !found {
-		return RankUnknown
-	}
-	return highest.Rank
-}
-
 // WantsYou reports whether arriving in this state is worth interrupting a
 // person for.
 //

@@ -1,4 +1,4 @@
-module github.com/lassoColombo/agent-notify-zellij-display
+module github.com/lassoColombo/agent-notify-zellij
 
 go 1.26.0
 

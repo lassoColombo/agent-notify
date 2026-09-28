@@ -10,8 +10,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
+
+	"github.com/lassoColombo/agent-notify/hook"
 )
 
 // The hook payload does not carry the name, so it is read out of band from the
@@ -84,52 +85,22 @@ func WhatCodexCallsThisThread(sessionID string) string {
 	if sessionID == "" {
 		return ""
 	}
-	file, err := os.Open(whereCodexKeepsItsIndex())
-	if err != nil {
-		return ""
-	}
-	defer file.Close()
-	facts, err := file.Stat()
-	if err != nil {
-		return ""
-	}
-
 	// The id as it appears in the file, so that a line can be dismissed without
-	// being parsed. Codex's ids are uuids, so this is a real answer rather than
-	// a filter: every line that survives it is then parsed and checked properly.
+	// being parsed.
 	wanted := []byte(`"` + sessionID + `"`)
-
-	// carried is the head of a line the previous read landed in the middle of.
-	// It belongs to a line that begins earlier in the file, so it waits here
-	// for the read that brings the rest of it.
-	var carried []byte
-	var readSoFar int64
-
-	for end := facts.Size(); end > 0 && readSoFar < asFarBackAsItIsWorthGoing; {
-		start := max(end-oneReadWorthOfIndex, 0)
-		block := make([]byte, end-start)
-		if _, err := file.ReadAt(block, start); err != nil {
-			return ""
-		}
-		readSoFar += int64(len(block))
-
-		lines := bytes.Split(slices.Concat(block, carried), []byte("\n"))
-		if start > 0 {
-			// The first line began before this read did, so it is not whole
-			// yet; the next read is the one that completes it.
-			carried, lines = lines[0], lines[1:]
-		}
-		for i := len(lines) - 1; i >= 0; i-- {
-			if !bytes.Contains(lines[i], wanted) {
-				continue
+	var name string
+	_ = hook.ReadBackwards(whereCodexKeepsItsIndex(), oneReadWorthOfIndex, asFarBackAsItIsWorthGoing,
+		func(line []byte) bool {
+			if !bytes.Contains(line, wanted) {
+				return true
 			}
-			if name, itIsThisThread := nameInLine(lines[i], sessionID); itIsThisThread {
-				return name
+			found, itIsThisThread := nameInLine(line, sessionID)
+			if itIsThisThread {
+				name = found
 			}
-		}
-		end = start
-	}
-	return ""
+			return !itIsThisThread
+		})
+	return name
 }
 
 // nameInLine reads one line of the index, and says whether it is about the

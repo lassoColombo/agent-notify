@@ -123,7 +123,7 @@ func TestInstallAddsItselfAndKeepsEverythingElse(t *testing.T) {
 	// Every hook we subscribe to now names us.
 	for _, event := range SubscribedHooks {
 		joined := strings.Join(commandsFor(t, settings, event), " ")
-		if !strings.Contains(joined, "agent-notify-claude") || !strings.Contains(joined, event) {
+		if !strings.Contains(joined, "agent-notify-claude") {
 			t.Errorf("%s does not name this program: %q", event, joined)
 		}
 	}
@@ -253,7 +253,7 @@ func TestTheHookNeverBlocks(t *testing.T) {
 		{"SessionStart", realStart},
 	}
 	for _, attempt := range attempts {
-		command := exec.Command(binary, attempt.hook)
+		command := exec.Command(binary)
 		command.Stdin = strings.NewReader(attempt.payload)
 		command.Env = append(os.Environ(), "AGENT_NOTIFY_ROOT="+root)
 		var out, errs strings.Builder

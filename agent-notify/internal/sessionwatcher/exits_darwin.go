@@ -4,6 +4,7 @@ package sessionwatcher
 
 import (
 	"fmt"
+	"sync"
 	"syscall"
 	"time"
 
@@ -13,20 +14,15 @@ import (
 // Exits tells us the moment a process we did not start goes away.
 //
 // [verified 2026-09-16, macOS 26] kqueue's EVFILT_PROC with NOTE_EXIT registers
-// against any process owned by the same user, with no privileges and no
-// entitlement, and the event arrives the instant that process exits. This is
-// what makes `kill -9` on an agent show up on your bar in milliseconds instead
-// of at the next sweep (plan.md §A8.1).
-//
-// The sweep stays, as the safety net behind it: a pid we failed to register, a
-// record inherited from a previous session-watcher, a process that died in the
-// gap before we were listening.
+// against any process owned by the same user, with no privileges, and the event
+// arrives the instant that process exits (plan.md §A8.1). The sweep stays as
+// the safety net behind it.
 type Exits struct {
 	queue   int
+	mu      sync.Mutex
 	watched map[int]bool
 }
 
-// WatchExits opens the queue.
 func WatchExits() (*Exits, error) {
 	queue, err := unix.Kqueue()
 	if err != nil {
@@ -35,13 +31,11 @@ func WatchExits() (*Exits, error) {
 	return &Exits{queue: queue, watched: map[int]bool{}}, nil
 }
 
-// Watch registers one pid, if it is not registered already.
-//
-// A pid that has already exited fails to register, and that failure is the
-// answer rather than a problem: the sweep will judge it on the next tick, from
-// the store, against the start time. Registration is an optimisation on top of
-// a correct-but-slower mechanism, never the mechanism itself (R5).
+// Watch registers one pid. A pid that has already exited fails to register,
+// and the sweep judges it from the store instead (R5).
 func (e *Exits) Watch(pid int) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	if pid <= 0 || e.watched[pid] {
 		return nil
 	}
@@ -58,19 +52,7 @@ func (e *Exits) Watch(pid int) error {
 	return nil
 }
 
-// Forget stops tracking a pid we have already dealt with, so that a pid reused
-// later can be watched again.
-func (e *Exits) Forget(pid int) { delete(e.watched, pid) }
-
-// Watching reports how many pids are registered, for doctor.
-func (e *Exits) Watching() int { return len(e.watched) }
-
-// WhichPidsExited blocks until a watched process exits or the deadline passes,
-// and returns the pids that went.
-//
-// The timeout is not how exits are noticed — an event arrives the instant it
-// happens — it is only how this returns to the caller's loop so that a sweep
-// tick or a shutdown can be seen.
+// WhichPidsExited blocks until a watched process exits or the deadline passes.
 func (e *Exits) WhichPidsExited(within time.Duration) ([]int, error) {
 	events := make([]unix.Kevent_t, 16)
 	timeout := unix.NsecToTimespec(int64(within))
@@ -84,18 +66,16 @@ func (e *Exits) WhichPidsExited(within time.Duration) ([]int, error) {
 	}
 
 	gone := make([]int, 0, count)
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	for _, event := range events[:count] {
 		pid := int(event.Ident)
-		// EV_ONESHOT removed it already; forget it so a later record naming
-		// the same pid can register again.
 		delete(e.watched, pid)
 		gone = append(gone, pid)
 	}
 	return gone, nil
 }
 
-// Close releases the queue and every registration with it.
 func (e *Exits) Close() error {
-	e.watched = nil
 	return unix.Close(e.queue)
 }

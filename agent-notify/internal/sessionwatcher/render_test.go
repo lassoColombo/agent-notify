@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,7 +14,6 @@ import (
 	"github.com/lassoColombo/agent-notify/internal/paths"
 	"github.com/lassoColombo/agent-notify/internal/sessionstore"
 	"github.com/lassoColombo/agent-notify/internal/sessionwatcher"
-	"github.com/lassoColombo/agent-notify/internal/subscriber"
 	"github.com/lassoColombo/agent-notify/session"
 )
 
@@ -23,23 +21,6 @@ import (
 // happens between processes: a view on a stdin, an exit code, a process that is
 // not started at all. The displays here are shell scripts, which is the most
 // honest stand-in for somebody else's code.
-
-const beAnIntegration = "TestBeAnIntegration"
-
-// TestBeAnIntegration is not a test. It is a subscriber that connects on its
-// own — what a launchd-started display is — and it does nothing at all unless
-// the script below runs it by name.
-func TestBeAnIntegration(t *testing.T) {
-	if os.Getenv("AGENT_NOTIFY_TEST_INTEGRATION") == "" {
-		t.Skip("spawned only by these tests")
-	}
-	ctx, stop := context.WithTimeout(context.Background(), 60*time.Second)
-	defer stop()
-	_ = subscriber.Run(ctx, subscriber.Subscription{
-		Name:     os.Getenv("AGENT_NOTIFY_TEST_INTEGRATION"),
-		OnChange: func(session.View) error { return nil },
-	})
-}
 
 func shortRoot(t *testing.T) string {
 	t.Helper()
@@ -54,14 +35,13 @@ func shortRoot(t *testing.T) string {
 }
 
 // answersCapabilities writes a script that answers `capabilities` with exactly
-// this JSON and otherwise connects as a subscriber.
+// this JSON and nothing else.
 func answersCapabilities(t *testing.T, directory, name, answer string) string {
 	t.Helper()
 	path := filepath.Join(directory, "agent-notify-"+name)
 	script := fmt.Sprintf("#!/bin/sh\n"+
-		"if [ \"$1\" = %q ]; then printf '%%s\\n' '%s'; exit 0; fi\n"+
-		"AGENT_NOTIFY_TEST_INTEGRATION=%s exec %s -test.run=%s\n",
-		session.CapabilitiesCommand, answer, name, os.Args[0], beAnIntegration)
+		"if [ \"$1\" = %q ]; then printf '%%s\\n' '%s'; exit 0; fi\nexit 1\n",
+		session.CapabilitiesCommand, answer)
 	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
@@ -351,26 +331,6 @@ func TestAContainerIsNeverDrawn(t *testing.T) {
 	}
 }
 
-// TestSomethingThatConnectsOnItsOwnIsReported is the other half of a display:
-// one that owns its process, started by launchd, connecting unsolicited.
-//
-// Core does not run it and has no table for it, and a person who has just
-// loaded a launch agent still needs to see that it is talking.
-func TestSomethingThatConnectsOnItsOwnIsReported(t *testing.T) {
-	atATestablePace(t, 100*time.Millisecond)
-	root := shortRoot(t)
-	layout := running(t, root)
-
-	connecting := answersCapabilities(t, root, "bar", `{"methods":[]}`)
-	started := startInTheBackground(t, connecting)
-	t.Cleanup(func() { _ = started.Process.Kill() })
-
-	waitFor(t, "the unsolicited subscriber to be reported", func() bool {
-		one, found := reported(t, layout, "bar")
-		return found && strings.Contains(one.State, "connected")
-	})
-}
-
 // aTurnFinished puts one session in the store, the way an agent-integration
 // would: a report, applied, and the session-watcher notices on its next sweep.
 func aTurnFinished(t *testing.T, layout paths.Layout, id string) {
@@ -403,14 +363,4 @@ func applyToTheStore(t *testing.T, layout paths.Layout, report session.Report) {
 	if _, err := store.Apply(report, time.Now().UTC()); err != nil {
 		t.Fatalf("applying %s: %v", report.Event, err)
 	}
-}
-
-// startInTheBackground runs a program and leaves it running.
-func startInTheBackground(t *testing.T, binary string) *exec.Cmd {
-	t.Helper()
-	running := exec.Command(binary)
-	if err := running.Start(); err != nil {
-		t.Fatalf("starting %s: %v", binary, err)
-	}
-	return running
 }

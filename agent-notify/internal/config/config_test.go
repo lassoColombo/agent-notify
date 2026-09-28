@@ -223,58 +223,6 @@ func TestATableWithNoBinaryIsAccepted(t *testing.T) {
 // configuration get a sentence rather than the generic "not recognised", because
 // the generic one says a key was ignored and not that the mechanism has gone
 // (D-57).
-// TestCaptureEnvironmentIsRemovedAndSaysSo: the key that said "run this one on
-// the agent's path" is gone because all of them are run there now.
-//
-// A person whose file still has it deserves better than silence: leaving it in
-// changes nothing, but so does deleting it, and only the sentence says which.
-func TestCaptureEnvironmentIsRemovedAndSaysSo(t *testing.T) {
-	_, problems := config.Parse([]byte(`
-[integration.zellij-display]
-binary              = "agent-notify-zellij-display"
-capture-environment = true
-`), "old.toml")
-
-	var said string
-	for _, problem := range problems {
-		if strings.Contains(problem.Error(), "no longer read") {
-			said = problem.Error()
-		}
-	}
-	if said == "" {
-		t.Fatalf("nothing explained the removed key: %v", problems)
-	}
-	for _, want := range []string{"zellij-display", "Every integration is asked", "Delete the line"} {
-		if !strings.Contains(said, want) {
-			t.Errorf("the complaint does not mention %q:\n%s", want, said)
-		}
-	}
-}
-
-func TestTheRemovedCaptureKeysSayWhatToDoInstead(t *testing.T) {
-	_, problems := config.Parse([]byte(`
-[integration.zellij-display]
-binary  = "agent-notify-zellij-display"
-capture = ["ZELLIJ_SESSION_NAME", "ZELLIJ_PANE_ID"]
-`), "old.toml")
-
-	var said string
-	for _, problem := range problems {
-		if strings.Contains(problem.Error(), "capture-environment") {
-			said = problem.Error()
-		}
-	}
-	if said == "" {
-		t.Fatalf("nothing explained the removed key: %v", problems)
-	}
-	for _, want := range []string{
-		"zellij-display", "capture", "`capture-environment`", "agent-notify install",
-	} {
-		if !strings.Contains(said, want) {
-			t.Errorf("the complaint does not mention %q:\n%s", want, said)
-		}
-	}
-}
 
 // A file that still carries them is otherwise used. Losing the rest of somebody's
 // configuration over a line that no longer does anything would be a worse answer

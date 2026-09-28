@@ -10,7 +10,6 @@ import (
 	"github.com/lassoColombo/agent-notify/command/focus"
 	"github.com/lassoColombo/agent-notify/command/install"
 	"github.com/lassoColombo/agent-notify/command/list"
-	"github.com/lassoColombo/agent-notify/command/replay"
 	"github.com/lassoColombo/agent-notify/command/reportevent"
 	"github.com/lassoColombo/agent-notify/command/tail"
 	"github.com/lassoColombo/agent-notify/command/watcher"
@@ -77,7 +76,7 @@ never a second implementation of anything.`,
 	fileUnder(command, groupForDoingSomethingAboutIt,
 		focus.FocusSession(), annotate.Command())
 	fileUnder(command, groupForSettingItUp,
-		install.Command(), watcher.Command(), replay.Record(), replay.Replay())
+		install.Command(), watcher.Command())
 	fileUnder(command, groupForWhatAnAgentCalls,
 		reportevent.Command())
 

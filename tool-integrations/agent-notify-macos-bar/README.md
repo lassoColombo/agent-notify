@@ -6,7 +6,7 @@ the ones waiting on you flickering, and a menu behind it listing every session
 with the one you choose brought to the front.
 
 It needs nothing installed first. The [zellij
-display](../agent-notify-zellij-display) needs zellij; this one needs the menu
+display](../agent-notify-zellij) needs zellij; this one needs the menu
 bar every Mac already has, which is the reason it exists.
 
 ```
@@ -267,7 +267,7 @@ The bundle holds a COPY of the binary, so run this again after rebuilding.
 
 This display runs itself rather than being started by agent-notify:
 a menu bar item dies with its process, so there is nothing core could
-usefully run. It watches `agent-notify tail --json` instead.
+usefully run. It watches the store itself instead.
 
 <?xml version="1.0" encoding="UTF-8"?>
 … a launch agent naming the binary inside the bundle …
@@ -309,9 +309,11 @@ menu bar exists.
 That is also why its table has no `binary`. `binary` means "core may run this",
 and nothing core runs could hold this item up.
 
-What it reads is `agent-notify tail --json`, which it starts itself and starts
-again if it stops. So the session-watcher going away is not this display going
-away: it keeps its item, and picks up where it left off when a watcher is back.
+What it reads is the store: it watches `state/sessions` and `state/ended` with
+kqueue and re-reads them when they change, through the same `subscribe.Run`
+that `agent-notify tail` uses. So the session-watcher going away is not this
+display going away: it keeps its item, and starts a watcher if none holds the
+lock.
 
 It puts its item on the menu bar when it connects, and — almost — takes it off
 when it stops. `removeStatusItem:` is deliberately not called on shutdown,
@@ -334,16 +336,14 @@ paths
   log         /Users/you/Library/Application Support/agent-notify/agent-notify.log
 
 directories  ok    present, mode 700
-sockets      ok    longest path 82 of 103 bytes — …/agent-notify/session-changes.sock
 config       ok    2 agent(s), 6 integration(s), keep-ended-sessions 168h0m0s
 store        ok    3 live session(s), 74 ended and still resumable, 0 forgotten this run
 liveness     ok    boot 027BA0B8-… — 3 running, 0 gone but not yet ended, 0 cannot tell
 watcher      ok    pid 86777, version 0.0.0-dev, since 2026-09-22T22:15:40Z
-                  the socket answers: 77 session(s) in its snapshot
 integrations ok    reported by pid 86777 at 2026-09-23T20:38:39Z
-             macos-bar              connected, pid 86843 [display]
-             macos-notifications    connected, pid 86844 [display]
-             zellij-display         connected, pid 86847 [display]
+             macos-bar              yours to start; core never runs it
+             macos-notifications    yours to start; core never runs it
+             zellij                 drawn when something it watches moves
 ```
 
 `macos-bar … connected` is the line that matters. A configuration error is
@@ -499,8 +499,9 @@ path lives in the launch agent, because `binary` would mean "core may run this".
 One key elsewhere in the file matters to this display, and matters more than it
 used to: top-level `agent-notify-binary`. It is how this display finds the
 `agent-notify` to run when you choose a row — and now also the one it watches,
-`agent-notify tail --json`. A launchd job's `PATH` is `/usr/bin:/bin` and
-nothing else, so naming it explicitly is no longer optional in practice.
+the session-watcher it starts when none is running. A launchd job's `PATH` is
+`/usr/bin:/bin` and nothing else, so naming it explicitly is no longer optional
+in practice.
 
 ### `[integration.macos-bar.settings]` — this display's half
 
@@ -652,9 +653,8 @@ is core's:
 | --- | --- |
 | `AGENT_NOTIFY_ROOT` | Moves the state directory, the runtime directory and the config file beneath one directory — the one step that makes an isolated instance possible. Unset, the platform defaults apply: `~/Library/Application Support/agent-notify`, a runtime directory under `$TMPDIR`, and `~/.config/agent-notify/config.toml`. |
 
-It is read through the subscriber SDK, so this display is pointed at a recording
-the same way anything else is — `agent-notify record` and `agent-notify replay`
-set it for you.
+It is read through the SDK, so pointing this display at another store is one
+variable.
 
 ### The timings you cannot configure
 

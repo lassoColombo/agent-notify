@@ -98,12 +98,9 @@ func Reduce(previous Kernel, event Event) Kernel {
 }
 
 // Apply is Reduce plus everything else the event carries: the next record,
-// given the one on disk.
-//
-// It is pure — the clock is a parameter and the result shares nothing mutable
-// with previous — so that the store (M4) can lock, read, apply and write
-// without a state machine of its own, and so that the reducer table is
-// testable without a filesystem.
+// given the one on disk. It is pure: the clock is a parameter and the result
+// shares nothing mutable with previous. Key, Sequence, CreatedAt and UpdatedAt
+// are the store's to stamp, on every write.
 //
 // A zero previous means a session nobody has recorded yet.
 //
@@ -113,13 +110,6 @@ func Reduce(previous Kernel, event Event) Kernel {
 // not yet carry (§A18 Q15).
 func Apply(previous Record, report Report, now time.Time) Record {
 	next := previous.Clone()
-
-	if next.CreatedAt.IsZero() {
-		next.Key = report.Key
-		next.CreatedAt = now
-	}
-	next.Sequence = previous.Sequence + 1
-	next.UpdatedAt = now
 
 	kernel := Reduce(previous.Kernel, report.Event)
 	moved := kernel != previous.Kernel

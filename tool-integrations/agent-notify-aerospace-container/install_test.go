@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lassoColombo/agent-notify/tool"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -159,29 +160,7 @@ func TestTheToolIsResolvedAtInstallTime(t *testing.T) {
 	}
 	// And what it printed is what the program will accept, which is the loop
 	// worth closing: a table that reads well and is then refused helps nobody.
-	if _, err := TheAerospaceToRun(where); err != nil {
+	if _, err := tool.AbsolutePath("aerospace", where); err != nil {
 		t.Errorf("install printed a path its own program refuses: %v", err)
-	}
-}
-
-// TestTheToolMustBeNamedAndAbsolute: there is no search left, so the only
-// answers are a path somebody has seen, or a refusal that says so.
-func TestTheToolMustBeNamedAndAbsolute(t *testing.T) {
-	for _, one := range []struct{ given, mention string }{
-		{"", "is not set"},
-		{"aerospace", "absolute"},
-		{"./aerospace", "absolute"},
-	} {
-		_, err := TheAerospaceToRun(one.given)
-		if err == nil {
-			t.Errorf("TheAerospaceToRun(%q) was accepted", one.given)
-			continue
-		}
-		if !strings.Contains(err.Error(), one.mention) {
-			t.Errorf("TheAerospaceToRun(%q) said %q, want it to mention %q", one.given, err, one.mention)
-		}
-	}
-	if _, err := TheAerospaceToRun("/nowhere/at/all/aerospace"); err == nil {
-		t.Error("a path that is not there was accepted")
 	}
 }

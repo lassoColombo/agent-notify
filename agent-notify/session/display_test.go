@@ -25,9 +25,6 @@ func TestMostUrgentIsWhatOneLightShows(t *testing.T) {
 	if _, found := session.MostUrgent(nil); found {
 		t.Error("an empty set has no most urgent record")
 	}
-	if got := session.Urgency(nil); got != session.RankUnknown {
-		t.Errorf("Urgency(nil) = %d, want RankUnknown", got)
-	}
 
 	tab := []session.Record{
 		waiting("one", session.Working, nine),
@@ -37,9 +34,6 @@ func TestMostUrgentIsWhatOneLightShows(t *testing.T) {
 	highest, found := session.MostUrgent(tab)
 	if !found || highest.Name != "two" {
 		t.Errorf("MostUrgent picked %q, want the blocked one", highest.Name)
-	}
-	if got := session.Urgency(tab); got != session.RankBlockedOnYou {
-		t.Errorf("Urgency = %d, want %d", got, session.RankBlockedOnYou)
 	}
 
 	// Between two sessions at the same urgency the one waiting longer wins,

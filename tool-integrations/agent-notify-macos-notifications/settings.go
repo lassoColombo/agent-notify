@@ -18,33 +18,7 @@ import (
 // their bar and no banners. Two programs, two bundles, two answers.
 const Name = "macos-notifications"
 
-// me is this integration: how everything here asks where agent-notify's files
-// are, and what its own settings say.
-//
-// Root is left empty on purpose — empty means "wherever this process's
-// environment says", which is right everywhere but a test (D-69).
-var me = subscribe.Integration{Name: Name}
-
-// capabilities is what this notifier answers `capabilities` with, and the same
-// wake list it watches with.
-//
-// **No methods**, and that is the honest answer rather than a gap. A method is
-// something core may run, and core runs nothing here: a tap on a banner is
-// answered on this process's main thread, so there has to be a process for it
-// to reach, and launchd keeps one. Declaring `render` would invite core to fork
-// a poster per change whose banners nobody could click.
-//
-// The wake list is still here, and is the one thing this value is for: it is
-// what the `tail` it runs is told to wake for, and a handshake that named
-// different fields from the watch would be the D-72 failure again, arrived at
-// from the other side.
-//
-// WantEnded stays false. A notifier is told about the transition to ended
-// either way (D-26), and an ended session in the opening snapshot is a banner
-// for something that finished while nobody was running this.
-var capabilities = session.Capabilities{
-	WakeOn: WhatToWakeFor(),
-}
+var me = subscribe.Integration{Name: Name, WakeOn: WhatToWakeFor()}
 
 // DefaultColours is what the invader on a banner is drawn in.
 //
@@ -69,10 +43,9 @@ var DefaultColours = map[session.Kernel]string{
 // the file is ours. A key nobody declared is refused by name.
 type Settings struct {
 	// Sign is the code signing identity `install` gives the bundle, remembered
-	// here so that re-running install after a rebuild does not need the flag
-	// again. Nothing at runtime reads it — and an empty one is not merely
-	// second best here, it is fatal: macOS refuses notifications from an
-	// ad-hoc signed bundle outright, silently (bundle.go).
+	// so that re-running install after a rebuild does not need the flag again.
+	// Empty is ad-hoc, and macOS refuses notifications from an ad-hoc bundle
+	// silently.
 	Sign string `toml:"sign"`
 
 	// Preview is how much of what the agent said a banner carries.
@@ -113,7 +86,6 @@ type PreviewSettings struct {
 // Resolved is Settings after everything that can fail has been done once, at
 // startup, where it can still be reported to a person.
 type Resolved struct {
-	Core    string
 	Preview Preview
 	Sound   Sound
 	Colours session.Palette
@@ -167,13 +139,9 @@ func Read(given subscribe.Integration) (Resolved, error) {
 		return Resolved{}, fmt.Errorf("[integration.%s.settings.preview] %s", Name, problem)
 	}
 
-	// What tapping a banner runs. Without it a notification is something you
-	// can read and not something you can act on, so this is a startup error
-	// rather than something discovered when somebody taps one.
-	core, err := given.CoreBinary()
-	if err != nil {
+	// Refused now rather than when somebody taps a banner.
+	if _, err := given.CoreBinary(); err != nil {
 		return Resolved{}, fmt.Errorf("tapping a banner has to be able to run something, and %w", err)
 	}
-	resolved.Core = core
 	return resolved, nil
 }

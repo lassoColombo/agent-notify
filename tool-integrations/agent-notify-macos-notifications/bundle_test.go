@@ -1,11 +1,9 @@
 package main
 
 import (
-	"encoding/json"
 	"image"
 	"image/png"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,231 +11,24 @@ import (
 	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
-// bundledAt stands a bundle up around a real Mach-O binary, because a bundle is
-// signed and `codesign` will not sign a shell script standing in for one.
-func bundledAt(t *testing.T) Bundle {
-	t.Helper()
-	root := t.TempDir()
-	binary := filepath.Join(root, "bin", program)
-	if err := os.MkdirAll(filepath.Dir(binary), 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-	real, err := os.ReadFile("/bin/echo")
-	if err != nil {
-		t.Skipf("no binary to stand in for one: %v", err)
-	}
-	if err := os.WriteFile(binary, real, 0o755); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-	return Bundle{Path: filepath.Join(root, "Applications", program+".app"), Executable: binary}
-}
-
-// TestTheExecutableIsARegularFileAndNotALink. A symlink is the tidier design
-// and it cannot be signed: `codesign` answers "the main executable or Info.plist
-// must be a regular file", and an unsigned bundle never reaches the
-// notification system at all.
-func TestTheExecutableIsARegularFileAndNotALink(t *testing.T) {
-	bundle := bundledAt(t)
-	if err := bundle.Write(); err != nil {
-		t.Fatalf("Write: %v", err)
-	}
-
-	info, err := os.Lstat(bundle.PathOfTheBinaryInside())
-	if err != nil {
-		t.Fatalf("Lstat: %v", err)
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		t.Fatalf("%s is a symlink, which cannot be signed", bundle.PathOfTheBinaryInside())
-	}
-	if !info.Mode().IsRegular() {
-		t.Fatalf("%s is not a regular file", bundle.PathOfTheBinaryInside())
-	}
-	if info.Mode().Perm()&0o111 == 0 {
-		t.Errorf("%s is not executable", bundle.PathOfTheBinaryInside())
-	}
-}
-
-// TestTheBundleIsSignedAsItself is the regression test for an afternoon: with a
-// symlinked executable `codesign -dv` reports the identifier as `a.out`, macOS
-// has no record of the app, and asking for notification permission silently
-// does nothing at all — no prompt, and the status stays `not-determined`.
-func TestTheBundleIsSignedAsItself(t *testing.T) {
-	bundle := bundledAt(t)
-	if err := bundle.Write(); err != nil {
-		t.Fatalf("Write: %v", err)
-	}
-	out, err := exec.Command("codesign", "-dv", bundle.Path).CombinedOutput()
-	if err != nil {
-		t.Fatalf("the bundle is not signed: %v\n%s", err, out)
-	}
-	if !strings.Contains(string(out), "Identifier="+Identifier) {
-		t.Errorf("codesign reports:\n%s\nwant Identifier=%s", out, Identifier)
-	}
-}
-
-// TestRebuildingReplacesWhatTheBundleRuns, including while it is running, which
-// is the ordinary case: install is how a running display is upgraded.
-func TestRebuildingReplacesWhatTheBundleRuns(t *testing.T) {
-	bundle := bundledAt(t)
-	if err := bundle.Write(); err != nil {
-		t.Fatalf("first Write: %v", err)
-	}
-	before, err := os.ReadFile(bundle.PathOfTheBinaryInside())
-	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
-	}
-
-	newer, err := os.ReadFile("/bin/date")
-	if err != nil {
-		t.Skipf("nothing else to stand in for a rebuild: %v", err)
-	}
-	if err := os.WriteFile(bundle.Executable, newer, 0o755); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-	if err := bundle.Write(); err != nil {
-		t.Fatalf("second Write: %v", err)
-	}
-	after, err := os.ReadFile(bundle.PathOfTheBinaryInside())
-	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
-	}
-	if len(after) == len(before) {
-		t.Errorf("the bundle still holds the old binary")
-	}
-}
-
-// TestTheInfoPlistSaysTheThingsMacOSReads. The identifier is what macOS files
-// its notification decision against, the icon is what a banner carries, and
-// LSUIElement is what keeps this out of the Dock.
-//
-// Read back through `plutil` rather than through a plist library, because the
-// question is not whether some parser accepts what was written — it is whether
-// the one on this machine does, and that one is also the only opinion that
-// counts at runtime.
-func TestTheInfoPlistSaysTheThingsMacOSReads(t *testing.T) {
-	bundle := bundledAt(t)
-	if err := bundle.Write(); err != nil {
-		t.Fatalf("Write: %v", err)
-	}
-	body, err := exec.Command("plutil", "-convert", "json", "-o", "-",
-		filepath.Join(bundle.Path, "Contents", "Info.plist")).Output()
-	if err != nil {
-		t.Fatalf("plutil could not read what was written: %v", err)
-	}
-
-	var parsed map[string]any
-	if err := json.Unmarshal(body, &parsed); err != nil {
-		t.Fatalf("what plutil gave back is not JSON: %v", err)
-	}
-	if parsed["CFBundleIdentifier"] != Identifier {
-		t.Errorf("CFBundleIdentifier = %v, want %q", parsed["CFBundleIdentifier"], Identifier)
-	}
-	if parsed["CFBundleExecutable"] != program {
-		t.Errorf("CFBundleExecutable = %v, want %q", parsed["CFBundleExecutable"], program)
-	}
-	if parsed["LSUIElement"] != true {
-		t.Errorf("LSUIElement = %v — a display would appear in the Dock", parsed["LSUIElement"])
-	}
-}
-
-// TestMacOSItselfAcceptsTheBundle, because a plist this program can parse and
-// macOS cannot is exactly the bug a hand-written plist invites.
-func TestMacOSItselfAcceptsTheBundle(t *testing.T) {
-	bundle := bundledAt(t)
-	if err := bundle.Write(); err != nil {
-		t.Fatalf("Write: %v", err)
-	}
-	out, err := exec.Command("plutil", "-lint",
-		filepath.Join(bundle.Path, "Contents", "Info.plist")).CombinedOutput()
-	if err != nil {
-		t.Fatalf("plutil rejected it: %v\n%s", err, out)
-	}
-}
-
-// TestInstallingTwiceRepairsRatherThanFails: install is what somebody runs when
-// something is wrong, so it has to be the fix and not a thing to be careful
-// about.
-func TestInstallingTwiceRepairsRatherThanFails(t *testing.T) {
-	bundle := bundledAt(t)
-	if err := bundle.Write(); err != nil {
-		t.Fatalf("first Write: %v", err)
-	}
-	// Whatever is in there is broken: truncated, half-copied, replaced by hand.
-	if err := os.WriteFile(bundle.PathOfTheBinaryInside(), []byte("rubbish"), 0o755); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-	if err := bundle.Write(); err != nil {
-		t.Fatalf("second Write: %v", err)
-	}
-	body, _ := os.ReadFile(bundle.PathOfTheBinaryInside())
-	if string(body) == "rubbish" {
-		t.Errorf("a broken bundle was not repaired")
-	}
-}
-
-func TestABundleCannotPointAtSomethingThatIsNotThere(t *testing.T) {
-	bundle := bundledAt(t)
-	bundle.Executable = filepath.Join(t.TempDir(), "gone")
-	err := bundle.Write()
-	if err == nil || !strings.Contains(err.Error(), "no binary") {
-		t.Errorf("err = %v, want a refusal naming the missing binary", err)
-	}
-}
-
-// TestTheLaunchAgentPointsInsideTheBundle. Naming the bare binary would work in
-// every way except the one the bundle exists for.
+// The launch agent names the binary inside the bundle, and the table names no
+// binary at all: `binary` means "core may run this".
 func TestTheLaunchAgentPointsInsideTheBundle(t *testing.T) {
-	bundle := bundledAt(t)
-	written := subscribe.LaunchAgentPlist(Identifier, bundle.PathOfTheBinaryInside())
-	if !strings.Contains(written, ".app/Contents/MacOS/") {
-		t.Errorf("the launch agent names %q, which is not inside a bundle", written)
+	bundle := subscribe.Bundle{Path: "/Applications/x.app", Program: program}
+	plist := subscribe.LaunchAgentPlist(Identifier, bundle.PathOfTheBinaryInside())
+	if !strings.Contains(plist, ".app/Contents/MacOS/"+program) {
+		t.Errorf("the launch agent names %q, which is not inside a bundle", plist)
+	}
+	if table := theConfigTableToAdd(""); strings.Contains(table, "binary") {
+		t.Errorf("the table still names a binary, so core would try to run it:\n%s", table)
 	}
 }
 
-// TestThisTestBinaryIsNotBundled is the other half of the runtime check: a bare
-// binary must be able to tell that it is one, or the warning never fires.
+// A bare binary must be able to tell that it is one, or the warning never
+// fires.
 func TestThisTestBinaryIsNotBundled(t *testing.T) {
 	if got := RunningIn(); got != "" {
 		t.Errorf("RunningIn() = %q, but `go test` does not run from a bundle", got)
-	}
-}
-
-// TestABundleIsSignedWithTheIdentityItIsGiven, because the difference between
-// an ad-hoc signature and a named one is the difference between a display that
-// can notify and one macOS will not even list in System Settings.
-func TestABundleIsSignedWithTheIdentityItIsGiven(t *testing.T) {
-	identities := CodeSigningIdentitiesInTheKeychain()
-	if len(identities) == 0 {
-		t.Skip("this keychain has no code signing identity to sign with")
-	}
-	bundle := bundledAt(t)
-	bundle.Identity = identities[0]
-	if err := bundle.Write(); err != nil {
-		t.Fatalf("Write: %v", err)
-	}
-	out, err := exec.Command("codesign", "-dv", "--verbose=4", bundle.Path).CombinedOutput()
-	if err != nil {
-		t.Fatalf("codesign: %v\n%s", err, out)
-	}
-	if !strings.Contains(string(out), "Authority="+identities[0]) {
-		t.Errorf("signed by somebody else:\n%s\nwant Authority=%s", out, identities[0])
-	}
-	if strings.Contains(string(out), "adhoc") {
-		t.Errorf("still ad-hoc despite being given %q", identities[0])
-	}
-}
-
-// TestIdentitiesIncludesUntrustedOnes. A self-signed certificate is untrusted
-// by construction — `security find-identity -v` hides it — and it is exactly
-// the one wanted here, so the listing must not filter on validity.
-func TestIdentitiesIncludesUntrustedOnes(t *testing.T) {
-	out, err := exec.Command("security", "find-identity", "-p", "codesigning").Output()
-	if err != nil {
-		t.Skipf("no security command here: %v", err)
-	}
-	counted := strings.Count(string(out), `"`) / 2
-	if got := len(CodeSigningIdentitiesInTheKeychain()); got > counted {
-		t.Errorf("found %d identities, and security lists %d", got, counted)
 	}
 }
 

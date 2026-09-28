@@ -1,138 +1,47 @@
-// Package container is what a container-integration imports.
-//
-// A container answers two questions about one session — where does it live, and
-// bring it to the front — and it answers them by being *run*, not by staying
-// connected (plan.md D-38). A display is told things and therefore holds a
-// socket; a container is asked things and therefore has subcommands.
-//
-// An author writes up to four functions and a two-line main:
-//
-//	func main() {
-//	    os.Exit(container.Main(container.Integration{
-//	        Name:      "zellij-container",
-//	        Capture:   capture,    // runs inside the agent: read, do not ask
-//	        Interpret: interpret,  // runs in the session-watcher: ask the tool
-//	        Focus:     focus,
-//	        Focused:   focused,
-//	    }))
-//	}
-//
-// The split between Capture and Interpret is the one thing to understand, and
-// it is not stylistic (D-27). Capture runs as a child of the hook, inside the
-// agent's process tree, because the agent's environment exists nowhere else —
-// and it must therefore never talk to anything, never open a socket and never
-// wait. Interpret runs later, in the session-watcher, where blocking is allowed
-// and where asking zellij which tab holds pane 7 costs the agent nothing.
-//
-// Only Capture is shared with the rest of the world, which is why it lives in
-// [capture] and is merely wired up here (D-59). It is not a container's question
-// at all: a display needs it too, and the three functions below are the ones
-// that make this a container.
-//
-// The subcommand names themselves are [session.MethodInterpret],
-// [session.MethodFocus] and [session.MethodFocused], and they live there rather
-// than here because they are no longer only names. They are what this container
-// puts in its `capabilities` answer and what core dispatches on, so the string
-// an author implements and the string core asks for have to be one string and
-// not two that agree today.
+// Package container is the vocabulary a container-integration answers in: a
+// typed outcome for a focus and a three-valued answer for whether a session is
+// in front. The functions themselves are filled into [subscribe.Commands].
 package container
 
-import (
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
-	"os"
-
-	"github.com/lassoColombo/agent-notify/capture"
-	"github.com/lassoColombo/agent-notify/session"
-)
-
-// Integration is what an author fills in. Every function is optional: a
-// container that can place a session but not focus it is a legitimate thing to
-// ship, and core asks only for what is there.
-type Integration struct {
-	// Name is what this calls itself — in its config table, in
-	// `[container] order`, and as the key of its own section of a record.
-	Name string
-
-	// Capture reads the agent's environment. It runs on the hook path, as a
-	// child of the agent, under `capture-timeout`, and the rule is absolute:
-	// read local state and return. Never ask the tool anything here.
-	//
-	// It is declared here for a container's convenience — a container usually
-	// needs all four — but it is [capture.Reads] and Main dispatches it to
-	// [capture.Main], so a container and a display answer this one subcommand
-	// through the same code (D-59).
-	Capture capture.Reads
-
-	// Interpret turns what Capture returned into coordinates. It runs in the
-	// session-watcher under `interpret-timeout` and is allowed to block.
-	Interpret func(captured json.RawMessage) (any, error)
-
-	// Focus brings one place to the front. It is given what Interpret
-	// returned, and the coordinates are validated at the moment of use rather
-	// than trusted — panes and windows die without telling anybody (R17).
-	Focus func(coordinates json.RawMessage) (Outcome, error)
-
-	// Focused answers whether that place is the one in front, in three values,
-	// because "nobody can tell" is the state of every fresh install (R27).
-	Focused func(coordinates json.RawMessage) (Verdict, error)
-}
-
 // Problem is why a focus did not happen, as a word rather than a sentence, so
-// that a caller can act differently on each: "the pane is gone" should offer to
-// prune the record and "zellij is not running" should not (§A11.3).
+// that a caller can act differently on each (§A11.3).
 type Problem string
 
 const (
-	// PlaceIsGone — the pane, window or tab this session was in no longer
-	// exists. The session may well still be alive somewhere else.
+	// PlaceIsGone — the pane, window or tab no longer exists.
 	PlaceIsGone Problem = "place-is-gone"
 	// NotRunning — the tool itself is not there to be asked.
 	NotRunning Problem = "not-running"
-	// NeverPlaced — this container has no coordinates for this session, which
-	// is the ordinary case for a session that started outside it.
+	// NeverPlaced — this container has no coordinates for this session.
 	NeverPlaced Problem = "never-placed"
-	// NoContainer — nothing is configured to place anything. It is deliberately
-	// not the same word as NeverPlaced: those two feel identical and are not,
-	// and a fresh install is the first one (§A11.7).
+	// NoContainer — nothing is configured to place anything, which is every
+	// fresh install (§A11.7).
 	NoContainer Problem = "no-container-configured"
-	// Unreachable — the container was run and could not answer: it crashed, it
-	// timed out, or the binary named in the config is not there. Core
-	// synthesises this one; no integration ever reports it about itself.
+	// Unreachable — the container was run and could not answer. Core
+	// synthesises this one.
 	Unreachable Problem = "container-unreachable"
 	// Refused — the tool was asked, understood, and would not.
 	Refused Problem = "refused"
-	// Ambiguous — this container can see several places the session could be
-	// and nothing to choose between them. It is not "gone" and it is not "never
-	// placed": the evidence points at more than one door, and opening a door at
-	// random puts somebody in front of a window that is not theirs while
-	// looking exactly like success (§A11.3).
+	// Ambiguous — several places the session could be, and nothing to choose
+	// between them.
 	Ambiguous Problem = "ambiguous"
 )
 
-// Outcome is what came of a focus.
+// Outcome is what came of a focus. An empty Problem with OK false is read as
+// Refused.
 type Outcome struct {
-	OK bool `json:"ok"`
-	// Problem is set when OK is false. An empty one is read as Refused rather
-	// than as success: a container that says "no" without saying why has still
-	// said no.
+	OK      bool    `json:"ok"`
 	Problem Problem `json:"problem,omitempty"`
 	Detail  string  `json:"detail,omitempty"`
 }
 
-// Done is the outcome of a focus that worked.
 func Done() Outcome { return Outcome{OK: true} }
 
-// Failed is the outcome of one that did not, named.
 func Failed(problem Problem, detail string) Outcome {
 	return Outcome{Problem: problem, Detail: detail}
 }
 
-// Answer is a three-valued yes. There is no bool anywhere in this file for the
-// reason R27 gives: the third answer is part of the design, and a bool forces
-// whoever receives it to guess which of the two it meant.
+// Answer is a three-valued yes (R27).
 type Answer string
 
 const (
@@ -145,135 +54,4 @@ const (
 type Verdict struct {
 	Answer Answer `json:"answer"`
 	Detail string `json:"detail,omitempty"`
-}
-
-// Main dispatches one subcommand and returns the exit code.
-//
-// The contract with core, in one paragraph: the answer is one JSON object on
-// stdout and the exit code is 0; anything else means "I could not answer", and
-// stderr is the reason. Core never parses stderr and never reads meaning into a
-// particular non-zero code — a container that crashes, hangs or was deleted all
-// arrive as the same thing, which is the only honest way to treat a program
-// that did not run.
-func Main(integration Integration) int {
-	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "%s <%s|%s|%s|%s|%s>\n", integration.Name,
-			session.CapabilitiesCommand, capture.Command,
-			session.MethodInterpret, session.MethodFocus, session.MethodFocused)
-		return 1
-	}
-
-	// The two subcommands every tool-integration answers, container or not, are
-	// dispatched before this package's own verbs.
-	switch os.Args[1] {
-	case session.CapabilitiesCommand:
-		// The first thing core ever runs, and the only one it can run before
-		// it knows anything about this program.
-		return integration.capabilities().Answer(os.Stdout)
-	case capture.Command:
-		// Early for the reason the whole split exists: it runs on the path the
-		// agent waits on and must do nothing but read.
-		return capture.Main(integration.Name, integration.Capture)
-	}
-
-	answer, err := integration.answer(os.Args[1], os.Stdin)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s %s: %v\n", integration.Name, os.Args[1], err)
-		return 1
-	}
-	encoded, err := json.Marshal(answer)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s %s: %v\n", integration.Name, os.Args[1], err)
-		return 1
-	}
-	fmt.Println(string(encoded))
-	return 0
-}
-
-// capabilities is what this container answers `capabilities` with, derived from
-// which functions the author filled in rather than written down anywhere.
-//
-// Derived because this list decides whether core forks. A method declared and
-// not implemented costs a process per question and answers nothing; a method
-// implemented and not declared is never called at all. A nil function is
-// already exactly "do not call me", so taking the answer from the functions
-// leaves nothing to keep in agreement.
-//
-// `capture-environment` is not in it: every integration is asked that one and
-// none of them declares it.
-func (i Integration) capabilities() session.Capabilities {
-	var methods []string
-	if i.Interpret != nil {
-		methods = append(methods, session.MethodInterpret)
-	}
-	if i.Focus != nil {
-		methods = append(methods, session.MethodFocus)
-	}
-	if i.Focused != nil {
-		// A container with no Focused still answers the question — with
-		// "cannot say", below — but it should not be ASKED, which is a fork
-		// spent to be told nothing. Leaving it out of the list is how that
-		// stops, and the honest reading of R27 besides: not knowing is an
-		// answer, and a container that will never know has nothing to add to
-		// the vote.
-		methods = append(methods, session.MethodFocused)
-	}
-	return session.Capabilities{Methods: methods}
-}
-
-var errUnimplemented = errors.New("this container does not answer that")
-
-func (i Integration) answer(command string, input io.Reader) (any, error) {
-	switch command {
-	case session.MethodInterpret:
-		if i.Interpret == nil {
-			return nil, errUnimplemented
-		}
-		given, err := read(input)
-		if err != nil {
-			return nil, err
-		}
-		return i.Interpret(given)
-
-	case session.MethodFocus:
-		if i.Focus == nil {
-			return nil, errUnimplemented
-		}
-		given, err := read(input)
-		if err != nil {
-			return nil, err
-		}
-		return i.Focus(given)
-
-	case session.MethodFocused:
-		if i.Focused == nil {
-			// Not knowing is an answer, and it is the one every container that
-			// has never heard of this question should give (R27).
-			return Verdict{Answer: CannotTell, Detail: "this container cannot say"}, nil
-		}
-		given, err := read(input)
-		if err != nil {
-			return nil, err
-		}
-		return i.Focused(given)
-	}
-	return nil, fmt.Errorf("%q is not a command", command)
-}
-
-// read takes the whole of stdin as JSON. An empty stdin is `null` rather than
-// an error: `capture-environment` is given nothing, and a container asked to
-// interpret a session it never captured should say so in its own words rather
-// than fail to start.
-func read(input io.Reader) (json.RawMessage, error) {
-	raw, err := io.ReadAll(input)
-	if err != nil {
-		return nil, err
-	}
-	if len(raw) == 0 {
-		return json.RawMessage("null"), nil
-	}
-	if !json.Valid(raw) {
-		return nil, fmt.Errorf("what arrived on stdin is not JSON")
-	}
-	return json.RawMessage(raw), nil
 }

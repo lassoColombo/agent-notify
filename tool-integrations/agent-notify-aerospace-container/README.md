@@ -264,7 +264,7 @@ manager is outside whatever multiplexer is running inside it:
 
 ```toml
 [container]
-order = ["aerospace-container", "zellij-container"]
+order = ["aerospace-container", "zellij"]
 ```
 
 And if `aerospace` was not on PATH when you ran install, the line comes out
@@ -284,8 +284,8 @@ agent-notify doctor
 ```
 config       ok    2 agent(s), 6 integration(s), keep-ended-sessions 168h0m0s
 integrations ok    reported by pid 86777 at 2026-09-23T20:38:44Z
-             macos-bar              connected, pid 86843 [display]
-             zellij-display         connected, pid 86847 [display]
+             macos-bar              yours to start; core never runs it
+             zellij                 drawn when something it watches moves
 ```
 
 Read that honestly: a container **does not appear** in the `integrations` list
@@ -317,7 +317,7 @@ then:
 looking at:  window 107 Firefox, workspace 2
 $ agent-notify focus-session m15-demo
   aerospace-container    focused
-  zellij-container       focused
+  zellij                 focused
 agent-notify is in front.
 after:       window 34 Ghostty, workspace 1
 focused?     yes
@@ -367,7 +367,7 @@ It is called `aerospace` rather than `binary` because the table above it has a
 
 ```toml
 [container]
-order = ["aerospace-container", "zellij-container"]
+order = ["aerospace-container", "zellij"]
 ```
 
 Outermost first. This is configuration rather than discovery because nesting is

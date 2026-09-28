@@ -68,8 +68,8 @@ type Payload struct {
 	// Reason is SessionEnd's. Only "other" has ever been seen.
 	Reason string `json:"reason"`
 
-	Prompt               string  `json:"prompt"`
-	LastAssistantMessage *string `json:"last_assistant_message"`
+	Prompt               string `json:"prompt"`
+	LastAssistantMessage string `json:"last_assistant_message"`
 
 	ToolName  string          `json:"tool_name"`
 	ToolInput json.RawMessage `json:"tool_input"`
@@ -150,9 +150,7 @@ func Translate(payload Payload, whatCodexCallsIt string, spent Spending) (sessio
 
 	case "Stop":
 		report.Event = session.TurnFinished
-		if payload.LastAssistantMessage != nil {
-			report.Message = said(*payload.LastAssistantMessage)
-		}
+		report.Message = said(payload.LastAssistantMessage)
 
 	case "Interrupt":
 		// The hook this integration cannot do without. Stop and Interrupt are

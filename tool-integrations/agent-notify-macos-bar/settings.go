@@ -17,33 +17,7 @@ import (
 // the same measurements behind it as this display.
 const Name = "macos-bar"
 
-// me is this integration: how everything here asks where agent-notify's files
-// are, and what its own settings say.
-//
-// Root is left empty on purpose — empty means "wherever this process's
-// environment says", which is right everywhere but a test (D-69).
-var me = subscribe.Integration{Name: Name}
-
-// capabilities is what this display answers `capabilities` with, and the same
-// wake list it watches with.
-//
-// **No methods**, and that is the honest answer rather than a gap. A method is
-// something core may run, and core runs nothing here: a menu bar item dies with
-// the process that made it, so this display is started by launchd and watches
-// `agent-notify tail --json` on its own. Declaring `render` would invite core
-// to fork a fresh NSApplication per change and draw nothing with it.
-//
-// The wake list is still here, and is the one thing this value is for: it is
-// what the `tail` it runs is told to wake for, and a handshake that named
-// different fields from the watch would be the D-72 failure again, arrived at
-// from the other side.
-//
-// WantEnded stays false. This bar draws live sessions and owns nothing it would
-// have to give back, so an ended record tells it only that a row has gone —
-// which it learns from the transition either way (D-26).
-var capabilities = session.Capabilities{
-	WakeOn: WhatToWakeFor(),
-}
+var me = subscribe.Integration{Name: Name, WakeOn: WhatToWakeFor()}
 
 // DefaultGlyphs is the mark on each count.
 //
@@ -156,9 +130,7 @@ type Settings struct {
 	// Resting is the colour of the mark on the bar while nothing wants you.
 	Resting string `toml:"resting"`
 	// Sign is the code signing identity `install` gives the bundle, remembered
-	// here so that re-running install after a rebuild does not need the flag
-	// again. Nothing at runtime reads it; an empty one means ad-hoc, which
-	// works for everything except notifications (bundle.go).
+	// so that re-running install after a rebuild does not need the flag again.
 	Sign string `toml:"sign"`
 	// Font is the family the item is drawn in, for somebody who wants their
 	// own glyphs. Empty is the menu bar's own font, which is the right answer
@@ -173,7 +145,6 @@ type Settings struct {
 // Resolved is Settings after everything that can fail has been done once, at
 // startup, where it can still be reported to a person.
 type Resolved struct {
-	Core     string
 	Rows     int
 	Announce time.Duration
 	Resting  string
@@ -274,13 +245,9 @@ func Read(given subscribe.Integration) (Resolved, error) {
 		resolved.Announce = settings.Announce.Duration()
 	}
 
-	// What choosing a row runs. Without it the menu is a list you cannot act
-	// on, so this is a startup error rather than something discovered when
-	// somebody picks a session.
-	core, err := given.CoreBinary()
-	if err != nil {
+	// Refused now rather than when somebody picks a session.
+	if _, err := given.CoreBinary(); err != nil {
 		return Resolved{}, fmt.Errorf("choosing a session has to be able to run something, and %w", err)
 	}
-	resolved.Core = core
 	return resolved, nil
 }

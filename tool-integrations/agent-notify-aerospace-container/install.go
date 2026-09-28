@@ -85,17 +85,10 @@ func printTable(out, problems io.Writer, arguments []string) int {
 	// your shell, where aerospace is on PATH, and everything that runs later
 	// does not (D-67).
 	aerospace, lookup := exec.LookPath("aerospace")
-	fmt.Fprint(out, table(program, aerospace)+"\n"+order)
-
-	where, err := me.ConfigFile()
-	if err != nil {
-		where = "agent-notify's config file"
-	}
-	fmt.Fprintf(problems, "\nNothing was written. Put that in %s when you want this\n"+
-		"running: the table being there is what turns it on.\n\n"+
-		"If you already have a [container] table, add %q to its `order` rather than\n"+
+	me.PrintTable(out, problems, table(program, aerospace)+"\n"+order)
+	fmt.Fprintf(problems, "\nIf you already have a [container] table, add %q to its `order` rather than\n"+
 		"adding a second table — two of them is a TOML error. Put it FIRST: a window\n"+
-		"manager is outside whatever multiplexer is running inside it.\n", where, Name)
+		"manager is outside whatever multiplexer is running inside it.\n", Name)
 
 	if lookup != nil {
 		fmt.Fprint(problems, "\naerospace is not on this PATH, so the `aerospace` line above "+

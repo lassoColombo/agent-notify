@@ -1,7 +1,7 @@
 //go:build unix
 
-// Package watcher is the one long-lived process: it watches for agents dying,
-// sweeps up behind itself, and — from M9 — talks to the integrations.
+// Package sessionwatcher is the one long-lived process: it watches agents for
+// death, sweeps up behind them, and runs the displays.
 package sessionwatcher
 
 import (
@@ -15,8 +15,7 @@ import (
 	"github.com/lassoColombo/agent-notify/session"
 )
 
-// TheProcessHoldingTheLock is what the lock file says about whoever holds it,
-// for doctor to read.
+// TheProcessHoldingTheLock is what the lock file says about whoever holds it.
 type TheProcessHoldingTheLock struct {
 	PID     int       `json:"pid"`
 	Version string    `json:"version"`
@@ -31,12 +30,8 @@ type TheOnlyRunningWatcher struct {
 // TakeIfNobodyElseHasIt acquires the lock, or reports who has it.
 //
 // The kernel holds this mutex, so it survives every kind of death including
-// SIGKILL — which a check-then-act on a pid file does not. It is held for the
-// process's life and released only by exiting.
-//
-// The lock file is **never unlinked**, and that is not tidiness: deleting a
-// locked file breaks the mutex, because the next process creates a fresh inode
-// and locks that instead. Then there are two session-watchers and neither knows
+// SIGKILL. The lock file is never unlinked: deleting a locked file breaks the
+// mutex, because the next process creates a fresh inode and locks that instead
 // (plan.md §A9.2).
 func TakeIfNobodyElseHasIt(layout paths.Layout) (*TheOnlyRunningWatcher, error) {
 	file, err := os.OpenFile(layout.WatcherLock(), os.O_CREATE|os.O_RDWR, paths.FileMode)
@@ -74,11 +69,9 @@ func TakeIfNobodyElseHasIt(layout paths.Layout) (*TheOnlyRunningWatcher, error) 
 }
 
 // ErrAlreadyRunning means somebody else holds the lock, which is the ordinary
-// outcome of a race between two processes both trying to start one. It is not
-// a failure: the loser simply has nothing to do.
+// outcome of a race and not a failure.
 var ErrAlreadyRunning = fmt.Errorf("a session-watcher is already running")
 
-// Release drops the lock. Exiting would do it too; this says so at the call site.
 func (s *TheOnlyRunningWatcher) Release() error {
 	if s == nil || s.file == nil {
 		return nil
@@ -87,9 +80,8 @@ func (s *TheOnlyRunningWatcher) Release() error {
 	return syscall.Flock(int(s.file.Fd()), syscall.LOCK_UN)
 }
 
-// WhoHolds reads the lock file without taking it, which is what doctor does.
-// It reports what the holder wrote, not whether it is still alive — a stale
-// record is possible and Running is the question to ask about that.
+// WhoHolds reads the lock file without taking it. It reports what the holder
+// wrote, not whether it is still alive; Running answers that.
 func WhoHolds(layout paths.Layout) (TheProcessHoldingTheLock, error) {
 	content, err := os.ReadFile(layout.WatcherLock())
 	if err != nil {
@@ -105,9 +97,6 @@ func WhoHolds(layout paths.Layout) (TheProcessHoldingTheLock, error) {
 
 // Running reports whether anybody holds the lock, by trying to take it and
 // giving it straight back.
-//
-// A failure to acquire is the answer, not an error: flock is the only thing
-// that knows, and asking it is cheap.
 func Running(layout paths.Layout) bool {
 	file, err := os.OpenFile(layout.WatcherLock(), os.O_CREATE|os.O_RDWR, paths.FileMode)
 	if err != nil {

@@ -102,21 +102,11 @@ func TestApplyCreatesASession(t *testing.T) {
 		Key: key, Event: session.SessionStarted, Cwd: "/tmp/x", Message: &message,
 	}, when)
 
-	if got.Key != key {
-		t.Errorf("Key = %v, want %v", got.Key, key)
-	}
 	if got.Kernel != session.Idle || got.Rank != session.RankIdle {
 		t.Errorf("kernel/rank = %q/%d, want idle/%d", got.Kernel, got.Rank, session.RankIdle)
 	}
-	if got.Sequence != 1 {
-		t.Errorf("Sequence = %d, want 1", got.Sequence)
-	}
-	for name, stamp := range map[string]time.Time{
-		"CreatedAt": got.CreatedAt, "UpdatedAt": got.UpdatedAt, "StateSince": got.StateSince,
-	} {
-		if !stamp.Equal(when) {
-			t.Errorf("%s = %v, want %v", name, stamp, when)
-		}
+	if !got.StateSince.Equal(when) {
+		t.Errorf("StateSince = %v, want %v", got.StateSince, when)
 	}
 	if got.Message != message || got.Cwd != "/tmp/x" {
 		t.Errorf("message/cwd = %q/%q", got.Message, got.Cwd)
@@ -139,9 +129,6 @@ func TestStateSinceSurvivesWhatIsNotAStateChange(t *testing.T) {
 		}
 		if got.Detail != "permission-prompt" {
 			t.Errorf("%q overwrote the detail with %q", event, got.Detail)
-		}
-		if !got.UpdatedAt.Equal(later) || got.Sequence != 2 {
-			t.Errorf("%q was not recorded as a write: seq %d at %v", event, got.Sequence, got.UpdatedAt)
 		}
 	}
 }
@@ -171,33 +158,25 @@ func TestDetailDoesNotOutliveItsState(t *testing.T) {
 	}
 }
 
-// TestSequenceContinuesAcrossResurrection is the second of the three rules the
-// table does not show. A display must never see a sequence go backwards.
-func TestSequenceContinuesAcrossResurrection(t *testing.T) {
+// TestResurrectionClearsTheEnd: an event on an ended session brings it back.
+func TestResurrectionClearsTheEnd(t *testing.T) {
 	record := session.Record{}
 	for _, event := range []session.Event{session.SessionStarted, session.UserSentPrompt, session.TurnFinished, session.SessionEnded} {
 		record = session.Apply(record, session.Report{Key: key, Event: event}, when)
 	}
-	if record.Kernel != session.Ended || record.Sequence != 4 {
-		t.Fatalf("setup: kernel %q at sequence %d", record.Kernel, record.Sequence)
+	if record.Kernel != session.Ended {
+		t.Fatalf("setup: kernel %q", record.Kernel)
 	}
 	if !record.EndedAt.Equal(when) {
 		t.Errorf("EndedAt = %v, want %v", record.EndedAt, when)
 	}
 
 	resumed := session.Apply(record, session.Report{Key: key, Event: session.SessionStarted}, later)
-	if resumed.Sequence != 5 {
-		t.Errorf("Sequence = %d, want 5 — it must never restart", resumed.Sequence)
-	}
 	if resumed.Kernel != session.Idle {
 		t.Errorf("Kernel = %q, want idle", resumed.Kernel)
 	}
 	if !resumed.EndedAt.IsZero() {
 		t.Errorf("EndedAt = %v, want it cleared by resurrection", resumed.EndedAt)
-	}
-	if !resumed.CreatedAt.Equal(when) {
-		t.Errorf("CreatedAt = %v, want the original %v — a resumed session is not a new one",
-			resumed.CreatedAt, when)
 	}
 	if !resumed.StateSince.Equal(later) {
 		t.Errorf("StateSince = %v, want %v — it did change state", resumed.StateSince, later)

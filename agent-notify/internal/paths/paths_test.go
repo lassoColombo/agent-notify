@@ -25,8 +25,7 @@ func TestRootRelocatesEverything(t *testing.T) {
 		t.Errorf("Root = %q, want %q", layout.Root, root)
 	}
 
-	everything := append(layout.Directories(), layout.Sockets()...)
-	everything = append(everything,
+	everything := append(layout.Directories(),
 		layout.ConfigFile, layout.LogFile(), layout.WatcherLock(),
 		layout.SessionFile("k"), layout.EndedFile("k"), layout.HistoryFile("k"),
 		layout.LockFile("k"))
@@ -137,54 +136,6 @@ func TestCreateRestrictsMode(t *testing.T) {
 		if got := info.Mode().Perm(); got != paths.DirMode {
 			t.Errorf("%s has mode %o, want %o", dir, got, paths.DirMode)
 		}
-	}
-}
-
-// TestCheckSocketsNamesTheOffender is the whole point of the check: bind would
-// have said "invalid argument" and named nothing.
-func TestCheckSocketsNamesTheOffender(t *testing.T) {
-	root := filepath.Join(t.TempDir(), strings.Repeat("d", 120))
-	t.Setenv(paths.TheVariableThatNamesTheRoot, root)
-	layout, err := paths.FromEnvironment()
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
-
-	err = layout.CheckSockets()
-	if err == nil {
-		t.Fatalf("CheckSockets accepted a path of %d bytes", len(layout.SessionChangesSocket()))
-	}
-	for _, socket := range layout.Sockets() {
-		if !strings.Contains(err.Error(), socket) {
-			t.Errorf("the complaint does not name %s:\n%s", socket, err)
-		}
-	}
-	if !strings.Contains(err.Error(), paths.TheVariableThatNamesTheRoot) {
-		t.Errorf("the complaint does not say what to do about it:\n%s", err)
-	}
-}
-
-func TestCheckSocketsAcceptsAShortRoot(t *testing.T) {
-	t.Setenv(paths.TheVariableThatNamesTheRoot, shortTempDir(t))
-	layout, err := paths.FromEnvironment()
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
-	if err := layout.CheckSockets(); err != nil {
-		t.Errorf("CheckSockets rejected a short path: %v", err)
-	}
-}
-
-// TestMaxSocketPathMatchesTheKernel is pinned to what the probe of 2026-09-17
-// measured: 103 binds, 104 fails with EINVAL. A limit one byte too generous
-// admits exactly the path this check exists to reject.
-func TestMaxSocketPathMatchesTheKernel(t *testing.T) {
-	want := 103
-	if runtime.GOOS == "linux" {
-		want = 107
-	}
-	if got := paths.MaxSocketPath(); got != want {
-		t.Errorf("MaxSocketPath() = %d, want %d on %s", got, want, runtime.GOOS)
 	}
 }
 

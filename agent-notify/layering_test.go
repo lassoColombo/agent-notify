@@ -38,13 +38,13 @@ var theFloorEachPackageIsOn = map[string]int{
 	"hook/internal/branch":    0, // the one package with a single owner, so it nests
 	"command/internal/exit":   0,
 	"command/internal/onpath": 0,
+	"container":               0, // the words a container answers in
 
 	// One step up: they know the vocabulary, or where things are, and nothing else.
 	"internal/config":       1,
 	"internal/process":      1,
 	"logs":                  1,
 	"tool":                  1,
-	"container":             1,
 	"command/internal/rows": 1,
 	"command/install":       1, // a dispatcher: it execs, so it links almost nothing
 
@@ -65,16 +65,9 @@ var theFloorEachPackageIsOn = map[string]int{
 	"command/focus":       5,
 	"command/annotate":    5,
 	"command/watcher":     5,
-	"command/doctor":      6,
-	"command/replay":      6,
+	"command/doctor":      5,
 	"command/reportevent": 6,
 	"command/tail":        6,
-
-	// Beside the door rather than above it. internal/subscriber is core's own
-	// client of the subscribers socket, and it declares what it takes rather
-	// than importing the Integration an author fills in — which is six lines
-	// against putting the published door underneath core's use of it.
-	"internal/subscriber": 5,
 
 	// main, which imports every command and is imported by nothing.
 	".": 7,

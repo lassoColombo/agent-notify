@@ -2,9 +2,7 @@
   <h1>agent-notify</h1>
   <p><strong>The semaphore over your coding agents</strong></p>
   <p>
-    One answer, always up to date: which of your agents wants you<br>
-    Painted wherever you happen to be looking — a menu bar, a tab title, a notification<br>
-    In one vocabulary, whichever agent it came from
+    A standard for agents to get your attention.
   </p>
 </div>
 
@@ -43,8 +41,6 @@
   - [`agent-notify annotate`](#agent-notify-annotate)
   - [`agent-notify install`](#agent-notify-install)
   - [`agent-notify watcher`](#agent-notify-watcher)
-  - [`agent-notify record`](#agent-notify-record)
-  - [`agent-notify replay`](#agent-notify-replay)
   - [`agent-notify report-event`](#agent-notify-report-event)
   - [`agent-notify completion`](#agent-notify-completion)
 - [The library](#the-library)
@@ -56,6 +52,26 @@
 - [What is not finished](#what-is-not-finished)
 
 ---
+
+## The Problem
+
+I want my window manager to notify me when one of my agents requires my attention, and jump to it with the click of a button.  
+I want to browse all my running sessions in a picker and jump to the one I select.  
+I want my terminal multiplexer to change the color of the pane based on the state of the agent running inside.
+
+> Basically I want a great integration between my agents and my environment.
+
+However, a standard for agents to communicate informations about the running sessions does not yet exist - and it may never will.  
+All agents expose hooks, but they speak different dialects and obey to different mechanics.  
+This lack of a standard has practical, unwanted consequences:
+- the integration must implement one standard for every agent it wants to integrate with: if it wants to integrate a new agent it must implement new logic.
+- the integration is coupled with the agent's behaviour: if something about the agent changes the integration must change too.
+
+This lack of standard is unfortunate for someone who wants to develop an integration
+
+If we had a standard we could write integrations that work by default with all agents. When a new agent comes around you don't need to develop new logic in order to talk with it. 
+
+> Agent-notify provides that standard.
 
 ## What this module is
 
@@ -95,26 +111,25 @@ hook's exit code, so a hook that failed would reach back into the very session
 it is describing. Everything it has to say goes to the log.
 
 The **session-watcher** is the one long-lived process, and it is the only one.
-It notices agents dying, sweeps up behind them, runs each display when something
-that display watches moves, and hands anything that connects the current state
-over a unix socket. There is one per machine and starting a second is refused by
-the first. Nobody has to start it: the first hook that finds nobody listening
-starts one.
+It notices agents dying, sweeps up behind them, and runs each display when
+something that display watches moves. It wakes on the store itself: a kqueue
+over `state/sessions` and `state/ended`, which every record write renames into.
+There is one per machine and starting a second is refused by the first. Nobody
+has to start it: the first hook that finds nobody holding the lock starts one.
 
-A **tool-integration** either renders that state (a display) or acts on it (a
-container: where is this session, and bring it to the front). Several displays
-at once is the ordinary case. They never talk to each other — each connects on
-its own, is handed the same state, and paints wherever it paints.
+A **tool-integration** renders that state (a display), acts on it (a container:
+where is this session, and bring it to the front), or both. Core runs it with a
+subcommand and JSON on stdin; a display that must own its process — a menu bar
+— watches the store the same way the session-watcher does. Several displays at
+once is the ordinary case, and they never talk to each other.
 
 Reading does not need any of this. `agent-notify list` and `subscribe.Read` go
-straight to the store with no watcher and no socket involved, which is what lets
-an agent's own statusline poll three times a second for your *other* agents.
+straight to the store with no watcher involved, which is what lets an agent's
+own statusline poll three times a second for your *other* agents.
 
 ### The integrations
 
-Each is its own Go module in this monorepo, one per agent and one per (tool,
-role) — so a tool that both draws and navigates is two programs you install
-separately.
+Each is its own Go module in this monorepo, one per agent and one per tool.
 
 | | role | |
 | --- | --- | --- |
@@ -122,9 +137,8 @@ separately.
 | [agent-notify-codex](../agent-integrations/agent-notify-codex) | agent | Codex CLI's hooks |
 | [agent-notify-macos-bar](../tool-integrations/agent-notify-macos-bar) | display | the semaphore on the macOS menu bar |
 | [agent-notify-macos-notifications](../tool-integrations/agent-notify-macos-notifications) | display | a macOS notification when an agent wants you |
-| [agent-notify-zellij-display](../tool-integrations/agent-notify-zellij-display) | display | pane and tab titles |
+| [agent-notify-zellij](../tool-integrations/agent-notify-zellij) | display and container | pane and tab titles, placing and focusing a session |
 | [agent-notify-picker](../tool-integrations/agent-notify-picker) | display | every session in a terminal, and a way into one |
-| [agent-notify-zellij-container](../tool-integrations/agent-notify-zellij-container) | container | placing and focusing a session |
 | [agent-notify-aerospace-container](../tool-integrations/agent-notify-aerospace-container) | container | finding and raising the window a session is in |
 
 ## Installation
@@ -220,15 +234,13 @@ installed    --    1 on your PATH and not mentioned here: picker
 
 ### Start the watcher
 
-You do not have to. The first hook that finds nobody listening starts one, and
-so does any subscriber. Start it by hand when you want to watch it:
+You do not have to. The first hook that finds nobody holding the lock starts
+one, and so does any display that owns its process. Start it by hand when you
+want to watch it:
 
 ```sh
-agent-notify watcher status
-# not running
-
 agent-notify watcher start
-# running: pid 86777, version 0.0.0-dev, since 2026-09-22T22:15:40Z
+# started: pid 86777
 ```
 
 Then check the whole thing over:
@@ -245,16 +257,18 @@ paths
   log         /Users/you/Library/Application Support/agent-notify/agent-notify.log
 
 directories  ok    present, mode 700
-sockets      ok    longest path 82 of 103 bytes — …/T/agent-notify/session-changes.sock
-config       ok    2 agent(s), 6 integration(s), keep-ended-sessions 168h0m0s
+config       ok    2 agent(s), 5 integration(s), keep-ended-sessions 168h0m0s
 store        ok    3 live session(s), 74 ended and still resumable, 0 forgotten this run
 liveness     ok    boot 027BA0B8-… — 3 running, 0 gone but not yet ended, 0 cannot tell
-watcher      ok    pid 86777, version 0.0.0-dev, since 2026-09-22T22:15:40Z
-                  the socket answers: 77 session(s) in its snapshot
-integrations ok    reported by pid 86777 at 2026-09-23T20:38:09Z
-             macos-bar              connected, pid 86843 [display]
-             macos-notifications    connected, pid 86844 [display]
-             zellij-display         connected, pid 86847 [display]
+watcher      ok    pid 86777, version 0.0.0-dev, since 2026-09-28T20:15:40Z
+integrations ok    reported by pid 86777 at 2026-09-28T20:38:09Z
+             aerospace-container    run when core needs it
+                                    answers interpret-environment, focus, focused — built against 0.0.0-dev
+             macos-bar              yours to start; core never runs it
+             macos-notifications    yours to start; core never runs it
+             picker                 yours to start; core never runs it
+             zellij                 drawn when something it watches moves
+                                    answers interpret-environment, focus, focused, render — built against 0.0.0-dev
 
 not checked here: which agents have their hooks installed. Each
 agent-integration answers that with its own `install`.
@@ -396,7 +410,7 @@ read through the standard rules.
 | `AGENT_NOTIFY_ROOT` | Moves everything beneath one directory: `<root>/state`, `<root>/run`, `<root>/config.toml`. One variable, so that running an isolated instance is one step. It is made absolute, so a relative value is resolved against the process's own working directory — which for a program core starts is not yours. |
 | `AGENT_NOTIFY_LOG_LEVEL` | `debug`, `info`, `warn` or `error`. Absent means `info`, and so does a value it cannot read — which it says in the log, because a typo in the variable you set precisely to see more must not be the reason you see the same as before. It is a variable rather than a configuration key because the log is opened before the configuration is read, deliberately, so that complaints about the configuration have somewhere to go. Setting it once before starting anything sets it for everything. |
 | `XDG_STATE_HOME` | Where records and the log go on Linux. Ignored on macOS, which uses `~/Library/Application Support`. |
-| `XDG_RUNTIME_DIR` | Where sockets and locks go on Linux. |
+| `XDG_RUNTIME_DIR` | Where the lock and the report go on Linux. |
 | `TMPDIR` | The same, on macOS: under launchd it is a per-user `0700` directory. With none, `os.TempDir()` plus a uid suffix, because `/tmp` is writable by everyone and an unsuffixed name there is a name another user can take first. |
 | `XDG_CONFIG_HOME` | Where the configuration file is, as above. |
 | `PATH` | How `install` and `doctor` find `agent-notify-<name>` programs. |
@@ -470,8 +484,8 @@ nothing else in the file changes, and no integration can be made to depend on
 another being present.
 
 ```toml
-[integration.zellij-display]
-binary = "/opt/homebrew/bin/agent-notify-zellij-display"
+[integration.zellij]
+binary = "/opt/homebrew/bin/agent-notify-zellij"
 
 [integration.picker]
 ```
@@ -493,7 +507,7 @@ declared **by name** — because a misspelled setting that changes nothing and
 says nothing is the config bug people give up on.
 
 ```toml
-[integration.zellij-display.settings]
+[integration.zellij.settings]
 zellij = "/opt/homebrew/bin/zellij"
 
 [integration.macos-notifications.settings]
@@ -508,7 +522,7 @@ The one shape core does define is the **palette**: a display that paints a glyph
 or a colour per state resolves it most-specific-first, and the table is yours.
 
 ```toml
-[integration.zellij-display.settings.glyphs]
+[integration.zellij.settings.glyphs]
 "blocked-on-you" = "!"
 "blocked-on-you/permission-prompt" = "?"
 "working" = "~"
@@ -522,7 +536,7 @@ today survive a seventh state shipped tomorrow.
 
 ```toml
 [container]
-order = ["aerospace-container", "zellij-container"]
+order = ["aerospace-container", "zellij"]
 ```
 
 | Key | Type | What it does |
@@ -532,8 +546,8 @@ order = ["aerospace-container", "zellij-container"]
 ### A complete file
 
 This is a working configuration: two agents, a multiplexer that both paints and
-navigates, a window manager, a menu bar, notifications, and a picker that is
-installed but never started.
+navigates, a window manager, a menu bar, notifications, and a picker that is run
+from a key.
 
 ```toml
 # A hook's PATH is not your shell's PATH, and a menu-bar click runs from
@@ -546,16 +560,10 @@ binary = "claude"
 [agent.codex]
 binary = "codex"
 
-[integration.zellij-display]
-binary = "/opt/homebrew/bin/agent-notify-zellij-display"
+[integration.zellij]
+binary = "/opt/homebrew/bin/agent-notify-zellij"
 
-[integration.zellij-display.settings]
-zellij = "/opt/homebrew/bin/zellij"
-
-[integration.zellij-container]
-binary = "/opt/homebrew/bin/agent-notify-zellij-container"
-
-[integration.zellij-container.settings]
+[integration.zellij.settings]
 zellij = "/opt/homebrew/bin/zellij"
 
 [integration.aerospace-container]
@@ -565,11 +573,9 @@ binary = "/opt/homebrew/bin/agent-notify-aerospace-container"
 aerospace = "/opt/homebrew/bin/aerospace"
 
 [container]
-order = ["aerospace-container", "zellij-container"]
+order = ["aerospace-container", "zellij"]
 
 [integration.macos-bar]
-binary = "/opt/homebrew/bin/agent-notify-macos-bar"
-
 [integration.macos-bar.settings]
 sign = "agent-notify self-signed"
 
@@ -630,15 +636,15 @@ agent-notify watcher reload
 
 Asking is also how you retry. An integration that was broken, misspelled or not
 yet installed gets another go rather than being written off for the life of the
-process. Values that cannot change under a running process — the socket paths,
-the state directory — keep what they had; everything else takes effect now.
+process. The state directory is fixed for the life of the process; everything
+else takes effect now.
 
 ## Where everything lives on disk
 
 Two directories, because one must survive a reboot and the other must not: a
-socket or a lock that outlived the process holding it is a ghost that takes
-manual cleanup, and a session record that vanished on reboot is a session you
-can no longer resume. Everything is mode `0700`, files `0600`, because a record
+lock that outlived the process holding it is a ghost that takes manual cleanup,
+and a session record that vanished on reboot is a session you can no longer
+resume. Everything is mode `0700`, files `0600`, because a record
 carries the text of what an agent last said.
 
 | | macOS | Linux | Under `AGENT_NOTIFY_ROOT` |
@@ -652,9 +658,7 @@ is over and still resumable, `history/<key>.json` for the last few things each
 session said, `locks/<key>.lock` one per session, and `agent-notify.log`, which
 every process writes to and which is in state rather than runtime because a log
 swept away by a reboot is a log missing exactly the failures worth reading about.
-Inside runtime: `subscribers.sock` (the stream, watcher to displays),
-`session-changes.sock` (the datagram, hook to watcher), `session-watcher.lock`
-and `integrations.json` (what each integration said it answers, written so that
+Inside runtime: `session-watcher.lock` and `integrations.json` (what each integration said it answers, written so that
 `doctor`, a focus off a keybinding and the hook can all read it without running
 anything — and so you can `cat` it at three in the morning).
 
@@ -662,15 +666,6 @@ A session key is `host~agent~session-id`, percent-encoded so the encoding cannot
 be ambiguous however strange an agent's session ids turn out to be, and capped
 at 200 bytes because it becomes a filename.
 
-**Socket paths are the one hard limit.** `sun_path` is 104 bytes on darwin and
-108 on linux, so the usable maximum is 103 and 107. A long
-`AGENT_NOTIFY_ROOT` therefore fails, and it fails by name rather than with a
-bare `invalid argument` from `bind`:
-
-```
-sockets      FAIL  socket path is 143 bytes, over the 103 this platform allows: …/run/subscribers.sock
-                      set AGENT_NOTIFY_ROOT to a shorter directory
-```
 
 ## Commands
 
@@ -689,8 +684,6 @@ disagree.
 | [`annotate`](#agent-notify-annotate) | 0/1 | write one owner's section of a record |
 | [`install`](#agent-notify-install) | any | hand over to that integration to set itself up |
 | [`watcher`](#agent-notify-watcher) | 0/1/3 | the one long-lived process |
-| [`record`](#agent-notify-record) | 0/1 | write what happens, to replay into a display later |
-| [`replay`](#agent-notify-replay) | 0/1/2 | play a recording, with no agents and no store |
 | [`report-event`](#agent-notify-report-event) | **always 0** | what an agent-integration calls when its agent did something |
 | [`completion`](#agent-notify-completion) | 0/1 | a completion script for your shell |
 
@@ -702,7 +695,7 @@ than failing, because the first thing anybody types is the name of the program.
 What is running, most urgent first. Aliased to `ls`.
 
 This is the cold read path: it reads the store directly, with no session-watcher
-and no socket anywhere. A session whose process is gone is shown as ended even
+anywhere. A session whose process is gone is shown as ended even
 if nothing has got round to filing it, and **nothing is written** — a command a
 statusline polls three times a second has no business writing.
 
@@ -760,13 +753,13 @@ currency: `model` sits beside the counters and pricing is yours.
 
 ### `agent-notify tail`
 
-Watch sessions change, live. It connects as a display would and prints every
-view it is handed, which makes it the way to find out what a display is being
-told before blaming the display.
+Watch sessions change, live. It watches the store as a display would and prints
+every view it is handed, which makes it the way to find out what a display is
+being told before blaming the display.
 
 | Flag | Type | Description |
 | --- | --- | --- |
-| `--json` | switch | print each changed record as JSON, one per line |
+| `--json` | switch | print the whole view as one JSON object per line |
 | `--wake-on` | strings | a record field worth waking for; repeat it, or separate them with commas. TAB completes the fields |
 | `--all` | switch | include sessions that have ended |
 
@@ -778,7 +771,7 @@ $ agent-notify tail --wake-on kernel
 21:04:26  30  agent-notify-95   finished-a-turn   Done — the README is written.
 ```
 
-A name that is not a record field is refused before anything connects, and the
+A name that is not a record field is refused before anything runs, and the
 error suggests what you meant. That check is in the SDK rather than the watcher
 on purpose: a wake-on typo produces no error anywhere else, and what you are
 left chasing is "it is right when I start it and stale an hour later".
@@ -804,7 +797,7 @@ Where everything resolves to, and what is wrong with it. Exits non-zero when
 something is, because a health check nothing can branch on is a health check
 nobody runs twice.
 
-It checks the directories, the socket path lengths, the configuration, the
+It checks the directories, the configuration, the
 store, liveness, whether the watcher is up — and whether it *answers*, which is
 the difference between "something holds the lock" and "something holds the lock
 and works". A wedged watcher is named and never killed: recovery is your word,
@@ -851,7 +844,7 @@ whether the pane is there.
 ```
 $ agent-notify focus-session lenny-load
   aerospace-container    focused
-  zellij-container       focused
+  zellij                 focused
 lenny-load is in front.
 ```
 
@@ -911,8 +904,8 @@ it first.
 ### `agent-notify watcher`
 
 The one long-lived process. It watches for agents dying and sweeps up behind
-them, and it is what every display connects to. One per machine; starting a
-second is refused by the first.
+them, and it runs the displays. One per machine; starting a second is refused
+by the first. `doctor` says whether it is running.
 
 | Subcommand | Description |
 | --- | --- |
@@ -921,15 +914,9 @@ second is refused by the first.
 | `stop` | ask it to stop, and never kill it |
 | `restart` | stop it, then start it |
 | `reload` | SIGHUP: re-read the config without restarting |
-| `status` | is it running, since when, and does its socket answer |
 
-`status`, `stop` and `reload` exit **3** when nothing is running, which is not a
-failure — `restart` treats it as a fine state to start from.
-
-```
-$ agent-notify watcher status
-running: pid 86777, version 0.0.0-dev, since 2026-09-22T22:15:40Z
-```
+`stop` and `reload` exit **3** when nothing is running, which is not a failure —
+`restart` treats it as a fine state to start from.
 
 `run` is normally started for you. Run it yourself to watch what it does:
 
@@ -947,48 +934,6 @@ nothing errors, it simply never sees anything.
 
 Losing the race to take the lock is the ordinary outcome and exits 0. Anyone may
 start one; the lock is what makes that harmless.
-
-### `agent-notify record`
-
-Connect as a display would and write every view to a file, with the time it
-arrived. A recording of a real day is how a display gets worked on without
-waiting for agents to do something interesting.
-
-| Flag | Type | Description |
-| --- | --- | --- |
-| `--output` | path | where to write; default is stdout |
-
-```sh
-agent-notify record --output ~/a-busy-afternoon.jsonl
-# ^C
-# recorded 412 moment(s)
-```
-
-One JSON object per line: `after_ms`, the whole `session`, and the `event` that
-caused it when there was one.
-
-### `agent-notify replay`
-
-Play a recording into whatever connects, with no store, no agents and no
-session-watcher.
-
-| Flag | Type | Default | Description |
-| --- | --- | --- | --- |
-| `--speed` | float | `1` | how much faster than recorded; `0` plays with no waiting |
-| `--loop` | switch | off | start over when the recording ends |
-| `--wait-for` | duration | `10s` | how long to wait for something to connect |
-
-It **requires `AGENT_NOTIFY_ROOT`** and refuses without one (exit 2), so that a
-recording is never played into the same place your real sessions live. It then
-takes the singleton lock at that root, which means a real watcher cannot be
-running there — correct rather than awkward: a display being fed a recording
-must not also be fed reality.
-
-```sh
-export AGENT_NOTIFY_ROOT=/tmp/an-replay
-agent-notify replay ~/a-busy-afternoon.jsonl --speed 4 --loop &
-AGENT_NOTIFY_ROOT=/tmp/an-replay agent-notify-macos-bar
-```
 
 ### `agent-notify report-event`
 
@@ -1041,10 +986,10 @@ All of them are under `github.com/lassoColombo/agent-notify/`.
 
 | Package | For |
 | --- | --- |
-| `session` | the vocabulary: events, kernels, the record, the protocol, the display rules |
-| `hook` | an agent-integration: one function |
-| `subscribe` | a display: connect, be handed the state, render |
-| `container` | a container: place and focus a session |
+| `session` | the vocabulary: events, kernels, the record, the view, the display rules |
+| `hook` | an agent-integration: one function, and a reverse reader for its agent's files |
+| `subscribe` | a tool-integration: answer the subcommands core runs, read the store, watch it |
+| `container` | the words a container answers in: outcomes and verdicts |
 | `capture` | the one subcommand that runs inside the agent |
 | `tool` | running the external program an integration drives, under a timeout |
 | `logs` | the one log file every agent-notify process appends to |
@@ -1073,7 +1018,7 @@ even for an agent with no session-start hook at all.
 
 The rules every display would otherwise write for itself, and write slightly
 differently, are here once: `Record.DisplayName()`, `Record.State()`,
-`ByUrgency`, `MostUrgent`, `Urgency`, `Differs`, `JustArrived`, `Ago`, and
+`ByUrgency`, `MostUrgent`, `Differs`, `JustArrived`, `Ago`, and
 `NewPalette` for the user's glyph table.
 
 ### Writing an agent-integration
@@ -1091,9 +1036,9 @@ hook.Record(session.Report{
 `Record` does the rest: resolves where things live, reads the configuration,
 walks its own ancestry to find the agent's process, runs the
 `capture-environment` of each integration that has one, reads the branch, takes
-the session's lock, reduces, writes, and pokes the watcher — starting one if
-nobody is listening. It returns no error, and that is the contract rather than
-an oversight.
+the session's lock, reduces, writes, and starts a session-watcher if none holds
+the lock. It returns no error, and that is the contract rather than an
+oversight.
 
 Every field of a `Report` except `Event` and `Key` is optional, and an absent
 field means "leave what is there alone" rather than "clear it" — so a hook that
@@ -1101,41 +1046,53 @@ knows the cwd and one that does not are both usable, and the one that does not
 cannot erase what the other established. `Message` is a pointer because `nil`
 and `""` mean different things.
 
-### Writing a display
+### Writing a tool-integration
 
-A render function and a main of about ten lines.
+One `Main`, and every function you fill in is a subcommand core may run. The
+`capabilities` answer is derived from what is filled in, so it cannot disagree
+with it.
 
 ```go
+var me = subscribe.Integration{
+    Name:      "zellij",
+    WakeOn:    []string{"kernel", "detail", "name", "captured_context"},
+    WantEnded: true,       // to give a pane back when its session ends
+    Reads:     capture,    // capture-environment: runs inside the agent
+}
+
 func main() {
-    subscribe.Run(context.Background(), subscribe.Integration{
-        Name:   "zellij-display",
-        Roles:  []string{"display"},
-        WakeOn: []string{"kernel", "detail", "name"},
-        OnChange: func(view subscribe.View) error {
-            return render(view.Sessions)
-        },
-    })
+    os.Exit(subscribe.Main(me, subscribe.Commands{
+        Render:    render,     // core runs it with the view on stdin
+        Interpret: interpret,  // runs in the watcher: ask the tool
+        Focus:     focus,
+        Focused:   focused,
+        Named:     map[string]func([]string) int{"install": install},
+    }, os.Args[1:]))
 }
 ```
 
-The callback is handed **the current state**, never a stream of transitions,
-which makes it structurally impossible to write a display that breaks after a
-dropped message, a restart or a closed laptop. `view.Changed` is what moved
-since the *last call* — across a reconnection and a session-watcher restart,
-because what it is compared against is what YOU were last shown rather than what
-arrived on any one connection — and is empty on the very first one, which is
-what stops a notifier that started thirty seconds ago announcing every agent
-that happens to be blocked.
+A display fills in `Render`; a container fills in the other three; zellij fills
+in all four. `Focused` returns three values, because "nobody can tell" is the
+state of every fresh install. The contract in one line: one JSON object on
+stdout and exit 0. Anything else means "I could not answer", and stderr is the
+reason — core never parses it.
 
-`Run` owns connect, declare, coalesce, reconnect and shutdown. There is no
-resync to own: the session-watcher sends the whole world every time, so being
-out of date is not a state you can be in.
-It starts a watcher if there is none. Beside it: `Settings(&mine)` decodes this
-integration's own settings table and refuses a key nobody declared,
-`Read()`/`ReadIncludingEnded()` are the cold read with no socket, `History(key)`
-is one session's last few messages and transitions, `ConfigFile()` is for an
-`install` that has a table to add, and `CoreBinary()` is for a display that
-offers a click.
+`render` is handed a `session.View`: **the current state**, never a stream of
+transitions, and `view.Changed` is what moved since the last render — empty on
+the first, which is what stops a notifier that started thirty seconds ago
+announcing every agent that happens to be blocked.
+
+A display that must own its process — a menu bar — fills in no `Render`, is
+started by launchd, and calls `subscribe.Run(ctx, me, paint)`: it watches the
+store and hands `paint` a view whenever something in `WakeOn` moves, starting a
+session-watcher if none is running. `agent-notify tail` is the same loop.
+
+Beside them: `Settings(&mine)` decodes this integration's own settings table
+and refuses a key nobody declared, `Read()`/`ReadIncludingEnded()` are the cold
+read, `History(key)` is one session's last few messages and transitions,
+`Focus(key)` runs `agent-notify focus-session` for a display that offers a
+click, `PrintTable` is what an `install` prints, and `Bundle` writes a macOS
+`.app` around a display that needs one.
 
 One trap worth knowing about, because it is silent: a field your renderer reads
 and your `WakeOn` omits wakes you never for that change, and nothing errors.
@@ -1149,52 +1106,18 @@ for field, moved := range session.EachFieldMoved(base) {
 }
 ```
 
-### Writing a container
-
-Up to four functions and a two-line main. A container is *run*, not connected:
-it is asked things rather than told them, so it has subcommands.
-
-```go
-func main() {
-    os.Exit(container.Main(container.Integration{
-        Name:      "zellij-container",
-        Capture:   capture,    // runs inside the agent: read, do not ask
-        Interpret: interpret,  // runs in the watcher: ask the tool
-        Focus:     focus,
-        Focused:   focused,
-    }))
-}
-```
-
-Every function is optional — a container that can place a session but not focus
-it is a legitimate thing to ship. `Focused` returns three values, because
-"nobody can tell" is the state of every fresh install and a bool would force the
-receiver to guess which of the two it meant.
-
-The contract in one line: one JSON object on stdout and exit 0. Anything else
-means "I could not answer", and stderr is the reason — core never parses it and
-reads no meaning into which non-zero code came back, because a program that
-crashed, hung or was deleted are all the same thing.
-
 ### `capture-environment`
 
 An agent's environment exists nowhere but the agent's own process, so the only
 program that can read it is a descendant of it — which means a child of the
-hook, and nothing else. Anything that needs to know *where* a session is must
-therefore answer this one subcommand, whatever else it is: a container fills in
-`Capture` alongside its other three, and a display adds one case to the `main`
-it already has.
-
-```go
-case capture.Command:
-    os.Exit(capture.Main(Name, readTheTwoVariablesWeNeed))
-```
+hook, and nothing else. Anything that needs to know *where* a session is fills
+in `Reads` on its `subscribe.Integration`.
 
 It runs on the path the agent is waiting on, under a one-second timeout, so the
 rule is absolute: **read local state and return.** Never ask your tool anything,
 never open a socket, never wait. Whatever it returns is stored verbatim under
 that integration's name and is opaque to core in both directions; what it means
-is agreed between your `Capture` and your `Interpret` and nobody else.
+is agreed between your `Reads` and your `Interpret` and nobody else.
 
 There is nothing to declare. Every integration core can run is asked this one,
 and an integration with nothing to read answers an empty object, which core
@@ -1205,8 +1128,8 @@ stores as no entry at all.
 The codebase says this in places and it is worth saying here.
 
 - **It runs on macOS only.** `GOOS=linux go build ./...` does not compile:
-  process facts, exit watching and the socket peer-pid lookup have darwin
-  implementations and no others. Linux is M17, and two assumptions in the
+  process facts, exit watching and the store watch have darwin implementations
+  and no others. Linux is M17, and two assumptions in the
   liveness design stay marked `[assumed]` until it lands.
 - **Nothing is published.** No module proxy, no releases, no artifacts. Every
   integration is built beside core through a `replace` directive, and a clone of
@@ -1219,8 +1142,7 @@ The codebase says this in places and it is worth saying here.
   exist. That changes when core is published, not before.
 - **`doctor` is incomplete, and says so.** It does not check whether an agent's
   hooks are actually installed.
-- **The picker is not done** (M16), and `wait` and a `history` command are still
-  on the list.
+- **`wait` and a `history` command** are still on the list.
 - **Annotations are never invalidated by `Apply`.** The rule that a derived
   annotation dies with the captured context it came from needs provenance the
   record does not yet carry.

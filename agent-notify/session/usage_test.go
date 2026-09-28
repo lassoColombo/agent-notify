@@ -240,11 +240,10 @@ func TestAUsageOnlyChangeReachesWhoeverNamedItAndNobodyElse(t *testing.T) {
 // display that asked about the most volatile field there is.
 func TestAStampOnlyChangeWakesNobody(t *testing.T) {
 	before := session.Apply(session.Record{}, session.Report{Key: key, Event: session.AgentProgressed}, when)
-	again := session.Apply(before, session.Report{Key: key, Event: session.AgentProgressed}, later)
+	again := before.Clone()
+	again.Sequence++
+	again.UpdatedAt = later
 
-	if again.Sequence == before.Sequence {
-		t.Fatal("the fixture did not write twice")
-	}
 	if session.Differs(before, again, nil) {
 		t.Error("a write that moved only the stamps woke somebody")
 	}

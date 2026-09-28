@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lassoColombo/agent-notify/tool"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -101,6 +102,30 @@ func TestWhatInstallPrintsIsWhatCoreReads(t *testing.T) {
 	}
 }
 
+// TestTheContainerOrderIsOfferedAndNeverDecided: which shell is outside which
+// is something only the person running them knows (§A11.2). The old install
+// said so in a comment and then wrote the order anyway whenever there was no
+// [container] table to collide with.
+func TestTheContainerOrderIsOfferedAndNeverDecided(t *testing.T) {
+	t.Setenv("AGENT_NOTIFY_ROOT", t.TempDir())
+	table, _ := printed(t)
+	if !strings.Contains(table, "[container]") {
+		t.Errorf("the order was not offered at all:\n%s", table)
+	}
+	var parsed struct {
+		Container struct {
+			Order []string `toml:"order"`
+		} `toml:"container"`
+	}
+	if err := toml.Unmarshal([]byte(table), &parsed); err != nil {
+		t.Fatalf("what install printed is not TOML: %v", err)
+	}
+	if len(parsed.Container.Order) != 1 || parsed.Container.Order[0] != Name {
+		t.Errorf("order = %v, want just this container for a person to place",
+			parsed.Container.Order)
+	}
+}
+
 // TestTheToolIsResolvedAtInstallTime is D-67.
 //
 // A supervised child's PATH is not your shell's, so looking zellij up at
@@ -119,14 +144,14 @@ func TestTheToolIsResolvedAtInstallTime(t *testing.T) {
 	var parsed struct {
 		Integration map[string]struct {
 			Settings struct {
-				Zellij string `toml:"zellij"`
+				Tool string `toml:"zellij"`
 			} `toml:"settings"`
 		} `toml:"integration"`
 	}
 	if err := toml.Unmarshal([]byte(table), &parsed); err != nil {
 		t.Fatalf("what install printed is not TOML: %v\n%s", err, table)
 	}
-	where := parsed.Integration[Name].Settings.Zellij
+	where := parsed.Integration[Name].Settings.Tool
 	if !filepath.IsAbs(where) {
 		t.Errorf("zellij = %q is not an absolute path", where)
 	}
@@ -135,30 +160,7 @@ func TestTheToolIsResolvedAtInstallTime(t *testing.T) {
 	}
 	// And what it printed is what the program will accept, which is the loop
 	// worth closing: a table that reads well and is then refused helps nobody.
-	if _, err := TheZellijToRun(where); err != nil {
+	if _, err := tool.AbsolutePath("zellij", where); err != nil {
 		t.Errorf("install printed a path its own program refuses: %v", err)
-	}
-}
-
-// TestTheToolMustBeNamedAndAbsolute: there is no search left, so the only
-// answers are a path somebody has seen, or a refusal that says so.
-func TestTheToolMustBeNamedAndAbsolute(t *testing.T) {
-	for _, one := range []struct{ given, mention string }{
-		{"", "is not set"},
-		{"zellij", "absolute"},
-		{"./zellij", "absolute"},
-	} {
-		_, err := TheZellijToRun(one.given)
-		if err == nil {
-			t.Errorf("TheZellijToRun(%q) was accepted", one.given)
-			continue
-		}
-		if !strings.Contains(err.Error(), one.mention) {
-			t.Errorf("TheZellijToRun(%q) said %q, want it to mention %q",
-				one.given, err, one.mention)
-		}
-	}
-	if _, err := TheZellijToRun("/nowhere/at/all/zellij"); err == nil {
-		t.Error("a path that is not there was accepted")
 	}
 }

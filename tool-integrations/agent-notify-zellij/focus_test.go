@@ -25,18 +25,7 @@ import (
 // is named `not-attached` instead of reported as focused, and one somebody is
 // attached to is read back and shown to be in front.
 
-func realZellij(t *testing.T) Zellij {
-	t.Helper()
-	// A test runs in a shell, which is the one context where looking zellij up
-	// is right — and exactly why the program no longer does it (D-67).
-	binary, err := exec.LookPath("zellij")
-	if err != nil {
-		t.Skipf("no zellij here: %v", err)
-	}
-	return Zellij{Binary: binary, Timeout: 5 * time.Second}
-}
-
-func session(t *testing.T, zellij Zellij) (string, int) {
+func aSession(t *testing.T, zellij Zellij) (string, int) {
 	return namedSession(t, zellij, "")
 }
 
@@ -125,22 +114,11 @@ func bareZellij(t *testing.T, zellij Zellij, arguments ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-func stripped(environment []string) []string {
-	var kept []string
-	for _, variable := range environment {
-		if strings.HasPrefix(variable, "ZELLIJ") {
-			continue
-		}
-		kept = append(kept, variable)
-	}
-	return kept
-}
-
 // TestInterpretFindsTheTab is the whole of placing: the environment says which
 // pane, and only zellij knows which tab holds it.
 func TestInterpretFindsTheTab(t *testing.T) {
 	zellij := realZellij(t)
-	name, pane := session(t, zellij)
+	name, pane := aSession(t, zellij)
 
 	captured, _ := json.Marshal(Captured{Session: name, Pane: strconv.Itoa(pane)})
 	got, err := Interpret(zellij, captured)
@@ -172,7 +150,7 @@ func TestInterpretFindsTheTab(t *testing.T) {
 // use and never trusted from the record (R17, §A11.3).
 func TestAPaneThatIsGoneIsNamedAsGone(t *testing.T) {
 	zellij := realZellij(t)
-	name, _ := session(t, zellij)
+	name, _ := aSession(t, zellij)
 
 	coordinates, _ := json.Marshal(Coordinates{Session: name, Pane: 9999, Tab: 0})
 	outcome, err := Focus(zellij, coordinates)
@@ -217,7 +195,7 @@ func TestASessionThatIsGoneIsNotAPaneProblem(t *testing.T) {
 // [Focus].
 func TestFocusOnASessionNobodyIsLookingAt(t *testing.T) {
 	zellij := realZellij(t)
-	name, pane := session(t, zellij)
+	name, pane := aSession(t, zellij)
 	t.Setenv(sessionVariable, "")
 
 	coordinates, _ := json.Marshal(Coordinates{Session: name, Pane: pane})
@@ -238,11 +216,11 @@ func TestFocusOnASessionNobodyIsLookingAt(t *testing.T) {
 // zellij rather than taken from an exit code.
 func TestFocusPutsThePaneInFrontOfAnAttachedClient(t *testing.T) {
 	zellij := realZellij(t)
-	name, pane := session(t, zellij)
+	name, pane := aSession(t, zellij)
 	viewer(t, zellij, name)
 
 	// The viewer arrives on whatever the session's focus was, which is the pane
-	// `session` just created — so this moves it away first, leaving Focus
+	// `aSession` just created — so this moves it away first, leaving Focus
 	// something to actually do.
 	bareZellij(t, zellij, "--session", name, "run", "--", "sleep", "600")
 
@@ -346,7 +324,7 @@ func TestParseClients(t *testing.T) {
 // focus, and the honest answer is the third one.
 func TestFocusedOnADetachedSession(t *testing.T) {
 	zellij := realZellij(t)
-	name, pane := session(t, zellij)
+	name, pane := aSession(t, zellij)
 
 	coordinates, _ := json.Marshal(Coordinates{Session: name, Pane: pane})
 	verdict, err := Focused(zellij, coordinates)

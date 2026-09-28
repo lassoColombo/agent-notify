@@ -64,20 +64,3 @@ func TestAnsweringNoMethodsIsAnEmptyListAndNotNull(t *testing.T) {
 		t.Errorf("answered %s, want an empty methods list", got)
 	}
 }
-
-func TestAnswersIsWhatWasDeclaredAndNothingElse(t *testing.T) {
-	container := session.Capabilities{
-		Methods: []string{session.MethodInterpret, session.MethodFocus}}
-
-	if !container.Answers(session.MethodFocus) {
-		t.Error("a container that declared focus does not answer focus")
-	}
-	if container.Answers(session.MethodFocused) {
-		// The whole point: `focused` undeclared means never asked, rather than
-		// asked at the cost of a process and answered "I cannot tell".
-		t.Error("a container that never declared focused answers it")
-	}
-	if container.Answers(session.MethodRender) {
-		t.Error("a container answers render")
-	}
-}

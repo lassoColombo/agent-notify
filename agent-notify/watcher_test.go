@@ -9,8 +9,28 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lassoColombo/agent-notify/internal/paths"
+	"github.com/lassoColombo/agent-notify/internal/sessionwatcher"
 	"github.com/lassoColombo/agent-notify/session"
 )
+
+// watching reports whether a session-watcher holds the lock under root, and
+// which pid.
+func watching(t *testing.T, root string) (int, bool) {
+	t.Helper()
+	layout, err := paths.Under(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sessionwatcher.Running(layout) {
+		return 0, false
+	}
+	held, err := sessionwatcher.WhoHolds(layout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return held.PID, true
+}
 
 // waitFor polls until the condition holds or the deadline passes, and reports
 // how long it took — which is the number these tests are actually about.
@@ -37,12 +57,9 @@ func TestAKilledAgentIsEndedInMilliseconds(t *testing.T) {
 
 	// The hooks the pretend agent fired will have started a session-watcher.
 	waitFor(t, 5*time.Second, "a session-watcher to take the lock", func() bool {
-		stdout, _, _ := pretend.run(t, "watcher", "status")
-		return strings.HasPrefix(stdout, "running:")
+		_, running := watching(t, pretend.root)
+		return running
 	})
-
-	stdout, _, _ := pretend.run(t, "watcher", "status")
-	t.Logf("watcher %s", strings.TrimSpace(stdout))
 
 	if got := pretend.records(t)[0].Kernel; got != session.BlockedOnYou {
 		t.Fatalf("kernel = %q before the kill", got)
@@ -76,8 +93,8 @@ func TestAKilledAgentIsEndedInMilliseconds(t *testing.T) {
 func TestARebootLeavesNoGhosts(t *testing.T) {
 	pretend := startWith(t, "")
 	waitFor(t, 5*time.Second, "a session-watcher", func() bool {
-		stdout, _, _ := pretend.run(t, "watcher", "status")
-		return strings.HasPrefix(stdout, "running:")
+		_, running := watching(t, pretend.root)
+		return running
 	})
 	pretend.run(t, "watcher", "stop")
 
@@ -191,21 +208,16 @@ func TestAHookDoesNotHangOnAnInheritedPipe(t *testing.T) {
 		}
 		// io.EOF: everybody let go.
 	case <-time.After(10 * time.Second):
-		stdout, _ := exec.Command(built, "watcher", "status").Output()
-		t.Fatalf("the pipe never reached end-of-file: something the hook started is still "+
-			"holding it, and a real agent would now wait forever. watcher: %s", stdout)
+		t.Fatalf("the pipe never reached end-of-file: something the hook started is still " +
+			"holding it, and a real agent would now wait forever")
 	}
 
 	// And the thing it started is genuinely running, or this test proved
 	// nothing about detachment.
-	status := exec.Command(built, "watcher", "status")
-	status.Env = append(os.Environ(), "AGENT_NOTIFY_ROOT="+root)
-	output, _ := status.Output()
-	if !strings.HasPrefix(string(output), "running:") {
-		t.Errorf("no session-watcher was started, so nothing could have held the pipe: %q", output)
-	} else {
-		t.Logf("the hook exited, the pipe closed, and %s", strings.TrimSpace(string(output)))
-	}
+	waitFor(t, 5*time.Second, "the session-watcher the hook started", func() bool {
+		_, running := watching(t, root)
+		return running
+	})
 }
 
 // TestOnlyOneSessionWatcherSurvives is the lock doing its job: anyone may start
@@ -213,10 +225,10 @@ func TestAHookDoesNotHangOnAnInheritedPipe(t *testing.T) {
 func TestOnlyOneSessionWatcherSurvives(t *testing.T) {
 	pretend := startWith(t, "")
 	waitFor(t, 5*time.Second, "a session-watcher", func() bool {
-		stdout, _, _ := pretend.run(t, "watcher", "status")
-		return strings.HasPrefix(stdout, "running:")
+		_, running := watching(t, pretend.root)
+		return running
 	})
-	first, _, _ := pretend.run(t, "watcher", "status")
+	first, _ := watching(t, pretend.root)
 
 	// Several more, at once, exactly as several hooks firing together would.
 	for range 5 {
@@ -225,9 +237,8 @@ func TestOnlyOneSessionWatcherSurvives(t *testing.T) {
 		}
 	}
 
-	second, _, _ := pretend.run(t, "watcher", "status")
-	if first != second {
-		t.Errorf("the lock changed hands:\n  %s  %s", first, second)
+	if second, _ := watching(t, pretend.root); first != second {
+		t.Errorf("the lock changed hands: pid %d, then %d", first, second)
 	}
 
 	// Running it in the foreground loses the race and says so, rather than
@@ -263,16 +274,16 @@ func runForeground(t *testing.T, pretend *pretendAgent) (string, int) {
 func TestStoppingIsAskingAndNeverKilling(t *testing.T) {
 	pretend := startWith(t, "")
 	waitFor(t, 5*time.Second, "a session-watcher", func() bool {
-		stdout, _, _ := pretend.run(t, "watcher", "status")
-		return strings.HasPrefix(stdout, "running:")
+		_, running := watching(t, pretend.root)
+		return running
 	})
 
 	stdout, _, code := pretend.run(t, "watcher", "stop")
 	if code != 0 || !strings.Contains(stdout, "stopped") {
 		t.Fatalf("stop exited %d saying %q", code, stdout)
 	}
-	if got, _, code := pretend.run(t, "watcher", "status"); code != 3 || !strings.Contains(got, "not running") {
-		t.Errorf("after stopping, status says %q (exit %d)", got, code)
+	if _, running := watching(t, pretend.root); running {
+		t.Error("after stopping, something still holds the lock")
 	}
 
 	// Stopping what is not running is not an error worth shouting about.

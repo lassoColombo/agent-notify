@@ -23,6 +23,7 @@ import (
 	"github.com/lassoColombo/agent-notify/internal/config"
 	"github.com/lassoColombo/agent-notify/internal/subcommand"
 	"github.com/lassoColombo/agent-notify/session"
+	"github.com/lassoColombo/agent-notify/tool"
 )
 
 // focusTimeout bounds one step of a focus, and one `focused` query. On expiry
@@ -121,7 +122,7 @@ func Focus(c Container, coordinates json.RawMessage, timeout time.Duration) cont
 	var outcome container.Outcome
 	if err := json.Unmarshal(raw, &outcome); err != nil {
 		return container.Failed(container.Unreachable,
-			fmt.Sprintf("%s answered something that is not an outcome: %s", c.Name, subcommand.Summarise(raw)))
+			fmt.Sprintf("%s answered something that is not an outcome: %s", c.Name, tool.Summarise(raw)))
 	}
 	if !outcome.OK && outcome.Problem == "" {
 		// A container that says no without saying why has still said no.
@@ -143,7 +144,7 @@ func Focused(c Container, coordinates json.RawMessage, timeout time.Duration) co
 	var verdict container.Verdict
 	if err := json.Unmarshal(raw, &verdict); err != nil {
 		return container.Verdict{Answer: container.CannotTell,
-			Detail: fmt.Sprintf("%s answered %s", c.Name, subcommand.Summarise(raw))}
+			Detail: fmt.Sprintf("%s answered %s", c.Name, tool.Summarise(raw))}
 	}
 	switch verdict.Answer {
 	case container.Yes, container.No, container.CannotTell:

@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lassoColombo/agent-notify/container"
 	"github.com/lassoColombo/agent-notify/session"
+	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
 // M6's "done when": a shell script pretending to be an agent produces records
@@ -104,19 +104,16 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// pretendToBeAContainer is a container-integration in six lines, through the
-// real SDK.
-//
-// It answers `capture-environment` out of its own environment, which is the
-// only way anything is captured since D-57 — and it is a child of the hook,
-// which is the only process that can see an agent's environment at all.
+// pretendToBeAContainer answers `capture-environment` out of its own
+// environment, as a child of the hook, which is the only process that can see
+// an agent's environment at all.
 func pretendToBeAContainer() int {
-	return container.Main(container.Integration{
+	return subscribe.Main(subscribe.Integration{
 		Name: "paneish",
-		Capture: func() (any, error) {
+		Reads: func() (any, error) {
 			return map[string]string{"FAKE_PANE": os.Getenv("FAKE_PANE")}, nil
 		},
-	})
+	}, subscribe.Commands{}, os.Args[1:])
 }
 
 // pretendToBeAnAgent runs the session script, then stays alive taking further

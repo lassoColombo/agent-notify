@@ -47,10 +47,10 @@ var SubscribedHooks = []string{
 // between releases. A program that fell over when it did would break on an
 // upgrade nobody told it about.
 type Payload struct {
+	HookEventName  string `json:"hook_event_name"`
 	SessionID      string `json:"session_id"`
 	Cwd            string `json:"cwd"`
 	TranscriptPath string `json:"transcript_path"`
-	Model          string `json:"model"`
 
 	// SessionStart: startup, resume, clear or compact. [verified 2026-09-17]
 	// against 38 real starts; all four occur.
