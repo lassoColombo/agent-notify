@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
 // bundledAt stands a bundle up around a real Mach-O binary, because a bundle is
@@ -182,13 +184,13 @@ func TestABundleCannotPointAtSomethingThatIsNotThere(t *testing.T) {
 	}
 }
 
-// TestTheConfigPointsInsideTheBundle. Naming the bare binary would work in
+// TestTheLaunchAgentPointsInsideTheBundle. Naming the bare binary would work in
 // every way except the one the bundle exists for.
-func TestTheConfigPointsInsideTheBundle(t *testing.T) {
+func TestTheLaunchAgentPointsInsideTheBundle(t *testing.T) {
 	bundle := bundledAt(t)
-	written := theConfigTableToAdd(bundle.PathOfTheBinaryInside(), "")
+	written := subscribe.LaunchAgentPlist(Identifier, bundle.PathOfTheBinaryInside())
 	if !strings.Contains(written, ".app/Contents/MacOS/") {
-		t.Errorf("the table names %q, which is not inside a bundle", written)
+		t.Errorf("the launch agent names %q, which is not inside a bundle", written)
 	}
 }
 

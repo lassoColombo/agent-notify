@@ -131,7 +131,7 @@ func (s *Subscribers) welcome(connection net.Conn) {
 	s.mu.Unlock()
 
 	s.logger.Info("a subscriber connected",
-		"name", hello.Name, "pid", pid, "roles", hello.Roles, "wake_on", hello.WakeOn)
+		"name", hello.Name, "pid", pid, "wake_on", hello.WakeOn)
 
 	joined.ask("connect")
 	go joined.write()
@@ -218,7 +218,6 @@ type Listener struct {
 	Name  string
 	PID   int
 	Since time.Time
-	Roles []string
 }
 
 // Listening is who is connected, with enough to tell one from another. The
@@ -230,7 +229,7 @@ func (s *Subscribers) Listening() []Listener {
 	listening := make([]Listener, 0, len(s.connected))
 	for _, one := range s.connected {
 		listening = append(listening, Listener{
-			Name: one.hello.Name, PID: one.pid, Since: one.since, Roles: one.hello.Roles,
+			Name: one.hello.Name, PID: one.pid, Since: one.since,
 		})
 	}
 	return listening

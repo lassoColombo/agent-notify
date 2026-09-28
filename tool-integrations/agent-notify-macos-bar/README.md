@@ -258,13 +258,23 @@ on stderr, and you decide:
 ```
 $ agent-notify install macos-bar
 [integration.macos-bar]
-binary = "/Users/you/Applications/agent-notify-macos-bar.app/Contents/MacOS/agent-notify-macos-bar"
 
 The bundle is at /Users/you/Applications/agent-notify-macos-bar.app. Nothing else was written:
-put the table above in /Users/you/.config/agent-notify/config.toml when you want this running, since the
-table being there is what turns it on.
+put the table above in /Users/you/.config/agent-notify/config.toml when you want this configurable,
+and load the launch agent below when you want it running.
 
 The bundle holds a COPY of the binary, so run this again after rebuilding.
+
+This display runs itself rather than being started by agent-notify:
+a menu bar item dies with its process, so there is nothing core could
+usefully run. It watches `agent-notify tail --json` instead.
+
+<?xml version="1.0" encoding="UTF-8"?>
+… a launch agent naming the binary inside the bundle …
+
+Put it in ~/Library/LaunchAgents/io.github.lassocolombo.agent-notify-bar.plist and load it:
+
+  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.github.lassocolombo.agent-notify-bar.plist
 
 Banners are a second display, agent-notify-macos-notifications, with a table
 of its own — install it too if you want to be interrupted as well as informed.
@@ -283,16 +293,25 @@ agent-notify install macos-bar >> ~/.config/agent-notify/config.toml
 
 ```sh
 agent-notify install macos-bar >> ~/.config/agent-notify/config.toml
-agent-notify watcher reload     # re-read the config without restarting
+# then put the launch agent it printed in ~/Library/LaunchAgents and:
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.github.lassocolombo.agent-notify-bar.plist
 ```
 
-The session-watcher reads the config at startup and on `reload` (which is a
-`SIGHUP`), and a reload stops and restarts every integration — deliberately, so
-that a display you have just rebuilt is actually the one now running. It starts
-this program, supervises it, restarts it if it dies, and gives up after
-`integration-tries` consecutive failures (five by default); `agent-notify
-watcher reload` clears that and retries. You never start this binary by hand, it
-is not a login item, and it needs nothing in any other program's configuration.
+**agent-notify does not start this display, and that is deliberate.** Every
+other integration is a program core runs and waits for — it hands over a view,
+the program paints, the program exits. A menu bar cannot be written that way: an
+`NSStatusItem` dies with the process that made it, and AppKit wants a main
+thread and a run loop it keeps. So this one owns its process, and something has
+to own the process: launchd does. It starts at login, restarts if it dies
+(`KeepAlive`), and runs inside your logged-in session, which is the one place a
+menu bar exists.
+
+That is also why its table has no `binary`. `binary` means "core may run this",
+and nothing core runs could hold this item up.
+
+What it reads is `agent-notify tail --json`, which it starts itself and starts
+again if it stops. So the session-watcher going away is not this display going
+away: it keeps its item, and picks up where it left off when a watcher is back.
 
 It puts its item on the menu bar when it connects, and — almost — takes it off
 when it stops. `removeStatusItem:` is deliberately not called on shutdown,
@@ -375,17 +394,19 @@ ten — Teams, OneDrive, Bitwarden, WireGuard and friends — were allocated
 positions and never rendered. The display worked perfectly and could not be
 seen.
 
-**There is a counter-measurement, and it is why this machine's config points at
-the bare binary** [measured 2026-09-21]: a bundled build put its `NSStatusItem`
-up, reported it visible at level 25 with a real frame, and the window server
-never drew it — bare binaries appear to be adopted into the menu bar where
-bundles signed by something this machine does not trust are not. If the bundled
-one does not appear for you, point `binary` at the bare path instead and accept
+**There is a counter-measurement, and it is why this machine runs the bare
+binary** [measured 2026-09-21]: a bundled build put its `NSStatusItem` up,
+reported it visible at level 25 with a real frame, and the window server never
+drew it — bare binaries appear to be adopted into the menu bar where bundles
+signed by something this machine does not trust are not. If the bundled one does
+not appear for you, point the launch agent at the bare path instead and accept
 the cost `install` warns about:
 
-```toml
-[integration.macos-bar]
-binary = "/opt/homebrew/bin/agent-notify-macos-bar"
+```xml
+	<key>ProgramArguments</key>
+	<array>
+		<string>/opt/homebrew/bin/agent-notify-macos-bar</string>
+	</array>
 ```
 
 Either way, the last check is looking at the screen.
@@ -465,20 +486,21 @@ This table is core's schema, the same for every integration.
 
 | Key | Type | Default | What it does |
 | --- | --- | --- | --- |
-| `binary` | string | — | The program the session-watcher supervises. Absolute, or looked up on `PATH`. `install` prints the path inside the bundle. |
 | `enabled` | bool | `true` | Absence means enabled: writing the table is how you ask for the display. `false` keeps the table and stops it being started. |
-| `capture-environment` | bool | `false` | Not used here, and deliberately: a menu bar does not care where a session lives, and getting you there is `focus-session`'s job. |
 | `settings` | table | — | Handed over verbatim and never read by core. See below. |
 
 ```toml
 [integration.macos-bar]
-binary = "/Users/you/Applications/agent-notify-macos-bar.app/Contents/MacOS/agent-notify-macos-bar"
 ```
 
-One key elsewhere in the file matters to this display: top-level
-`agent-notify-binary`, which is how it finds the `agent-notify` to run when you
-choose a row. A supervised child's `PATH` is not your shell's `PATH`, so naming
-it explicitly is worth doing.
+An empty table is the whole of core's half, and that is not an omission: the
+path lives in the launch agent, because `binary` would mean "core may run this".
+
+One key elsewhere in the file matters to this display, and matters more than it
+used to: top-level `agent-notify-binary`. It is how this display finds the
+`agent-notify` to run when you choose a row — and now also the one it watches,
+`agent-notify tail --json`. A launchd job's `PATH` is `/usr/bin:/bin` and
+nothing else, so naming it explicitly is no longer optional in practice.
 
 ### `[integration.macos-bar.settings]` — this display's half
 

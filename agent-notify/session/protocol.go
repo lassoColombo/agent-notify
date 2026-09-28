@@ -43,9 +43,6 @@ type Hello struct {
 	// together, so a version that did not match would be a deployment somebody
 	// half finished rather than a protocol to arbitrate (D-77).
 	Version string `json:"version"`
-	// Roles are what it does: display, container, enricher, or something core
-	// has never heard of, which is carried and ignored rather than refused.
-	Roles []string `json:"roles,omitempty"`
 	// WakeOn names the record fields it cares about, so that nothing is woken
 	// for a change it does not care about (R23). Empty means everything.
 	WakeOn []string `json:"wake_on,omitempty"`
@@ -63,6 +60,15 @@ type Hello struct {
 // session-watcher a long time after the only process that could have acted on
 // it had exited (D-39). Nothing ever read it. An integration that needs
 // variables reads them itself, in `capture-environment`.
+
+// There was a `roles` field here too — "display", "container", "enricher" — and
+// it is gone for the opposite reason: it arrived, it was logged, it was copied
+// into three structs, and not one line of code ever branched on it.
+//
+// A role is a category a person infers and then writes down, and writing it
+// down twice is how the two copies come to disagree. What core actually needs
+// is what it is about to run, which is [Capabilities.Methods]: "is a container"
+// became "answers `focus`", and that one cannot be wrong.
 
 // Welcome accepts the connection.
 type Welcome struct {

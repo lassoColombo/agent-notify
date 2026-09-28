@@ -1,12 +1,35 @@
+// Package subscribe is what a tool-integration imports.
+//
+// It is what is left of a much larger package, and what went is the point. It
+// used to own the socket: connect, declare, receive the opening snapshot,
+// coalesce, reconnect, resync, shut down — five hundred lines of protocol every
+// display linked. No display links it now. One that core runs is handed a view
+// on stdin and exits, and one that must own its process reads
+// `agent-notify tail --json`, so the protocol moved to internal/subscriber
+// where the only thing that speaks it is core talking to itself.
+//
+// What an author needs is here:
+//
+//   - [Integration.Settings], so that nobody locates, reads or parses the
+//     config file themselves — the file is core's and its shape is ours to
+//     change (§A10.4).
+//   - [Integration.Read], the cold read: what is running, straight from the
+//     store, with no session-watcher and no socket anywhere (§A7.6).
+//   - [RunThroughTheCLI], for the one kind of display that has to own its
+//     process, and [LaunchAgentPlist], for the thing that starts it.
 package subscribe
 
 import (
 	"bytes"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/lassoColombo/agent-notify/internal/config"
+	"github.com/lassoColombo/agent-notify/internal/core"
+	"github.com/lassoColombo/agent-notify/internal/paths"
 	"github.com/lassoColombo/agent-notify/internal/sessionwatcher"
+	"github.com/lassoColombo/agent-notify/session"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -115,4 +138,100 @@ func (i Integration) CoreBinary() (string, error) {
 	}
 	settings, _ := config.Load(layout.ConfigFile)
 	return sessionwatcher.CoreBinary(settings.AgentNotifyBinary)
+}
+
+// Integration is what an author fills in.
+type Integration struct {
+	// Name is what this calls itself, in the handshake and in the log.
+	Name string
+	// WakeOn names the record fields worth waking for. Empty means anything
+	// but the stamps. "wake me only when kernel changes" is the common case.
+	WakeOn []string
+	// WantEnded asks to see ended sessions. A bar says no and they never
+	// appear; a picker, whose job is offering you something to resume, says
+	// yes; and so does a display that painted something into a UI it does not
+	// own and must be told when to give it back, since the record is what
+	// remembers which pane it was.
+	WantEnded bool
+	// OnChange is the render function. It is called with the current state,
+	// never with a transition, and an error from it is logged and otherwise
+	// ignored: a display's failure is its own (R13).
+	OnChange func(session.View) error
+
+	// Logger is optional; without one nothing is logged.
+	Logger *slog.Logger
+	// Root overrides where to look for the session-watcher, for tests and for
+	// a fake (StartFake).
+	Root string
+}
+
+// layout is where this integration's things are.
+func (i Integration) layout() (paths.Layout, error) {
+	return paths.FromEnvironmentOrUnder(i.Root)
+}
+
+// Read is the cold read path: what is running, straight from the store, with no
+// session-watcher and no socket anywhere.
+//
+// It is here so that no integration ever walks our directory layout itself —
+// the layout is ours to change (§A10.4). An agent's own statusline, polled
+// several times a second to show your *other* agents, is the case this exists
+// for (§A7.6).
+//
+// It applies the liveness decision as it reads and writes nothing, exactly as
+// `agent-notify list` does and through the same function: a session whose
+// process was killed is handed over as ended even if nothing has got round to
+// filing it (D-30). An integration that had to do that for itself would be the
+// second implementation of it, and the two would disagree about somebody's
+// screen (R24).
+func (i Integration) Read() ([]session.Record, error) {
+	return i.read(false)
+}
+
+// ReadIncludingEnded is Read plus the sessions that are over and still
+// resumable — the set bounded by `keep-ended-sessions`.
+//
+// It is a separate method rather than a flag because the two callers are
+// different things: a bar asks the first question and a picker asks the
+// second, whose entire job is offering you something to resume (§A7.5).
+func (i Integration) ReadIncludingEnded() ([]session.Record, error) {
+	return i.read(true)
+}
+
+func (i Integration) read(includeEnded bool) ([]session.Record, error) {
+	layout, err := i.layout()
+	if err != nil {
+		return nil, err
+	}
+	opened, err := core.OpenAt(layout, "subscribe")
+	if err != nil {
+		return nil, err
+	}
+	defer opened.Close()
+
+	return opened.WhatIsRunning(includeEnded), nil
+}
+
+// History is one session's history: the last few things it said and the last
+// few times its state moved (§A7.7).
+//
+// It is read on demand, for one session, and never arrives with a delta — that
+// asymmetry is the whole reason it is a separate file, because a delta carrying
+// it would grow from a kilobyte to twenty. The caller is a display with room to
+// show more than a row: a preview pane, a chip somebody is hovering over.
+//
+// A session with nothing recorded yet is an empty History and no error, which
+// is the ordinary case for one that has only just started.
+func (i Integration) History(key session.Key) (session.History, error) {
+	layout, err := i.layout()
+	if err != nil {
+		return session.History{}, err
+	}
+	opened, err := core.OpenAt(layout, "subscribe")
+	if err != nil {
+		return session.History{}, err
+	}
+	defer opened.Close()
+
+	return opened.Store.History(key)
 }

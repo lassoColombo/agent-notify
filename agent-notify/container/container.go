@@ -28,6 +28,13 @@
 // [capture] and is merely wired up here (D-59). It is not a container's question
 // at all: a display needs it too, and the three functions below are the ones
 // that make this a container.
+//
+// The subcommand names themselves are [session.MethodInterpret],
+// [session.MethodFocus] and [session.MethodFocused], and they live there rather
+// than here because they are no longer only names. They are what this container
+// puts in its `capabilities` answer and what core dispatches on, so the string
+// an author implements and the string core asks for have to be one string and
+// not two that agree today.
 package container
 
 import (
@@ -38,18 +45,7 @@ import (
 	"os"
 
 	"github.com/lassoColombo/agent-notify/capture"
-)
-
-// The subcommands a container answers. They are named after what they do rather
-// than after the record fields they end up in, because an author implementing
-// one should not have to know the record's shape.
-//
-// The fourth, `capture-environment`, is [capture.Command]: it is answered by
-// integrations that are not containers as well, so it is not declared here.
-const (
-	InterpretCommand = "interpret-environment"
-	FocusCommand     = "focus"
-	FocusedCommand   = "focused"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // Integration is what an author fills in. Every function is optional: a
@@ -161,15 +157,22 @@ type Verdict struct {
 // that did not run.
 func Main(integration Integration) int {
 	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "%s <%s|%s|%s|%s>\n", integration.Name,
-			capture.Command, InterpretCommand, FocusCommand, FocusedCommand)
+		fmt.Fprintf(os.Stderr, "%s <%s|%s|%s|%s|%s>\n", integration.Name,
+			session.CapabilitiesCommand, capture.Command,
+			session.MethodInterpret, session.MethodFocus, session.MethodFocused)
 		return 1
 	}
 
-	// Capture is the one subcommand this package does not answer itself, and it
-	// is dispatched before anything else for the reason the whole split exists:
-	// it runs on the path the agent waits on and must do nothing but read.
-	if os.Args[1] == capture.Command {
+	// The two subcommands every tool-integration answers, container or not, are
+	// dispatched before this package's own verbs.
+	switch os.Args[1] {
+	case session.CapabilitiesCommand:
+		// The first thing core ever runs, and the only one it can run before
+		// it knows anything about this program.
+		return integration.capabilities().Answer(os.Stdout)
+	case capture.Command:
+		// Early for the reason the whole split exists: it runs on the path the
+		// agent waits on and must do nothing but read.
 		return capture.Main(integration.Name, integration.Capture)
 	}
 
@@ -187,11 +190,42 @@ func Main(integration Integration) int {
 	return 0
 }
 
+// capabilities is what this container answers `capabilities` with, derived from
+// which functions the author filled in rather than written down anywhere.
+//
+// Derived because this list decides whether core forks. A method declared and
+// not implemented costs a process per question and answers nothing; a method
+// implemented and not declared is never called at all. A nil function is
+// already exactly "do not call me", so taking the answer from the functions
+// leaves nothing to keep in agreement.
+//
+// `capture-environment` is not in it: every integration is asked that one and
+// none of them declares it.
+func (i Integration) capabilities() session.Capabilities {
+	var methods []string
+	if i.Interpret != nil {
+		methods = append(methods, session.MethodInterpret)
+	}
+	if i.Focus != nil {
+		methods = append(methods, session.MethodFocus)
+	}
+	if i.Focused != nil {
+		// A container with no Focused still answers the question — with
+		// "cannot say", below — but it should not be ASKED, which is a fork
+		// spent to be told nothing. Leaving it out of the list is how that
+		// stops, and the honest reading of R27 besides: not knowing is an
+		// answer, and a container that will never know has nothing to add to
+		// the vote.
+		methods = append(methods, session.MethodFocused)
+	}
+	return session.Capabilities{Methods: methods}
+}
+
 var errUnimplemented = errors.New("this container does not answer that")
 
 func (i Integration) answer(command string, input io.Reader) (any, error) {
 	switch command {
-	case InterpretCommand:
+	case session.MethodInterpret:
 		if i.Interpret == nil {
 			return nil, errUnimplemented
 		}
@@ -201,7 +235,7 @@ func (i Integration) answer(command string, input io.Reader) (any, error) {
 		}
 		return i.Interpret(given)
 
-	case FocusCommand:
+	case session.MethodFocus:
 		if i.Focus == nil {
 			return nil, errUnimplemented
 		}
@@ -211,7 +245,7 @@ func (i Integration) answer(command string, input io.Reader) (any, error) {
 		}
 		return i.Focus(given)
 
-	case FocusedCommand:
+	case session.MethodFocused:
 		if i.Focused == nil {
 			// Not knowing is an answer, and it is the one every container that
 			// has never heard of this question should give (R27).

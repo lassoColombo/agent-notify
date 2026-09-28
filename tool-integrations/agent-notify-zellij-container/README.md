@@ -188,8 +188,7 @@ else, which is how a container can be perfectly correct and never once be found.
 ```
 $ agent-notify install zellij-container
 [integration.zellij-container]
-binary              = "/Users/you/.local/bin/agent-notify-zellij-container"
-capture-environment = true
+binary = "/Users/you/.local/bin/agent-notify-zellij-container"
 
 [integration.zellij-container.settings]
 zellij = "/opt/homebrew/bin/zellij"
@@ -273,7 +272,7 @@ agent-notify install zellij-display   >> ~/.config/agent-notify/config.toml
 agent-notify install zellij-container >> ~/.config/agent-notify/config.toml
 ```
 
-Both print `capture-environment = true`, and both mean it: each captures for
+Both are asked `capture-environment` and both answer it: each captures for
 itself, under its own name, so either can be installed without the other. Only
 the container appears in `[container] order` — a display has no business being
 in a focus chain.
@@ -304,8 +303,7 @@ Three keys is the whole of it:
 
 ```toml
 [integration.zellij-container]
-binary              = "/Users/you/.local/bin/agent-notify-zellij-container"
-capture-environment = true
+binary = "/Users/you/.local/bin/agent-notify-zellij-container"
 
 [integration.zellij-container.settings]
 zellij = "/opt/homebrew/bin/zellij"
@@ -323,7 +321,6 @@ else in the file changes either way.
 | key | type | default | what it does |
 | --- | --- | --- | --- |
 | `binary` | string | — (required) | the program core runs. **Absolute.** Resolved by `install`; core does not search PATH for it, because the processes that run it do not have yours. |
-| `capture-environment` | boolean | `false` | whether the hook runs this program inside the agent to read its environment. **Must be `true`** — without it no session ever gets coordinates and this container is correct and invisible. The hook has no socket and cannot ask at connect time, so this one fact has to be written down (D-39). |
 | `enabled` | boolean | `true` | absent means true, because writing the table *is* the ask. `enabled = false` keeps the table and the settings while taking it out of the chain — the way to switch it off for an afternoon without losing the lines. |
 
 **Which** environment variables it captures is not here and is not yours to set.
@@ -360,7 +357,7 @@ Three ways to get it wrong, each with its own message:
 zellij-container`, which finds zellij in your own shell and prints the line to add
 
 [integration.zellij-container.settings] zellij = "zellij" must be an absolute path: a
-supervised child's PATH is not yours, so a bare name means something different here
+PATH of a program core starts is not yours, so a bare name means something different here
 than it does to you
 
 [integration.zellij-container.settings] zellij = "/opt/homebrew/bin/zellij": stat
@@ -592,7 +589,7 @@ the answer and this program cannot see it.
   with it, the session-watcher could name a client out of `list-clients` and move
   that one instead of relying on who is asking.
 - **doctor does not check this integration.** It checks the file it is named in.
-  A container is not a supervised child, so there is no connection to report and
+  A container is not kept running, so there is no connection to report and
   no handshake to fail — which means a `binary` path that no longer exists looks
   fine in doctor and shows up as `container-unreachable` the first time somebody
   clicks.

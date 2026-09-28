@@ -7,23 +7,32 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+
+	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
 // The theConfigTableToAdd this integration needs.
 //
-// The binary it names is the one INSIDE the bundle, and that is the whole point
-// of the bundle (see bundle.go): run the bare binary and it cannot notify at
-// all. The path never changes, so this line never has to — but what sits at it
-// is a signed COPY, not a symlink: codesign refuses a symlinked executable, and
-// an unsigned bundle is refused silently by the notification system
-// (bundle.go). A rebuilt binary therefore does not reach the bundle on its own:
+// It has no `binary`, and the absence is the declaration. `binary` means "core
+// may run this", and a notifier is not runnable in that sense: posting is XPC
+// and would survive being a one-shot, but a tap on a banner is answered on this
+// process's main thread, so a notifier that exits has banners nobody can click
+// (notifier_test.go). It keeps its process, and launchd keeps it.
+//
+// What is left in the table is settings. The binary inside the bundle is named
+// in the launch agent instead, and that is the whole point of the bundle (see
+// bundle.go): run the bare binary and it cannot notify at all. What sits at
+// that path is a signed COPY, not a symlink — codesign refuses a symlinked
+// executable, and an unsigned bundle is refused silently by the notification
+// system. A rebuilt binary therefore does not reach the bundle on its own:
 // `install` has to run again, which is why it is idempotent.
 //
-// No `capture` line: a notification does not care where a session lives, only what
-// it is doing. Choosing a row focuses one, and that is the container's job,
-// asked for through `agent-notify focus-session` rather than done here (D-37).
-func theConfigTableToAdd(binary, identity string) string {
-	written := fmt.Sprintf("[integration.%s]\nbinary = %q\n", Name, binary)
+// Nothing about capturing either: a notification does not care where a session
+// lives, only what it is doing. Choosing a row focuses one, and that is the
+// container's job, asked for through `agent-notify focus-session` rather than
+// done here (D-37).
+func theConfigTableToAdd(identity string) string {
+	written := fmt.Sprintf("[integration.%s]\n", Name)
 	if identity != "" {
 		written += fmt.Sprintf("\n[integration.%s.settings]\nsign = %q\n", Name, identity)
 	}
@@ -107,19 +116,27 @@ func setUp(out, problems io.Writer, arguments []string) int {
 		return 1
 	}
 
-	fmt.Fprint(out, theConfigTableToAdd(bundle.PathOfTheBinaryInside(), bundle.Identity))
+	fmt.Fprint(out, theConfigTableToAdd(bundle.Identity))
 
 	where, err := me.ConfigFile()
 	if err != nil {
 		where = "agent-notify's config file"
 	}
 	fmt.Fprintf(problems, "\nThe bundle is at %s. Nothing else was written:\n"+
-		"put the table above in %s when you want this running, since the\n"+
-		"table being there is what turns it on.\n\n", bundle.Path, where)
+		"put the table above in %s when you want this configurable,\n"+
+		"and load the launch agent below when you want it running.\n\n", bundle.Path, where)
 	fmt.Fprint(problems, "The bundle must be SIGNED: an unsigned or bundle-less program cannot post a\n"+
 		"notification at all, and is refused silently. It holds a signed COPY of the\n"+
-		"binary, so run this again after rebuilding.\n\n"+
-		"The menu bar item is a second display, agent-notify-macos-bar, with a table\n"+
+		"binary, so run this again after rebuilding.\n\n")
+
+	fmt.Fprintf(problems, "This display runs itself rather than being started by agent-notify:\n"+
+		"a tap on a banner is answered on this process's main thread, so there has\n"+
+		"to be a process for it to reach. It watches `agent-notify tail --json`\n"+
+		"instead.\n\n%s\n%s\n",
+		subscribe.LaunchAgentPlist(Identifier, bundle.PathOfTheBinaryInside()),
+		subscribe.HowToLoadTheLaunchAgent(Identifier))
+
+	fmt.Fprint(problems, "\nThe menu bar item is a second display, agent-notify-macos-bar, with a table\n"+
 		"of its own — install it too if you want to be informed as well as interrupted.\n")
 	return 0
 }

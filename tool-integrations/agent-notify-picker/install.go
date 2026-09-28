@@ -7,24 +7,29 @@ import (
 	"strings"
 )
 
-// The table this integration needs.
+// The table this integration needs, which is a heading and nothing else.
 //
-// `enabled = false` is the whole of the unusual part, and it does not mean off.
-// The session-watcher starts every integration that is enabled and has a binary
-// (§A9.4), which is right for a bar and wrong for this: a picker needs a
-// terminal, and a picker started behind your back is a process with nowhere to
-// draw. So the table names the binary — for whatever binds a key to it, and for
-// `doctor` — and says plainly that nothing should spawn it.
+// **No `binary`, and the absence is the declaration.** Naming one means "core
+// may run this" — the hook runs it on the agent's path, the session-watcher
+// runs it to render or to focus — and a picker needs a terminal, so a picker
+// started behind your back is a process with nowhere to draw. That used to be
+// said with `enabled = false`, which was a workaround rather than a statement:
+// the rule was "started if enabled and has a binary", so the only way to say
+// "do not start this" was to say "this is off", about a thing that was on.
 //
-// The binary is written as an ABSOLUTE path for the reason every integration
-// here writes one: this is run by a keybinding, whose PATH is not your shell's.
-func table(program string) string {
-	return fmt.Sprintf(`# The picker is run when you press a key, not supervised: it needs a terminal,
-# so `+"`enabled = false`"+` here means "do not start this for me", not "off".
+// Where the path goes instead is the keybinding below, which is the only thing
+// that runs this and is where a person would look for it. It is ABSOLUTE for
+// the reason every integration here writes one: a keybinding's PATH is not your
+// shell's.
+//
+// The table is still worth writing. It carries the settings, and it is what
+// makes this appear in `doctor` as something of yours rather than as a program
+// on your PATH that nobody asked for.
+func table() string {
+	return `# Run when you press a key, and never by core: it has no binary here, which is
+# what says so. The path lives in the keybinding, which is the thing that runs it.
 [integration.picker]
-binary  = %q
-enabled = false
-`, program)
+`
 }
 
 // keybinding is how zellij is asked to open it: a floating pane that closes
@@ -57,7 +62,7 @@ func keybinding(program string) string {
 // answer for the table: whether a picker should be set up at all is yours.
 //
 // What this program knows and a person cannot, it still supplies exactly: where
-// its binary is, and that nothing should spawn it.
+// its binary is, resolved, in the one place that needs it.
 func install(arguments []string) int {
 	return printTable(os.Stdout, os.Stderr, arguments)
 }
@@ -84,14 +89,17 @@ func printTable(out, problems io.Writer, arguments []string) int {
 		return 1
 	}
 
-	fmt.Fprint(out, table(program))
+	fmt.Fprint(out, table())
 
 	where, err := me.ConfigFile()
 	if err != nil {
 		where = "agent-notify's config file"
 	}
 	fmt.Fprintf(problems, "\nNothing was written. Put that in %s, and this in\n"+
-		"zellij's config.kdl to open it with a key:\n\n%s\n", where, indent(keybinding(program)))
+		"zellij's config.kdl to open it with a key:\n\n%s\n"+
+		"\nThe path is in the keybinding and not in the table, because a table with a\n"+
+		"binary in it is one core may run, and nothing core runs has a terminal.\n",
+		where, indent(keybinding(program)))
 	return 0
 }
 

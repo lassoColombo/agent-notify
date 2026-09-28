@@ -1,11 +1,11 @@
-package subscribe_test
+package subscriber_test
 
 import (
 	"context"
 	"testing"
 
+	"github.com/lassoColombo/agent-notify/internal/subscriber"
 	"github.com/lassoColombo/agent-notify/session"
-	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
 // What a subscriber is told MOVED is a different question from what it is told
@@ -27,7 +27,7 @@ import (
 // which is a restart telling you about the past.
 func TestTheFirstViewCarriesNoChanges(t *testing.T) {
 	root := shortRoot(t)
-	fake, err := subscribe.StartFake(root, nil)
+	fake, err := subscriber.StartFake(root, nil)
 	if err != nil {
 		t.Fatalf("StartFake: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestTheFirstViewCarriesNoChanges(t *testing.T) {
 	seen := &watched{}
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
-	go subscribe.Run(ctx, subscribe.Integration{
+	go subscriber.Run(ctx, subscriber.Subscription{
 		Name: "a-notifier", Root: root, OnChange: seen.record,
 	})
 
@@ -70,7 +70,7 @@ func TestTheFirstViewCarriesNoChanges(t *testing.T) {
 // per live agent every time the daemon comes back.
 func TestAReconnectionIsNotAChange(t *testing.T) {
 	root := shortRoot(t)
-	first, err := subscribe.StartFake(root, nil)
+	first, err := subscriber.StartFake(root, nil)
 	if err != nil {
 		t.Fatalf("StartFake: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestAReconnectionIsNotAChange(t *testing.T) {
 	seen := &watched{}
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
-	go subscribe.Run(ctx, subscribe.Integration{
+	go subscriber.Run(ctx, subscriber.Subscription{
 		Name: "a-notifier", Root: root, OnChange: seen.record,
 	})
 
@@ -95,7 +95,7 @@ func TestAReconnectionIsNotAChange(t *testing.T) {
 	if err := first.Stop(); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
-	second, err := subscribe.StartFake(root, nil)
+	second, err := subscriber.StartFake(root, nil)
 	if err != nil {
 		t.Fatalf("the second StartFake: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestAReconnectionIsNotAChange(t *testing.T) {
 // display was disconnected.
 func TestASnapshotComparesOnlyTheFieldsAskedFor(t *testing.T) {
 	root := shortRoot(t)
-	first, err := subscribe.StartFake(root, nil)
+	first, err := subscriber.StartFake(root, nil)
 	if err != nil {
 		t.Fatalf("StartFake: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestASnapshotComparesOnlyTheFieldsAskedFor(t *testing.T) {
 	seen := &watched{}
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
-	go subscribe.Run(ctx, subscribe.Integration{
+	go subscriber.Run(ctx, subscriber.Subscription{
 		Name: "a-tab-renamer", Root: root,
 		WakeOn:   []string{"kernel"},
 		OnChange: seen.record,
@@ -154,7 +154,7 @@ func TestASnapshotComparesOnlyTheFieldsAskedFor(t *testing.T) {
 	if err := first.Stop(); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
-	second, err := subscribe.StartFake(root, nil)
+	second, err := subscriber.StartFake(root, nil)
 	if err != nil {
 		t.Fatalf("the second StartFake: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestASnapshotComparesOnlyTheFieldsAskedFor(t *testing.T) {
 // from remembered timestamps.
 func TestAChangeCarriesWhatItMovedFrom(t *testing.T) {
 	root := shortRoot(t)
-	fake, err := subscribe.StartFake(root, nil)
+	fake, err := subscriber.StartFake(root, nil)
 	if err != nil {
 		t.Fatalf("StartFake: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestAChangeCarriesWhatItMovedFrom(t *testing.T) {
 	seen := &watched{}
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
-	go subscribe.Run(ctx, subscribe.Integration{
+	go subscriber.Run(ctx, subscriber.Subscription{
 		Name: "a-notifier", Root: root, OnChange: seen.record,
 	})
 
@@ -239,7 +239,7 @@ func TestAChangeCarriesWhatItMovedFrom(t *testing.T) {
 // must ignore, and the two are told apart by one comparison.
 func TestSomethingOtherThanTheStateMovingIsNotATransition(t *testing.T) {
 	root := shortRoot(t)
-	fake, err := subscribe.StartFake(root, nil)
+	fake, err := subscriber.StartFake(root, nil)
 	if err != nil {
 		t.Fatalf("StartFake: %v", err)
 	}
@@ -248,7 +248,7 @@ func TestSomethingOtherThanTheStateMovingIsNotATransition(t *testing.T) {
 	seen := &watched{}
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
-	go subscribe.Run(ctx, subscribe.Integration{
+	go subscriber.Run(ctx, subscriber.Subscription{
 		Name: "a-notifier", Root: root, OnChange: seen.record,
 	})
 
@@ -277,7 +277,7 @@ func TestSomethingOtherThanTheStateMovingIsNotATransition(t *testing.T) {
 // and that is the same fact the delta would have carried.
 func TestASnapshotStillSaysWhatASessionMovedFrom(t *testing.T) {
 	root := shortRoot(t)
-	first, err := subscribe.StartFake(root, nil)
+	first, err := subscriber.StartFake(root, nil)
 	if err != nil {
 		t.Fatalf("StartFake: %v", err)
 	}
@@ -285,7 +285,7 @@ func TestASnapshotStillSaysWhatASessionMovedFrom(t *testing.T) {
 	seen := &watched{}
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
-	go subscribe.Run(ctx, subscribe.Integration{
+	go subscriber.Run(ctx, subscriber.Subscription{
 		Name: "a-notifier", Root: root, OnChange: seen.record,
 	})
 
@@ -301,7 +301,7 @@ func TestASnapshotStillSaysWhatASessionMovedFrom(t *testing.T) {
 	if err := first.Stop(); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
-	second, err := subscribe.StartFake(root, nil)
+	second, err := subscriber.StartFake(root, nil)
 	if err != nil {
 		t.Fatalf("the second StartFake: %v", err)
 	}
@@ -332,7 +332,7 @@ func TestASnapshotStillSaysWhatASessionMovedFrom(t *testing.T) {
 
 // mostRecentChange is the one change in the latest view, which is what every
 // test above is actually asking about.
-func mostRecentChange(t *testing.T, w *watched) subscribe.Change {
+func mostRecentChange(t *testing.T, w *watched) session.Change {
 	t.Helper()
 	view, ok := w.latest()
 	if !ok {

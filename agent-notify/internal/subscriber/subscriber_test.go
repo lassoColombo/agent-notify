@@ -1,4 +1,4 @@
-package subscribe_test
+package subscriber_test
 
 import (
 	"bufio"
@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lassoColombo/agent-notify/internal/subscriber"
 	"github.com/lassoColombo/agent-notify/session"
-	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
 func shortRoot(t *testing.T) string {
@@ -44,31 +44,31 @@ func aSession(id string, kernel session.Kernel, message string) session.Record {
 // tests assert about.
 type watched struct {
 	mu    sync.Mutex
-	views []subscribe.View
+	views []session.View
 }
 
-func (w *watched) record(view subscribe.View) error {
+func (w *watched) record(view session.View) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.views = append(w.views, view)
 	return nil
 }
 
-func (w *watched) latest() (subscribe.View, bool) {
+func (w *watched) latest() (session.View, bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if len(w.views) == 0 {
-		return subscribe.View{}, false
+		return session.View{}, false
 	}
 	return w.views[len(w.views)-1], true
 }
 
 // first is the opening view, which is the only one some contracts are about.
-func (w *watched) first() (subscribe.View, bool) {
+func (w *watched) first() (session.View, bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if len(w.views) == 0 {
-		return subscribe.View{}, false
+		return session.View{}, false
 	}
 	return w.views[0], true
 }
@@ -96,7 +96,7 @@ func waitFor(t *testing.T, what string, ready func() bool) {
 // terminal — a display under test and a script.
 func TestTenLineSubscriberSeesChangesLive(t *testing.T) {
 	root := shortRoot(t)
-	fake, err := subscribe.StartFake(root, nil)
+	fake, err := subscriber.StartFake(root, nil)
 	if err != nil {
 		t.Fatalf("StartFake: %v", err)
 	}
@@ -107,9 +107,8 @@ func TestTenLineSubscriberSeesChangesLive(t *testing.T) {
 	defer stop()
 
 	// This is the ten lines.
-	go subscribe.Run(ctx, subscribe.Integration{
+	go subscriber.Run(ctx, subscriber.Subscription{
 		Name:     "a-display",
-		Roles:    []string{"display"},
 		Root:     root,
 		OnChange: seen.record,
 	})
@@ -148,7 +147,7 @@ func TestTenLineSubscriberSeesChangesLive(t *testing.T) {
 func TestASubscriberSurvivesASessionWatcherRestart(t *testing.T) {
 	root := shortRoot(t)
 
-	first, err := subscribe.StartFake(root, nil)
+	first, err := subscriber.StartFake(root, nil)
 	if err != nil {
 		t.Fatalf("StartFake: %v", err)
 	}
@@ -156,7 +155,7 @@ func TestASubscriberSurvivesASessionWatcherRestart(t *testing.T) {
 	seen := &watched{}
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
-	go subscribe.Run(ctx, subscribe.Integration{
+	go subscriber.Run(ctx, subscriber.Subscription{
 		Name: "a-display", Root: root, OnChange: seen.record,
 	})
 
@@ -174,7 +173,7 @@ func TestASubscriberSurvivesASessionWatcherRestart(t *testing.T) {
 	before := seen.count()
 
 	// A new one, which knows nothing about the old one's connections.
-	second, err := subscribe.StartFake(root, nil)
+	second, err := subscriber.StartFake(root, nil)
 	if err != nil {
 		t.Fatalf("the second StartFake: %v", err)
 	}
@@ -211,13 +210,13 @@ func TestASubscriberSurvivesASessionWatcherRestart(t *testing.T) {
 // render (§A9.3, R15).
 func TestASubscriberIsCorrectAfterOverflowing(t *testing.T) {
 	root := shortRoot(t)
-	fake, err := subscribe.StartFake(root, nil)
+	fake, err := subscriber.StartFake(root, nil)
 	if err != nil {
 		t.Fatalf("StartFake: %v", err)
 	}
 	defer fake.Stop()
 
-	layout, err := subscribe.FakeLayout(root)
+	layout, err := subscriber.FakeLayout(root)
 	if err != nil {
 		t.Fatalf("FakeLayout: %v", err)
 	}
@@ -305,13 +304,13 @@ func TestASubscriberIsCorrectAfterOverflowing(t *testing.T) {
 // would take the display down instead of telling them.
 func TestASubscriberFromAnotherVersionIsStillWelcome(t *testing.T) {
 	root := shortRoot(t)
-	fake, err := subscribe.StartFake(root, nil)
+	fake, err := subscriber.StartFake(root, nil)
 	if err != nil {
 		t.Fatalf("StartFake: %v", err)
 	}
 	defer fake.Stop()
 
-	layout, _ := subscribe.FakeLayout(root)
+	layout, _ := subscriber.FakeLayout(root)
 	connection, err := net.Dial("unix", layout.SubscribersSocket())
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
@@ -345,7 +344,7 @@ func TestASubscriberFromAnotherVersionIsStillWelcome(t *testing.T) {
 // not care about.
 func TestWakeOnFiltersWhatArrives(t *testing.T) {
 	root := shortRoot(t)
-	fake, err := subscribe.StartFake(root, nil)
+	fake, err := subscriber.StartFake(root, nil)
 	if err != nil {
 		t.Fatalf("StartFake: %v", err)
 	}
@@ -354,7 +353,7 @@ func TestWakeOnFiltersWhatArrives(t *testing.T) {
 	seen := &watched{}
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
-	go subscribe.Run(ctx, subscribe.Integration{
+	go subscriber.Run(ctx, subscriber.Subscription{
 		Name: "a-pane-renamer", Root: root, WakeOn: []string{"kernel", "name"},
 		OnChange: seen.record,
 	})
@@ -405,11 +404,11 @@ func TestAWakeOnNobodyCanMeetIsRefusedBeforeAnythingHappens(t *testing.T) {
 	defer cancel()
 
 	root := shortRoot(t)
-	err := subscribe.Run(ctx, subscribe.Integration{
+	err := subscriber.Run(ctx, subscriber.Subscription{
 		Name:     "misspelt",
 		Root:     root,
 		WakeOn:   []string{"kernel", "Kernel"},
-		OnChange: func(subscribe.View) error { return nil },
+		OnChange: func(session.View) error { return nil },
 	})
 	if err == nil {
 		t.Fatal("Run accepted a wake-on that can never wake")
@@ -437,13 +436,53 @@ func TestTheWakeOnEveryDisplayActuallyUsesIsAccepted(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	err := subscribe.Run(ctx, subscribe.Integration{
+	err := subscriber.Run(ctx, subscriber.Subscription{
 		Name:     "honest",
 		Root:     shortRoot(t),
 		WakeOn:   []string{"kernel", "detail", "rank", "name", "cwd", "captured_context"},
-		OnChange: func(subscribe.View) error { return nil },
+		OnChange: func(session.View) error { return nil },
 	})
 	if err != nil {
 		t.Fatalf("a real wake-on was refused: %v", err)
 	}
+}
+
+// TestAnEndedSessionLeavesAViewThatDidNotAskForOne: WantEnded has to mean the
+// same thing in a delta as it does in a snapshot, or every display writes this
+// filter itself and D-26 is a convention rather than a mechanism.
+func TestAnEndedSessionLeavesAViewThatDidNotAskForOne(t *testing.T) {
+	root := shortRoot(t)
+	fake, err := subscriber.StartFake(root, nil)
+	if err != nil {
+		t.Fatalf("StartFake: %v", err)
+	}
+	defer fake.Stop()
+
+	bar, picker := &watched{}, &watched{}
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	go subscriber.Run(ctx, subscriber.Subscription{Name: "bar", Root: root, OnChange: bar.record})
+	go subscriber.Run(ctx, subscriber.Subscription{
+		Name: "picker", Root: root, WantEnded: true, OnChange: picker.record,
+	})
+	waitFor(t, "both to connect", func() bool { return len(fake.Connected()) == 2 })
+
+	fake.Publish(aSession("one", session.Working, "building"))
+	waitFor(t, "the bar to see it", func() bool {
+		view, ok := bar.latest()
+		return ok && len(view.Sessions) == 1
+	})
+
+	ended := aSession("one", session.Ended, "building")
+	ended.Sequence = 2
+	fake.Publish(ended)
+
+	waitFor(t, "the bar to drop it", func() bool {
+		view, ok := bar.latest()
+		return ok && len(view.Sessions) == 0
+	})
+	waitFor(t, "the picker to keep it", func() bool {
+		view, ok := picker.latest()
+		return ok && len(view.Sessions) == 1 && view.Sessions[0].Kernel == session.Ended
+	})
 }

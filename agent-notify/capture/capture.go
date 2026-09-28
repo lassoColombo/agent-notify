@@ -29,9 +29,18 @@ import (
 	"os"
 )
 
-// Command is the subcommand core runs. An integration that answers it says so
-// with `capture-environment = true` in its own table, which its `install`
-// writes: the hook has no socket and cannot ask (D-39).
+// Command is the subcommand core runs, on every integration it can run at all.
+//
+// Nobody declares it and nobody is selected for it. It used to be asked of the
+// integrations whose table said `capture-environment = true`, because the hook
+// has no socket and cannot ask anything (D-39) — and that was a bit in the
+// user's file standing in for a property of the program, with the usual
+// consequence: a table that says yes for an integration that reads nothing, or
+// no for one that reads something, and no error either way.
+//
+// Asking everybody costs what it looks like it costs and no more: the hook only
+// captures when there is something new to capture, and runs all of them
+// concurrently under one shared timeout when it does.
 const Command = "capture-environment"
 
 // Reads is what an integration implements. Whatever it returns is encoded as
@@ -52,8 +61,13 @@ type Reads func() (any, error)
 // this integration contributes nothing, and the next capture tries again.
 func Main(name string, read Reads) int {
 	if read == nil {
-		fmt.Fprintf(os.Stderr, "%s %s: this integration does not read anything\n", name, Command)
-		return 1
+		// Reading nothing is an ordinary thing for an integration to do, now
+		// that all of them are asked, so it is answered rather than failed:
+		// an empty object, which core stores as no entry at all. Exiting 1
+		// here would fill the log with a complaint about a program behaving
+		// exactly as intended.
+		fmt.Println("{}")
+		return 0
 	}
 	answer, err := read()
 	if err != nil {

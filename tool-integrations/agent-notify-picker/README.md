@@ -75,11 +75,17 @@ core computed — exactly like the menu bar and the zellij pane titles. What
 differs is that it needs a terminal, so it is run when you press a key and it
 goes away when you have chosen.
 
-That is what `enabled = false` in its table means, and it does not mean off. The
-session-watcher starts every integration that is enabled and has a binary
-(§A9.4), which is right for a bar and wrong for this: a picker started behind
-your back is a process with nowhere to draw. The table still names the binary,
-for whatever binds the key and for `agent-notify doctor`.
+That is why **its table has no `binary`**, and the absence is the statement.
+Naming one means "core may run this" — the hook runs it on the path an agent is
+waiting on, the session-watcher runs it to render or to focus — and every one of
+those is a picker with nowhere to draw. The path lives in the keybinding
+instead, which is the only thing that runs this and where you would look for it.
+
+It used to say the same thing with `enabled = false`, which was a workaround
+rather than a statement: the old rule was "started if enabled and has a binary",
+so the only way to say "do not start this" was to say "this is off" about a
+thing that was on. The table is on now, and there is simply nothing in it for
+core to run.
 
 ### fzf owns the screen, as a library
 
@@ -194,11 +200,9 @@ a picker should be set up at all is one of the things only you can answer.
 
 ```
 $ agent-notify install picker
-# The picker is run when you press a key, not supervised: it needs a terminal,
-# so `enabled = false` here means "do not start this for me", not "off".
+# Run when you press a key, and never by core: it has no binary here, which is
+# what says so. The path lives in the keybinding, which is the thing that runs it.
 [integration.picker]
-binary  = "/opt/homebrew/bin/agent-notify-picker"
-enabled = false
 
 Nothing was written. Put that in /Users/you/.config/agent-notify/config.toml, and this in
 zellij's config.kdl to open it with a key:
@@ -323,14 +327,12 @@ Two keys, and both are core's rather than this program's:
 
 ```toml
 [integration.picker]
-binary  = "/opt/homebrew/bin/agent-notify-picker"
-enabled = false
 ```
 
 | key | type | default | what it changes |
 | --- | --- | --- | --- |
-| `binary` | string (absolute path, or a name on `PATH`) | — | where this program is. Read by whatever binds the key and by `doctor`; nothing supervises it. |
-| `enabled` | bool | `true` when absent | `false` means "do not start this for me". Writing the table is how you ask for an integration, so absence means enabled — which for a picker is wrong, and why `install` prints `false`. |
+| `binary` | — | absent, deliberately | Do not add one. It means "core may run this", and a picker run by core is a picker with nowhere to draw. The path belongs in your keybinding. |
+| `enabled` | bool | `true` when absent | `false` turns the picker off — which now means what it says, since nothing was ever going to start it. |
 
 Everything else this program understands is under
 `[integration.picker.settings]`, which core hands over verbatim and never reads

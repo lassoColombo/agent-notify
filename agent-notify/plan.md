@@ -4542,6 +4542,111 @@ of this section is that it prevents re-litigating.
     write to the shared file (D-79's companion, `827ccc4`); it is easy to
     mistake for machinery and the test now says otherwise out loud.
 
+- **D-81** (2026-09-28) — **One handshake, one interface, no long-lived
+  integrations.** Every tool-integration answers `capabilities`, core dispatches
+  on the methods it declares, and every integration core knows about is a
+  program core RUNS rather than one it keeps. *Amends* §A10.2 (there were two
+  lifecycles; there is one), §A10.3 (the declaration channel is a subcommand,
+  not the connect handshake), §A14 and D-66 (`capture-environment` has left the
+  printed table). *Reverses* D-6 (displays are long-lived subscribers core
+  supervises) and the inference half of D-38 (a container is a program that gets
+  run — still true — recognised by its absence from `[container] order` — no
+  longer). *Retires* D-39, which only existed because the hook could not ask.
+
+  - **What was wrong was one line.** `supervisable()` decided whether an
+    integration was a daemon by asking whether it was ABSENT from
+    `[container] order`. That key exists to say how shells nest, which §A11.2
+    calls the one thing only the user knows — so a property of the program was
+    being read out of the user's file, which is the thing §A10.3 and D-66 both
+    exist to prevent. It was wrong in both directions: a container left out of
+    the order was started as a daemon, and so was the picker, which is a
+    terminal program with a binary and no business being started at all. That
+    had been happening: started, failed, retried five times, retired, silently.
+  - **The declaration channel could not carry it.** §A10.3's answer is the
+    connect handshake, and that channel is only reachable by something that has
+    already decided to connect. Lifecycle is the one fact needed BEFORE that
+    decision exists. So: a subcommand, answered without connecting, before
+    anything else is asked.
+  - **Capabilities are methods, not roles.** A role is a category a person
+    infers and then writes down — in the table, in the order, in a `roles` field
+    — and each copy is somewhere it can be wrong. A method is what core is about
+    to run. "Is a container" became "answers `focus`", which is not an opinion.
+    `roles` was carried, logged, copied into three structs, and branched on by
+    nothing; it is gone.
+  - **The answer is derived, never written down.** `container.Main` builds its
+    own methods list from which functions the author filled in. A nil function
+    is already exactly "do not call me", so there is nothing left to keep in
+    agreement — and `methods` means "worth calling" rather than "will not
+    error", which is a distinction that used to cost a process: an unimplemented
+    `focused` was asked anyway and answered "cannot say", indistinguishable from
+    a tool that genuinely could not see. With unanimity required (§A11.6), one
+    such container made every session on the machine permanently unsure.
+  - **`capture-environment` is universal.** Nobody declares it and everybody is
+    asked; an integration that reads nothing answers `{}` and core records no
+    entry. The bit in the config existed only because the hook has no socket
+    (D-39), and it was a fact about the program living in the user's file — yes
+    for one that reads nothing, no for one that reads something, no error either
+    way. Asking everybody costs what it looks like: the hook only captures when
+    there is something new to capture, and runs them concurrently under one
+    shared timeout when it does.
+  - **A surface that must own a process stops being an integration.** A menu bar
+    item dies with the process that made it; a tap on a banner is answered on
+    the posting process's main thread. Neither can be a program core runs, so
+    both are started by launchd and read `agent-notify tail --json`, which
+    §A10.2 already allowed from the other side: an unsolicited connection is
+    first-class, and the CLI is a client rather than a second implementation.
+    `install` prints the launch agent and loads nothing, for D-66's reason and
+    more so — loading one puts a program in your login session for ever.
+  - **`binary` means "core may run this", and its absence is a declaration.** A
+    table without one belongs to something launchd starts; it is there for its
+    settings, and core neither starts it, asks it anything, nor runs it on the
+    hook path.
+  - **What core knows is written down, because three things read it.** The
+    session-watcher asks everyone at startup and on reload — never on a sweep:
+    the answer is a property of the program on disk, and rebuilding one is
+    already a reload — and writes the answers into `integrations.json`, which
+    the supervisor's report became. `doctor` shows it. A focus asked from a
+    keybinding reads it instead of running every container to find out what a
+    container is, and asks directly when there is no report, so focus still
+    works on a machine where nothing is running. The hook reads it too, and
+    never asks: R1 owns that path, so it is a file read or the configuration and
+    never a process.
+  - **`version` finally does something.** Nothing negotiates on it (D-77), but an
+    integration that cannot be asked at all is recorded with the reason, and
+    `doctor` fails and says to reinstall it. Without that, a display whose
+    binary was deleted reports no methods — exactly what a display with nothing
+    to offer reports — and core stops running it for ever with nobody told why.
+  - **A render is handed its view on stdin.** It cannot read the store instead: a
+    process started fresh for one render remembers nothing, and this is the
+    field where that matters — a display owns panes it did not create, and the
+    only thing that remembers which pane a finished agent had is that agent's
+    ended record. So the "since the last view" memory moved into core, one per
+    display, where it also survives the display crashing, which it did not
+    before. `want_ended` is in the handshake for the same reason: core composes
+    the payload now, so core has to be told.
+  - **One channel of one, doing two jobs.** At most one render in flight and one
+    pending. It coalesces, because a render always paints the whole world and a
+    queued one is never worth keeping beside a newer one; and it serialises,
+    because two `zellij action rename-pane` in flight together is how a pane
+    ends up wearing the wrong name. A render that would carry no changes is not
+    run at all, which is what `wake_on` buys now: it used to save a write to a
+    socket somebody was already listening on, and it saves a process.
+  - **What this deleted.** `supervise.go` entire — the child lifecycle, the
+    grace period, consecutive failures, `integration-tries`, the backoff, and
+    `whoIs`, which existed only to guess which connection belonged to the child
+    core had just started. `subscribe`'s five hundred lines of socket protocol
+    went to `internal/subscriber`, because no integration links it any more and
+    the socket has one consumer shape: `tail`. Net, across the eight steps, a
+    thousand lines fewer.
+  - **The picker's path is in its keybinding, and nowhere else.** It was the one
+    thing left open, and the answer fell out of the macOS two: they became
+    clients with no path in their tables at all — theirs is in the launch agent
+    — so there was no second client wanting a second key, and no second key.
+    Its table is a heading and its settings now. Its `enabled = false` went with
+    the binary: that was never a statement, it was the only way to say "do not
+    start this" to a rule that said "started if enabled and has a binary", and
+    it said it by calling a thing that was on off.
+
 
 **The payload discussion of 2026-09-17 is now ratified** in D-10 through D-18.
 What is still marked [proposed] elsewhere — the field list of §A7.4, the event

@@ -131,8 +131,7 @@ options; it **prints a table and writes nothing**:
 
 ```toml
 [integration.zellij-display]
-binary              = "/Users/you/go/bin/agent-notify-zellij-display"
-capture-environment = true
+binary = "/Users/you/go/bin/agent-notify-zellij-display"
 
 [integration.zellij-display.settings]
 zellij = "/opt/homebrew/bin/zellij"
@@ -155,7 +154,7 @@ Two of the three lines are facts about this machine that the program resolves fo
 you and you should not retype:
 
 - **`binary`** is `os.Executable()` — this binary's own absolute path. A
-  supervised child's PATH is not your shell's (a launchd job's is
+  PATH of a program core starts is not your shell's (a launchd job's is
   `/usr/bin:/bin` and nothing else), which is how a display can be perfectly
   correct and never once be started.
 - **`zellij`** is `exec.LookPath("zellij")`, resolved **here**, at install time,
@@ -164,11 +163,12 @@ you and you should not retype:
   ran the install, the line is printed empty with a comment saying so and the
   command exits 1: a table that looks complete and is not is worse than one that
   says what is missing.
-- **`capture-environment = true`** is the load-bearing line. Only a process
-  running inside the agent can see which pane it is in, so the hook runs
-  `agent-notify-zellij-display capture-environment` there and stores what it
-  returns, opaquely, under this integration's name. Without it every record
-  arrives with nowhere to paint and the display is correct and invisible.
+- **There is no line asking to be run inside the agent**, and there used to
+  be. Only a process running in there can see which pane it is in, so the hook
+  runs `agent-notify-zellij-display capture-environment` and stores what it
+  returns, opaquely, under this integration's name — and it does that for every
+  integration it can run, so there is nothing left to ask for. One that reads
+  nothing answers an empty object and core records nothing for it.
 
 **Which** variables get captured is not in your config file and is not yours to
 set. They are `ZELLIJ_SESSION_NAME` and `ZELLIJ_PANE_ID`, they live in this
@@ -178,12 +178,17 @@ disagree — silently, because a capture naming the wrong variable produces no
 error at all, just a display that paints nothing. If you still have an old
 `capture = ["ZELLIJ_SESSION_NAME", "ZELLIJ_PANE_ID"]` line, delete it.
 
-### Who starts it
+### Who runs it
 
-The session-watcher does. It reconciles on every sweep: anything enabled, with a
-`binary`, that is not named in `[container] order` is a daemon it should be
-keeping alive, so adding the table is the whole act of starting this, and
-deleting the table is the whole act of stopping it.
+The session-watcher does, one render at a time, when something this display
+watches moves. It asks every configured program what it answers — `capabilities`
+— and runs the ones that say `render`, so adding the table is the whole act of
+turning this on and deleting the table is the whole act of turning it off.
+
+Nothing about that is inferred from the table. What used to decide it was the
+program's ABSENCE from `[container] order`, which is a fact about how your
+shells nest standing in for a fact about the program, and it was wrong in both
+directions.
 
 ```sh
 agent-notify watcher reload      # pick up the table you just added
@@ -191,10 +196,14 @@ agent-notify watcher status
 agent-notify watcher restart     # after rebuilding the binary
 ```
 
-A child that fails is restarted once per sweep, up to `integration-tries`, and a
-child that stayed connected for a minute has its failure count forgiven. A
-rebuilt binary is **not** picked up by a reload of the old process — restart the
-watcher, or let it notice the child exit.
+Nothing is kept running. The session-watcher runs this program when something it
+watches moves and the program exits, so there is no child to restart, no failure
+count and nothing to forgive: a render that failed is repaired by the next one,
+which paints the whole world again.
+
+A rebuilt binary **is** picked up, because the next render is a new process — but
+what it answers is not. `capabilities` is asked at startup and on reload, so a
+rebuild that changes the wake list needs `agent-notify watcher reload`.
 
 You can also just run it in a terminal, which is the fastest way to see what it
 is doing, since it logs to stderr:
@@ -247,13 +256,12 @@ required and nothing can guess it.
 
 ### The integration's own table
 
-Everything here is read by **core**, which supervises the process:
+Everything here is read by **core**, which runs the program:
 
 | Key | Type | Default | What it does |
 | --- | --- | --- | --- |
-| `enabled` | boolean | `true` | `false` stops the watcher starting it, without you deleting the table. Absence means yes: writing the table is how you ask for the integration. |
-| `binary` | string | none | The program to run. Looked up on PATH unless absolute — **make it absolute**. |
-| `capture-environment` | boolean | `false` | Whether the hook runs this program inside the agent to learn where the session is. Must be `true` or nothing is ever painted. |
+| `enabled` | boolean | `true` | `false` stops the watcher running it, without you deleting the table. Absence means yes: writing the table is how you ask for the integration. |
+| `binary` | string | none | The program to run, and naming one is what says core may run it. Looked up on PATH unless absolute — **make it absolute**. |
 
 A key core does not declare is reported by name, and the rest of the file
 survives it.
@@ -368,15 +376,25 @@ nothing.
 | Invocation | What it does |
 | --- | --- |
 | `agent-notify-zellij-display` | Stay connected to the session-watcher and paint. This is the usual way to run it, and what the watcher runs. |
-| `agent-notify-zellij-display repaint` | Paint once, straight from the store, with no session-watcher and no socket. |
+| `agent-notify-zellij-display render` | Paint once and exit, from the view on stdin — or, with nothing on stdin, straight from the store. |
 | `agent-notify-zellij-display capture-environment` | Print `{"ZELLIJ_SESSION_NAME":"…","ZELLIJ_PANE_ID":"…"}` and exit. Run by the hook, not by you. |
+| `agent-notify-zellij-display capabilities` | Print what this program answers. Run by the session-watcher, not by you. |
 | `agent-notify-zellij-display install` | Print the config table. Writes nothing, takes no options. |
 | `agent-notify-zellij-display --help` | The same list. |
 
-`repaint` is the cold path: what you want after restarting zellij itself, and
-what you want when asking "why does that pane say that". It cannot give a pane
-back, because the cold read returns live sessions only and handing a pane back
-needs the ended record that remembers which pane it was.
+`render` is one paint and nothing else — no socket, no waiting — which is what
+lets something else decide when painting happens.
+
+The view comes in on stdin because a render is not only about the sessions that
+exist. This display owns panes it did not create, and the only thing that
+remembers which pane a finished agent had is that agent's ended record, so a
+process started fresh for one render knows exactly what it was told and nothing
+more.
+
+Run by hand there is nothing on stdin, so it reads the store instead: the cold
+path, what you want after restarting zellij itself and when asking "why does
+that pane say that". That one cannot give a pane back, because the store's live
+sessions are all it can see.
 
 ## What it does, exactly
 
@@ -460,7 +478,7 @@ subscriber lifecycle and the real render function.
   repository you clone and build. The `replace` in `go.mod` is the visible end of
   that, and it comes out with M18.
 - **Linux is untested here.** Nothing in this program is macOS-specific, but the
-  supervision and liveness work underneath it is verified on macOS only (plan.md
+  liveness work underneath it is verified on macOS only (plan.md
   M17).
 - **`doctor` does not check this display's own settings.** It will tell you the
   process is connected; it will not tell you that your `zellij` path stopped

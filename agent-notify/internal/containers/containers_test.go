@@ -42,11 +42,25 @@ func answers(t *testing.T, name string, byCommand map[string]string) string {
 	return fake(t, name, body.String())
 }
 
-func settingsWith(order []string, integrations map[string]config.Integration) config.Config {
+// settingsWith is the configuration, and beside it what the session-watcher
+// would have discovered about these programs.
+//
+// Every fixture here answers all three container verbs unless a test says
+// otherwise, because what each test is about is the walking and the verdicts
+// rather than the handshake. A test that cares hands over its own map.
+func settingsWith(
+	order []string, integrations map[string]config.Integration,
+) (config.Config, map[string][]string) {
 	settings := config.Defaults()
 	settings.Container.Order = order
 	settings.Integration = integrations
-	return settings
+
+	methods := make(map[string][]string, len(integrations))
+	for name := range integrations {
+		methods[name] = []string{
+			session.MethodInterpret, session.MethodFocus, session.MethodFocused}
+	}
+	return settings, methods
 }
 
 func placed(coordinates map[string]json.RawMessage) session.Record {
@@ -61,7 +75,7 @@ func placed(coordinates map[string]json.RawMessage) session.Record {
 func TestNothingConfiguredIsItsOwnAnswer(t *testing.T) {
 	// A fresh install has no container, and that is the default rather than an
 	// edge case: everything except navigation works without one (§A11.7).
-	_, outcome := containers.FocusSession(config.Defaults(), placed(nil))
+	_, outcome := containers.FocusSession(config.Defaults(), nil, placed(nil))
 	if outcome.OK || outcome.Problem != container.NoContainer {
 		t.Errorf("outcome = %+v, want no-container-configured", outcome)
 	}
@@ -71,11 +85,11 @@ func TestNothingConfiguredIsItsOwnAnswer(t *testing.T) {
 // feels identical and is not.
 func TestNeverPlacedIsNotTheSameAsNothingConfigured(t *testing.T) {
 	binary := answers(t, "outer", map[string]string{"focus": `{"ok":true}`})
-	settings := settingsWith([]string{"outer"}, map[string]config.Integration{
+	settings, methods := settingsWith([]string{"outer"}, map[string]config.Integration{
 		"outer": {Binary: binary},
 	})
 
-	_, outcome := containers.FocusSession(settings, placed(nil))
+	_, outcome := containers.FocusSession(settings, methods, placed(nil))
 	if outcome.OK || outcome.Problem != container.NeverPlaced {
 		t.Errorf("outcome = %+v, want never-placed", outcome)
 	}
@@ -89,7 +103,7 @@ func TestFocusWalksOutermostFirstAndStops(t *testing.T) {
 		"focus": `{"ok":false,"problem":"not-running","detail":"aerospace is not there"}`})
 	inner := fake(t, "inner", "echo 'the inner one was run' >&2; echo '{\"ok\":true}'")
 
-	settings := settingsWith([]string{"outer", "inner"}, map[string]config.Integration{
+	settings, methods := settingsWith([]string{"outer", "inner"}, map[string]config.Integration{
 		"outer": {Binary: outer},
 		"inner": {Binary: inner},
 	})
@@ -98,7 +112,7 @@ func TestFocusWalksOutermostFirstAndStops(t *testing.T) {
 		"inner": json.RawMessage(`{"pane":7}`),
 	})
 
-	steps, outcome := containers.FocusSession(settings, record)
+	steps, outcome := containers.FocusSession(settings, methods, record)
 	if outcome.OK || outcome.Problem != container.NotRunning {
 		t.Errorf("outcome = %+v, want the outer one's failure", outcome)
 	}
@@ -113,7 +127,7 @@ func TestASkippedLayerIsNotAFailedLayer(t *testing.T) {
 	outer := answers(t, "outer", map[string]string{"focus": `{"ok":true}`})
 	inner := answers(t, "inner", map[string]string{"focus": `{"ok":true}`})
 
-	settings := settingsWith([]string{"outer", "inner"}, map[string]config.Integration{
+	settings, methods := settingsWith([]string{"outer", "inner"}, map[string]config.Integration{
 		"outer": {Binary: outer},
 		"inner": {Binary: inner},
 	})
@@ -121,7 +135,7 @@ func TestASkippedLayerIsNotAFailedLayer(t *testing.T) {
 	// terminal window no window manager was recording.
 	record := placed(map[string]json.RawMessage{"inner": json.RawMessage(`{"pane":7}`)})
 
-	steps, outcome := containers.FocusSession(settings, record)
+	steps, outcome := containers.FocusSession(settings, methods, record)
 	if !outcome.OK {
 		t.Fatalf("outcome = %+v, want success", outcome)
 	}
@@ -143,7 +157,7 @@ func TestALayerThatSaysItCannotPlaceThisOneIsSkipped(t *testing.T) {
 		"focus": `{"ok":false,"problem":"never-placed","detail":"no window is showing this session"}`})
 	inner := answers(t, "inner", map[string]string{"focus": `{"ok":true}`})
 
-	settings := settingsWith([]string{"outer", "inner"}, map[string]config.Integration{
+	settings, methods := settingsWith([]string{"outer", "inner"}, map[string]config.Integration{
 		"outer": {Binary: outer},
 		"inner": {Binary: inner},
 	})
@@ -152,7 +166,7 @@ func TestALayerThatSaysItCannotPlaceThisOneIsSkipped(t *testing.T) {
 		"inner": json.RawMessage(`{"pane":7}`),
 	})
 
-	steps, outcome := containers.FocusSession(settings, record)
+	steps, outcome := containers.FocusSession(settings, methods, record)
 	if !outcome.OK {
 		t.Fatalf("outcome = %+v, want the inner layer to have gone ahead", outcome)
 	}
@@ -169,7 +183,7 @@ func TestAmbiguityStopsTheWalk(t *testing.T) {
 		"focus": `{"ok":false,"problem":"ambiguous","detail":"3 windows could be this session"}`})
 	inner := fake(t, "inner", "echo 'the inner one was run' >&2; echo '{\"ok\":true}'")
 
-	settings := settingsWith([]string{"outer", "inner"}, map[string]config.Integration{
+	settings, methods := settingsWith([]string{"outer", "inner"}, map[string]config.Integration{
 		"outer": {Binary: outer},
 		"inner": {Binary: inner},
 	})
@@ -178,7 +192,7 @@ func TestAmbiguityStopsTheWalk(t *testing.T) {
 		"inner": json.RawMessage(`{"pane":7}`),
 	})
 
-	steps, outcome := containers.FocusSession(settings, record)
+	steps, outcome := containers.FocusSession(settings, methods, record)
 	if outcome.OK || outcome.Problem != container.Ambiguous {
 		t.Errorf("outcome = %+v, want ambiguous", outcome)
 	}
@@ -193,10 +207,10 @@ func TestAmbiguityStopsTheWalk(t *testing.T) {
 // "capture these variables and run this command"; now it means nothing can be
 // asked, and saying so is the whole of what is left to test.
 func TestAContainerWithNoBinaryIsRefusedAndNamed(t *testing.T) {
-	settings := settingsWith([]string{"tmux"}, map[string]config.Integration{
+	settings, methods := settingsWith([]string{"tmux"}, map[string]config.Integration{
 		"tmux": {},
 	})
-	configured, problems := containers.Configured(settings)
+	configured, problems := containers.Configured(settings, methods)
 	if len(configured) != 0 {
 		t.Errorf("Configured = %v, want nothing runnable", configured)
 	}
@@ -205,7 +219,7 @@ func TestAContainerWithNoBinaryIsRefusedAndNamed(t *testing.T) {
 	}
 
 	record := placed(map[string]json.RawMessage{"tmux": json.RawMessage(`{"TMUX_PANE":"%7"}`)})
-	_, outcome := containers.FocusSession(settings, record)
+	_, outcome := containers.FocusSession(settings, methods, record)
 	if outcome.OK || outcome.Problem != container.NoContainer {
 		t.Errorf("outcome = %+v, want no-container-configured", outcome)
 	}
@@ -237,10 +251,10 @@ func TestAContainerThatHangsIsGivenUpOn(t *testing.T) {
 func TestAContainerThatAnswersNonsenseIsUnreachable(t *testing.T) {
 	for _, body := range []string{"echo not json", "exit 3", "echo '{}' ; exit 9"} {
 		binary := fake(t, "odd", body)
-		settings := settingsWith([]string{"odd"}, map[string]config.Integration{"odd": {Binary: binary}})
+		settings, methods := settingsWith([]string{"odd"}, map[string]config.Integration{"odd": {Binary: binary}})
 		record := placed(map[string]json.RawMessage{"odd": json.RawMessage(`{"pane":1}`)})
 
-		if _, outcome := containers.FocusSession(settings, record); outcome.Problem != container.Unreachable {
+		if _, outcome := containers.FocusSession(settings, methods, record); outcome.Problem != container.Unreachable {
 			t.Errorf("%q produced %+v, want container-unreachable", body, outcome)
 		}
 	}
@@ -249,10 +263,10 @@ func TestAContainerThatAnswersNonsenseIsUnreachable(t *testing.T) {
 // TestAContainerThatSaysNoWithoutSayingWhyHasStillSaidNo.
 func TestARefusalWithNoReasonIsStillARefusal(t *testing.T) {
 	binary := answers(t, "shy", map[string]string{"focus": `{"ok":false}`})
-	settings := settingsWith([]string{"shy"}, map[string]config.Integration{"shy": {Binary: binary}})
+	settings, methods := settingsWith([]string{"shy"}, map[string]config.Integration{"shy": {Binary: binary}})
 	record := placed(map[string]json.RawMessage{"shy": json.RawMessage(`{"pane":1}`)})
 
-	if _, outcome := containers.FocusSession(settings, record); outcome.Problem != container.Refused {
+	if _, outcome := containers.FocusSession(settings, methods, record); outcome.Problem != container.Refused {
 		t.Errorf("outcome = %+v, want refused", outcome)
 	}
 }
@@ -281,7 +295,7 @@ func TestInFrontOnlyIfEveryLayerAgrees(t *testing.T) {
 		{yes, dunno, container.CannotTell, "a layer that cannot say turns a yes into an unknown"},
 		{dunno, dunno, container.CannotTell, "nobody knows"},
 	} {
-		settings := settingsWith([]string{"outer", "inner"}, map[string]config.Integration{
+		settings, methods := settingsWith([]string{"outer", "inner"}, map[string]config.Integration{
 			"outer": {Binary: want.outer(t, "outer")},
 			"inner": {Binary: want.inner(t, "inner")},
 		})
@@ -289,7 +303,7 @@ func TestInFrontOnlyIfEveryLayerAgrees(t *testing.T) {
 			"outer": json.RawMessage(`{"window":3}`),
 			"inner": json.RawMessage(`{"pane":7}`),
 		})
-		if got := containers.IsFocused(settings, record); got.Answer != want.answer {
+		if got := containers.IsFocused(settings, methods, record); got.Answer != want.answer {
 			t.Errorf("%s: answered %q, want %q", want.why, got.Answer, want.answer)
 		}
 	}
@@ -299,13 +313,13 @@ func TestInFrontOnlyIfEveryLayerAgrees(t *testing.T) {
 // silences a notification that should have fired.
 func TestAnUnplacedLayerCannotSay(t *testing.T) {
 	binary := answers(t, "inner", map[string]string{"focused": `{"answer":"yes"}`})
-	settings := settingsWith([]string{"outer", "inner"}, map[string]config.Integration{
+	settings, methods := settingsWith([]string{"outer", "inner"}, map[string]config.Integration{
 		"outer": {Binary: binary},
 		"inner": {Binary: binary},
 	})
 	record := placed(map[string]json.RawMessage{"inner": json.RawMessage(`{"pane":7}`)})
 
-	if got := containers.IsFocused(settings, record); got.Answer != container.CannotTell {
+	if got := containers.IsFocused(settings, methods, record); got.Answer != container.CannotTell {
 		t.Errorf("answered %q, want cannot-tell", got.Answer)
 	}
 }
@@ -314,24 +328,33 @@ func TestAnUnplacedLayerCannotSay(t *testing.T) {
 // cannot be caught by anything else, because a container's name is a name core
 // has never heard of (R10).
 func TestAnOrderThatNamesNothingIsReported(t *testing.T) {
-	settings := settingsWith([]string{"zelij-container"}, map[string]config.Integration{
+	settings, methods := settingsWith([]string{"zelij-container"}, map[string]config.Integration{
 		"zellij-container": {Binary: "/bin/true"},
 	})
-	configured, problems := containers.Configured(settings)
+	configured, problems := containers.Configured(settings, methods)
 	if len(configured) != 0 {
 		t.Errorf("configured = %v, want nothing", configured)
 	}
-	if len(problems) != 1 || !strings.Contains(problems[0].Error(), "zelij-container") {
-		t.Errorf("problems = %v, want one naming the misspelled entry", problems)
+	// Two, and the second is the same mistake seen from the other side: the
+	// real container answers `focus` and is in nobody's order, so nothing will
+	// ever ask it to place anything.
+	if len(problems) != 2 {
+		t.Fatalf("problems = %v, want the typo and the container it orphaned", problems)
+	}
+	if !strings.Contains(problems[0].Error(), "zelij-container") {
+		t.Errorf("problems = %v, want the first to name the misspelled entry", problems)
+	}
+	if !strings.Contains(problems[1].Error(), "[container] order") {
+		t.Errorf("problems = %v, want the second to say it is in nobody's order", problems)
 	}
 }
 
 func TestADisabledContainerIsSkippedSilently(t *testing.T) {
 	off := false
-	settings := settingsWith([]string{"zellij-container"}, map[string]config.Integration{
+	settings, methods := settingsWith([]string{"zellij-container"}, map[string]config.Integration{
 		"zellij-container": {Binary: "/bin/true", Enabled: &off},
 	})
-	configured, problems := containers.Configured(settings)
+	configured, problems := containers.Configured(settings, methods)
 	if len(configured) != 0 || len(problems) != 0 {
 		t.Errorf("configured = %v, problems = %v; turning one off is not a mistake", configured, problems)
 	}

@@ -60,15 +60,6 @@ type Config struct {
 	HistoryMessages int `toml:"history-messages"`
 	HistoryChanges  int `toml:"history-changes"`
 
-	// IntegrationTries is how many consecutive failures an integration is
-	// allowed before the session-watcher stops starting it and says why.
-	//
-	// "Consecutive" cannot mean "since the last handshake", because a child
-	// that connects and dies immediately would reset it for ever. It means
-	// since the child last stayed connected long enough to count as working
-	// (§A9.4).
-	IntegrationTries int `toml:"integration-tries"`
-
 	// SubscriberQueue bounds how many changed sessions may wait for one
 	// subscriber before its queue is thrown away and replaced by a single
 	// snapshot (§A9.3). Overflow degrades to a full redraw, never to a wrong
@@ -116,20 +107,16 @@ type Integration struct {
 	// integration, so absence means enabled.
 	Enabled *bool `toml:"enabled"`
 
-	// Binary is this integration's program: the long-lived subprocess core
-	// supervises for a display, or the program it runs for a container. Looked
-	// up on PATH unless it is an absolute path.
-	Binary string `toml:"binary"`
-
-	// CaptureEnvironment says this integration's binary answers
-	// `capture-environment`, and is therefore the one thing the hook runs on
-	// the agent's own path. It is the only way anything is captured (D-57).
+	// Binary is this integration's program, and naming one means "core may run
+	// this": the hook runs it on the agent's path, the session-watcher runs it
+	// to ask what it answers and then to render or to focus. Looked up on PATH
+	// unless it is an absolute path.
 	//
-	// It is in the config file rather than declared on connect because the hook
-	// has no socket and no time to open one (D-39). Its own `install` writes it,
-	// and it is one bit rather than a list precisely so that a person who edits
-	// it by hand breaks something coarse rather than something subtle.
-	CaptureEnvironment bool `toml:"capture-environment"`
+	// Leaving it out is a decision rather than an omission. A table with no
+	// binary belongs to something core never runs — a menu bar, which has to
+	// own its process and is started by launchd — and it is here for its
+	// settings, which is what a table is for.
+	Binary string `toml:"binary"`
 
 	// Settings is handed to the integration verbatim and never read by core.
 	// Glyphs, colours and thresholds all live in here: core must not know
@@ -157,7 +144,6 @@ type Container struct {
 func Defaults() Config {
 	return Config{
 		KeepEndedSessions: session.NewDuration(7 * 24 * time.Hour),
-		IntegrationTries:  5,
 		HistoryMessages:   20,
 		HistoryChanges:    100,
 		SubscriberQueue:   128,
@@ -239,20 +225,29 @@ func removedKeys(data []byte, name string) []error {
 		return nil
 	}
 
+	// Each key with the sentence that says what happened to it. "Ignored" on
+	// its own is no use to somebody whose display quietly stopped placing
+	// sessions; what they need is the thing the key did and where it went.
+	why := map[string]string{
+		"capture": "Capturing is now the integration's own job: it declares what it " +
+			"needs in its own source and answers `capture-environment`",
+		"focus": "Capturing is now the integration's own job: it declares what it " +
+			"needs in its own source and answers `capture-environment`",
+		"capture-environment": "Every integration is asked `capture-environment` now, " +
+			"so there is nothing left to say yes to. One that reads nothing answers " +
+			"with an empty object and core records nothing for it",
+	}
+
 	var problems []error
 	for tool, table := range file.Integration {
-		for _, key := range []string{"capture", "focus"} {
+		for _, key := range []string{"capture", "focus", "capture-environment"} {
 			if _, present := table[key]; !present {
 				continue
 			}
 			problems = append(problems, fmt.Errorf(
-				"%s: [integration.%s] %s is no longer read. Capturing is now the "+
-					"integration's own job: it declares what it needs in its own source "+
-					"and answers `capture-environment`. Delete the line; if this "+
-					"integration needs to see inside the agent, put "+
-					"`capture-environment = true` in its table instead. "+
+				"%s: [integration.%s] %s is no longer read. %s. Delete the line; "+
 					"`agent-notify install %s` prints the table it wants",
-				name, tool, key, tool))
+				name, tool, key, why[key], tool))
 		}
 	}
 	slices.SortFunc(problems, func(a, b error) int {
@@ -310,11 +305,6 @@ func (c *Config) problemsWith(name string) []error {
 	}{
 		{"history-messages", &c.HistoryMessages},
 		{"history-changes", &c.HistoryChanges},
-	}
-	if c.IntegrationTries < 1 {
-		problems = append(problems, fmt.Errorf(
-			"%s: integration-tries must be at least 1; using %d", name, defaults.IntegrationTries))
-		c.IntegrationTries = defaults.IntegrationTries
 	}
 	if c.SubscriberQueue < 1 {
 		problems = append(problems, fmt.Errorf(

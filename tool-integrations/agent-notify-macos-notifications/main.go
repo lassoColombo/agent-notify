@@ -21,8 +21,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/lassoColombo/agent-notify/session"
+	"github.com/lassoColombo/agent-notify/capture"
 	"github.com/lassoColombo/agent-notify/logs"
+	"github.com/lassoColombo/agent-notify/session"
 	"github.com/lassoColombo/agent-notify/subscribe"
 	"github.com/lassoColombo/agent-notify/tool"
 )
@@ -37,6 +38,14 @@ func main() {
 	arguments := os.Args[1:]
 	if len(arguments) > 0 {
 		switch arguments[0] {
+		case session.CapabilitiesCommand:
+			// The handshake, and the first thing core ever runs here.
+			os.Exit(capabilities.Answer(os.Stdout))
+		case capture.Command:
+			// A notifier reads nothing out of the agent's process, and says so
+			// rather than failing: every integration is asked this one, and
+			// answering `{}` is what "nothing to add" sounds like.
+			os.Exit(capture.Main(Name, nil))
 		case "install":
 			os.Exit(install(arguments[1:]))
 		case "check":
@@ -253,10 +262,9 @@ func notify() int {
 
 	outcome := make(chan error, 1)
 	go func() {
-		outcome <- subscribe.Run(ctx, subscribe.Integration{
+		outcome <- subscribe.RunThroughTheCLI(ctx, subscribe.Integration{
 			Name:     Name,
-			Roles:    []string{"display"},
-			WakeOn:   WhatToWakeFor(),
+			WakeOn:   capabilities.WakeOn,
 			OnChange: banners.Post,
 			Logger:   log,
 		})
@@ -325,7 +333,7 @@ type Banners struct {
 // banner is an edge, so it reads view.Changed and nothing else. It used to read
 // the sessions and reconstruct the edges itself, which is the weaker version of
 // this that D-63 was built to replace (D-71).
-func (b *Banners) Post(view subscribe.View) error {
+func (b *Banners) Post(view session.View) error {
 	for _, notice := range b.Notifier.Fresh(view.Changed) {
 		Post(notice, b.InvaderPNGs.PathOfTheInvaderDrawnIn(notice.Colour), b.Sound)
 	}

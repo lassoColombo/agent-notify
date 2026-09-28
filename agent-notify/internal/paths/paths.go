@@ -313,3 +313,18 @@ func (l Layout) LongestSocket() (path string, length int) {
 	}
 	return path, length
 }
+
+// FromEnvironmentOrUnder is one or the other: the root this process's
+// environment names, or the one it is handed.
+//
+// Both branches end in the same code, and that is the point of it looking this
+// dull: naming a root outright used to reach a second, wronger implementation
+// of what a root contains (D-69). It is here rather than beside either caller
+// because there are two of them now — the SDK an integration links, and core's
+// own client of the socket.
+func FromEnvironmentOrUnder(root string) (Layout, error) {
+	if root == "" {
+		return FromEnvironment()
+	}
+	return Under(root)
+}

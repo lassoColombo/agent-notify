@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -12,7 +11,6 @@ import (
 	"time"
 
 	"github.com/lassoColombo/agent-notify/session"
-	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
 // These tests run against a real zellij. That is the point: everything this
@@ -187,7 +185,7 @@ func TestPaintingARealZellij(t *testing.T) {
 	working := placed("alpha", session.Working, name, first)
 	blocked := placed("beta", session.BlockedOnYou, name, second)
 
-	if err := display.Render(subscribe.View{Sessions: []session.Record{working, blocked}}); err != nil {
+	if err := display.Render(session.View{Sessions: []session.Record{working, blocked}}); err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 	panes, tabs := titles(t, zellij, name)
@@ -204,7 +202,7 @@ func TestPaintingARealZellij(t *testing.T) {
 	// The blocked one is answered and goes back to work. The tab follows the
 	// aggregate down, which is the half of max(rank) that is easy to get wrong.
 	answered := placed("beta", session.Working, name, second)
-	if err := display.Render(subscribe.View{Sessions: []session.Record{working, answered}}); err != nil {
+	if err := display.Render(session.View{Sessions: []session.Record{working, answered}}); err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 	_, tabs = titles(t, zellij, name)
@@ -215,7 +213,7 @@ func TestPaintingARealZellij(t *testing.T) {
 	// One ends. Its pane is handed back — to zellij's own title, not to a
 	// leftover of ours — and the tab keeps the other one's glyph.
 	ended := placed("beta", session.Ended, name, second)
-	if err := display.Render(subscribe.View{Sessions: []session.Record{working, ended}}); err != nil {
+	if err := display.Render(session.View{Sessions: []session.Record{working, ended}}); err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 	panes, tabs = titles(t, zellij, name)
@@ -228,7 +226,7 @@ func TestPaintingARealZellij(t *testing.T) {
 
 	// Both end: the tab is the user's again, exactly as it was.
 	done := placed("alpha", session.Ended, name, first)
-	if err := display.Render(subscribe.View{Sessions: []session.Record{done, ended}}); err != nil {
+	if err := display.Render(session.View{Sessions: []session.Record{done, ended}}); err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 	_, tabs = titles(t, zellij, name)
@@ -246,7 +244,7 @@ func TestRenderingTwiceRunsNothingTheSecondTime(t *testing.T) {
 
 	records := []session.Record{placed("alpha", session.Working, name, first)}
 	display := &Display{Zellij: zellij, Glyphs: testGlyphs, Logger: slog.New(slog.DiscardHandler)}
-	if err := display.Render(subscribe.View{Sessions: records}); err != nil {
+	if err := display.Render(session.View{Sessions: records}); err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 
@@ -260,54 +258,51 @@ func TestRenderingTwiceRunsNothingTheSecondTime(t *testing.T) {
 }
 
 // TestPanesCarryLiveStateGlyphs is M10's "done when", with the agent replaced
-// by a script and nothing else replaced at all: a real zellij, real panes, the
-// real fan-out, the real subscriber lifecycle, the real render function.
+// by a script and nothing else replaced at all: a real zellij, real panes, and
+// the real render function.
+//
+// It used to stand a fake session-watcher up and let this display subscribe to
+// it, because this display used to subscribe. It does not: core hands it a view
+// and it paints. So the views are handed over here, which is both what happens
+// now and a shorter way to say the same thing.
 func TestPanesCarryLiveStateGlyphs(t *testing.T) {
 	zellij := realZellij(t)
 	name, first, second := zellijSession(t, zellij)
 
-	root, err := os.MkdirTemp("/tmp", "an-zellij")
-	if err != nil {
-		t.Fatalf("MkdirTemp: %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(root) })
-
-	fake, err := subscribe.StartFake(root, nil)
-	if err != nil {
-		t.Fatalf("StartFake: %v", err)
-	}
-	defer fake.Stop()
-
 	display := &Display{Zellij: zellij, Glyphs: testGlyphs, Logger: slog.New(slog.DiscardHandler)}
-	ctx, stop := context.WithCancel(context.Background())
-	defer stop()
+	paint := func(t *testing.T, sessions ...session.Record) {
+		t.Helper()
+		if err := display.Render(session.View{Sessions: sessions}); err != nil {
+			t.Fatalf("Render: %v", err)
+		}
+	}
 
-	// This is the ten lines an author writes.
-	go subscribe.Run(ctx, subscribe.Integration{
-		Name: Name, Roles: []string{"display"}, WantEnded: true, Root: root,
-		OnChange: display.Render,
-	})
-	waitUntil(t, "the display connects", func() bool { return len(fake.Connected()) == 1 })
-
-	fake.Publish(placed("alpha", session.Working, name, first))
+	paint(t, placed("alpha", session.Working, name, first))
 	waitUntil(t, "the pane to say it is working", func() bool {
 		panes, _ := titles(t, zellij, name)
 		return panes[first] == "* alpha"
 	})
 
-	fake.Publish(placed("alpha", session.BlockedOnYou, name, first))
+	paint(t, placed("alpha", session.BlockedOnYou, name, first))
 	waitUntil(t, "the pane to say it is blocked", func() bool {
 		panes, _ := titles(t, zellij, name)
 		return panes[first] == "! alpha"
 	})
 
-	fake.Publish(placed("beta", session.FinishedATurn, name, second))
+	paint(t,
+		placed("alpha", session.BlockedOnYou, name, first),
+		placed("beta", session.FinishedATurn, name, second))
 	waitUntil(t, "the second pane", func() bool {
 		panes, _ := titles(t, zellij, name)
 		return panes[second] == "> beta"
 	})
 
-	fake.Publish(placed("alpha", session.Ended, name, first))
+	// The ended record is in the view, which is the only reason this display
+	// can give the pane back: it is the only thing that remembers which pane
+	// the finished agent had.
+	paint(t,
+		placed("alpha", session.Ended, name, first),
+		placed("beta", session.FinishedATurn, name, second))
 	waitUntil(t, "the first pane to be handed back", func() bool {
 		panes, _ := titles(t, zellij, name)
 		return panes[first] != "! alpha"

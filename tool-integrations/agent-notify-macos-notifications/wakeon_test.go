@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/lassoColombo/agent-notify/session"
-	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
 // TestEveryFieldABannerReadsIsOneItWakesFor is D-73.
@@ -26,7 +25,7 @@ import (
 // varying is the field under test.
 func TestEveryFieldABannerReadsIsOneItWakesFor(t *testing.T) {
 	said := func(record session.Record) string {
-		return fmt.Sprintf("%+v", notifier().Fresh([]subscribe.Change{
+		return fmt.Sprintf("%+v", notifier().Fresh([]session.Change{
 			{Record: record, PreviousKernel: session.Working},
 		}))
 	}

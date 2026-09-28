@@ -206,3 +206,44 @@ func shortTempDir(t *testing.T) string {
 	t.Cleanup(func() { os.RemoveAll(dir) })
 	return dir
 }
+
+// TestNamingTheRootAndLettingTheEnvironmentNameItAgree is D-69 as a test, and
+// it failed before the change it pins.
+//
+// Every integration used to write os.Getenv("AGENT_NOTIFY_ROOT") at the call
+// site and hand the answer over as a root. That looked like a no-op and was
+// not: the environment branch ran the value through filepath.Abs and the
+// explicit branch concatenated strings, so a relative root resolved against the
+// calling process's working directory — which, for a child the session-watcher
+// started, is not the one the person who set the variable was standing in.
+func TestNamingTheRootAndLettingTheEnvironmentNameItAgree(t *testing.T) {
+	for _, root := range []string{
+		"a/relative/root",  // the case that differed
+		"/tmp/an/absolute", // the case that did not
+		"/tmp/trailing/",   // and the one that produced `root//config.toml`
+	} {
+		t.Setenv(paths.TheVariableThatNamesTheRoot, root)
+
+		fromTheEnvironment, err := paths.FromEnvironmentOrUnder("")
+		if err != nil {
+			t.Fatalf("%s: %v", root, err)
+		}
+		passedThrough, err := paths.FromEnvironmentOrUnder(root)
+		if err != nil {
+			t.Fatalf("%s: %v", root, err)
+		}
+		if fromTheEnvironment.ConfigFile != passedThrough.ConfigFile {
+			t.Errorf("%s=%q gives two answers:\n  read from it: %s\n  passed in:    %s",
+				paths.TheVariableThatNamesTheRoot, root,
+				fromTheEnvironment.ConfigFile, passedThrough.ConfigFile)
+		}
+		if !filepath.IsAbs(fromTheEnvironment.ConfigFile) {
+			t.Errorf("%s=%q resolved to %q, which is a direction and not a place",
+				paths.TheVariableThatNamesTheRoot, root, fromTheEnvironment.ConfigFile)
+		}
+		if strings.Contains(fromTheEnvironment.ConfigFile, "//") {
+			t.Errorf("%s=%q resolved to %q",
+				paths.TheVariableThatNamesTheRoot, root, fromTheEnvironment.ConfigFile)
+		}
+	}
+}

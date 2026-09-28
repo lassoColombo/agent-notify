@@ -241,8 +241,7 @@ agent-notify install aerospace-container
 
 ```
 [integration.aerospace-container]
-binary              = "/opt/homebrew/bin/agent-notify-aerospace-container"
-capture-environment = true
+binary = "/opt/homebrew/bin/agent-notify-aerospace-container"
 
 [integration.aerospace-container.settings]
 aerospace = "/opt/homebrew/bin/aerospace"
@@ -291,7 +290,7 @@ integrations ok    reported by pid 86777 at 2026-09-23T20:38:44Z
 
 Read that honestly: a container **does not appear** in the `integrations` list
 and never will. That list is the session-watcher's report of the long-lived
-children it supervises, and a container is not one of them — it is a program
+displays it draws with, and a container is not one of them — it is a program
 that gets run and exits. What doctor tells you about this one is that the
 configuration parses and that it is counted among the integrations; the rest is
 checked by using it.
@@ -348,7 +347,6 @@ Core reads this one. The keys are core's, the same for every integration.
 | key | type | default | what it does |
 | --- | --- | --- | --- |
 | `binary` | string | none | the program to run. **Absolute**, and install resolves it for you: this is run by the hook and by the session-watcher, and a launchd job's PATH is `/usr/bin:/bin` and nothing else, which is how a container can be perfectly correct and never once be found |
-| `capture-environment` | bool | `false` | `true` is what tells the hook to **run** this program rather than read variables on its behalf. Without it nothing about where the session lives is ever captured, and this container places nothing, silently |
 | `enabled` | bool | `true` | absence means enabled: writing the table at all is the act of asking for the integration. Set it to `false` to keep the table and turn the thing off |
 
 ### `[integration.aerospace-container.settings]` — this program's half

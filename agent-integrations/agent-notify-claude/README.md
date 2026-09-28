@@ -356,7 +356,7 @@ There is no file by default and running without one is supported — but the
 | `keep-ended-sessions` | duration, in nanoseconds | `604800000000000` (7 days) | How long an ended session's record survives, so that resuming it is recognised as a return rather than a birth. Core's, not this program's, but it is what decides whether your resumed Claude session keeps its history. |
 
 **There is no `[integration.claude]` table, and there is not meant to be.** That
-table is for the long-lived subprocesses the session-watcher supervises and for
+table is for the programs core runs — displays and containers — and for
 the tools that answer `capture-environment`. An agent-integration is neither: it
 is `exec`ed by the agent, it exits in milliseconds, and core never starts it. The
 act that installs it is writing Claude's hooks, not adding a table.

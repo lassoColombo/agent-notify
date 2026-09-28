@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
 // bundledAt stands a bundle up around a real Mach-O binary, because a bundle is
@@ -182,13 +184,22 @@ func TestABundleCannotPointAtSomethingThatIsNotThere(t *testing.T) {
 	}
 }
 
-// TestTheConfigPointsInsideTheBundle. Naming the bare binary would work in
+// TestTheLaunchAgentPointsInsideTheBundle. Naming the bare binary would work in
 // every way except the one the bundle exists for.
-func TestTheConfigPointsInsideTheBundle(t *testing.T) {
+//
+// The path moved out of the config table and into the launch agent when this
+// display stopped being something core runs, and the check moved with it: the
+// table has no binary at all now, because `binary` means "core may run this".
+func TestTheLaunchAgentPointsInsideTheBundle(t *testing.T) {
 	bundle := bundledAt(t)
-	written := theConfigTableToAdd(bundle.PathOfTheBinaryInside(), "")
-	if !strings.Contains(written, ".app/Contents/MacOS/") {
-		t.Errorf("the table names %q, which is not inside a bundle", written)
+
+	plist := subscribe.LaunchAgentPlist(Identifier, bundle.PathOfTheBinaryInside())
+	if !strings.Contains(plist, ".app/Contents/MacOS/") {
+		t.Errorf("the launch agent names %q, which is not inside a bundle", plist)
+	}
+
+	if table := theConfigTableToAdd(""); strings.Contains(table, "binary") {
+		t.Errorf("the table still names a binary, so core would try to run it:\n%s", table)
 	}
 }
 

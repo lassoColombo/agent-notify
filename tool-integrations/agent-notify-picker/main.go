@@ -34,6 +34,7 @@ import (
 	fzf "github.com/junegunn/fzf/src"
 	"golang.org/x/term"
 
+	"github.com/lassoColombo/agent-notify/capture"
 	"github.com/lassoColombo/agent-notify/session"
 	"github.com/lassoColombo/agent-notify/subscribe"
 )
@@ -49,6 +50,18 @@ const Name = "picker"
 // environment says", which is right everywhere but a test (D-69).
 var me = subscribe.Integration{Name: Name}
 
+// capabilities is what this answers `capabilities` with, and the answer is
+// "nothing".
+//
+// The picker is not something core runs. It is something a person runs, from a
+// keybinding, and it reads the store and exits — so there is no method here for
+// core to call and no wake list, because nothing wakes it. Its table has no
+// `binary` for the same reason, which means core will not ask this question
+// either; it is answered anyway, because a program that cannot answer is
+// indistinguishable from one that is broken, and because somebody debugging
+// deserves to be able to ask.
+var capabilities = session.Capabilities{}
+
 // separator divides the key from what is drawn. A tab, because a session's name
 // is somebody else's string and may contain anything else.
 const separator = "\t"
@@ -56,7 +69,23 @@ const separator = "\t"
 func now() time.Time { return time.Now().UTC() }
 
 func main() {
-	// The config first, because all three jobs below draw with it and each of
+	// The two core asks, answered before the config is read. Both are the same
+	// answer whatever the file says, and both are run by something that is
+	// waiting — the session-watcher, or an agent's hook — so doing less is the
+	// whole point.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case session.CapabilitiesCommand:
+			os.Exit(capabilities.Answer(os.Stdout))
+		case capture.Command:
+			// The picker reads nothing out of the agent's process: it is the
+			// one program here that runs long after the agent has stopped
+			// waiting.
+			os.Exit(capture.Main(Name, nil))
+		}
+	}
+
+	// The config next, because all three jobs below draw with it and each of
 	// them is a separate process: the list, a preview fzf runs per row, and a
 	// label it runs per move of the cursor. What could not be used comes back
 	// as complaints, which only the window has anywhere to put.

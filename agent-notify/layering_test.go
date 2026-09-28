@@ -70,6 +70,12 @@ var theFloorEachPackageIsOn = map[string]int{
 	"command/reportevent": 6,
 	"command/tail":        6,
 
+	// Beside the door rather than above it. internal/subscriber is core's own
+	// client of the subscribers socket, and it declares what it takes rather
+	// than importing the Integration an author fills in — which is six lines
+	// against putting the published door underneath core's use of it.
+	"internal/subscriber": 5,
+
 	// main, which imports every command and is imported by nothing.
 	".": 7,
 }

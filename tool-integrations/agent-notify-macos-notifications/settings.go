@@ -25,6 +25,27 @@ const Name = "macos-notifications"
 // environment says", which is right everywhere but a test (D-69).
 var me = subscribe.Integration{Name: Name}
 
+// capabilities is what this notifier answers `capabilities` with, and the same
+// wake list it watches with.
+//
+// **No methods**, and that is the honest answer rather than a gap. A method is
+// something core may run, and core runs nothing here: a tap on a banner is
+// answered on this process's main thread, so there has to be a process for it
+// to reach, and launchd keeps one. Declaring `render` would invite core to fork
+// a poster per change whose banners nobody could click.
+//
+// The wake list is still here, and is the one thing this value is for: it is
+// what the `tail` it runs is told to wake for, and a handshake that named
+// different fields from the watch would be the D-72 failure again, arrived at
+// from the other side.
+//
+// WantEnded stays false. A notifier is told about the transition to ended
+// either way (D-26), and an ended session in the opening snapshot is a banner
+// for something that finished while nobody was running this.
+var capabilities = session.Capabilities{
+	WakeOn: WhatToWakeFor(),
+}
+
 // DefaultColours is what the invader on a banner is drawn in.
 //
 // The same table the menu bar display uses, written out again rather than

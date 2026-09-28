@@ -84,8 +84,7 @@ func TestWhatInstallPrintsIsWhatCoreReads(t *testing.T) {
 
 	var parsed struct {
 		Integration map[string]struct {
-			Binary             string `toml:"binary"`
-			CaptureEnvironment bool   `toml:"capture-environment"`
+			Binary string `toml:"binary"`
 		} `toml:"integration"`
 	}
 	if err := toml.Unmarshal([]byte(table), &parsed); err != nil {
@@ -99,11 +98,6 @@ func TestWhatInstallPrintsIsWhatCoreReads(t *testing.T) {
 	if !filepath.IsAbs(mine.Binary) {
 		t.Errorf("binary = %q is not absolute, and a supervised child's PATH is not yours",
 			mine.Binary)
-	}
-	if !mine.CaptureEnvironment {
-		// Without this the hook never runs this program, and nothing about
-		// where the session lives is ever captured.
-		t.Error("capture-environment is not set")
 	}
 }
 

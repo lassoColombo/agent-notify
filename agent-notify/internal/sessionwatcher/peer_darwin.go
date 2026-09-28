@@ -10,10 +10,12 @@ import (
 
 // peerPID asks the kernel which process is on the other end of a unix socket.
 //
-// It exists so that the supervisor's health check is exact rather than
-// name-based: "the child I started has connected" is a different claim from
-// "something calling itself zellij-display is connected", and a self-started
-// subscriber sharing a name would otherwise make a hung child look healthy.
+// It existed for the supervisor's health check — "the child I started has
+// connected" is a different claim from "something calling itself
+// zellij-display is connected" — and it outlived it, for a smaller job that
+// wants the same exactness: the report names the pid of everything connected,
+// which is how a person who has just loaded a launch agent sees that the thing
+// it started is the thing that is talking.
 //
 // Asking the kernel rather than taking the peer's word for it is R25: identity
 // that can be asserted is identity that will be asserted wrongly, and by

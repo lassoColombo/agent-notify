@@ -5,6 +5,11 @@
 // the session-watcher to, which is not a shortcut: focus must work on a machine
 // where nothing is running, and routing it through a daemon would add a way for
 // it to fail that has nothing to do with whether the pane is there (D-38).
+//
+// Which programs the containers are is read from the report the session-watcher
+// wrote, because asking every one of them costs a process each and this runs on
+// a keypress. That is a shortcut and not a dependency: with no report it asks,
+// which is slower and still works on a machine where nothing is running.
 package focus
 
 import (
@@ -18,6 +23,7 @@ import (
 	"github.com/lassoColombo/agent-notify/container"
 	"github.com/lassoColombo/agent-notify/internal/containers"
 	"github.com/lassoColombo/agent-notify/internal/core"
+	"github.com/lassoColombo/agent-notify/internal/sessionwatcher"
 )
 
 // FocusSession brings one session to the front.
@@ -55,7 +61,8 @@ func focusSession(wanted string, quiet bool) int {
 		return 1
 	}
 
-	steps, outcome := containers.FocusSession(openedCore.Settings, record)
+	steps, outcome := containers.FocusSession(openedCore.Settings,
+		sessionwatcher.MethodsByIntegration(openedCore.Layout, openedCore.Settings), record)
 	if !quiet {
 		for _, step := range steps {
 			switch {
@@ -130,7 +137,8 @@ func focused(wanted string) int {
 		return 1
 	}
 
-	verdict := containers.IsFocused(openedCore.Settings, record)
+	verdict := containers.IsFocused(openedCore.Settings,
+		sessionwatcher.MethodsByIntegration(openedCore.Layout, openedCore.Settings), record)
 	fmt.Println(verdict.Answer)
 	if verdict.Detail != "" {
 		fmt.Fprintln(os.Stderr, verdict.Detail)

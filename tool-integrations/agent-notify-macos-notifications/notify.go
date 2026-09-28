@@ -2,7 +2,6 @@ package main
 
 import (
 	"github.com/lassoColombo/agent-notify/session"
-	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
 // A notification is the one EDGE in this system, and this file is where the
@@ -78,7 +77,7 @@ func NewNotifier(preview Preview, colours session.Palette) *Notifier {
 //     asked for no ended sessions, because that is how a bar learns to take a
 //     row away (D-26), and "it finished" is not something to interrupt anybody
 //     with.
-func (n *Notifier) Fresh(changed []subscribe.Change) []Notice {
+func (n *Notifier) Fresh(changed []session.Change) []Notice {
 	var notices []Notice
 	for _, change := range changed {
 		record := change.Record

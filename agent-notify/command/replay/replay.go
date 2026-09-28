@@ -24,8 +24,8 @@ import (
 
 	"github.com/lassoColombo/agent-notify/command/internal/exit"
 	"github.com/lassoColombo/agent-notify/internal/paths"
+	"github.com/lassoColombo/agent-notify/internal/subscriber"
 	"github.com/lassoColombo/agent-notify/session"
-	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
 // RecordedChange is one line of a recording: how long after the previous one it
@@ -85,10 +85,10 @@ func record(output string) int {
 
 	last := time.Now()
 	count := 0
-	err := subscribe.Run(ctx, subscribe.Integration{
-		Name: "record", Roles: []string{"display"}, WantEnded: true,
+	err := subscriber.Run(ctx, subscriber.Subscription{
+		Name: "record", WantEnded: true,
 		Logger: slog.New(slog.NewTextHandler(os.Stderr, nil)),
-		OnChange: func(view subscribe.View) error {
+		OnChange: func(view session.View) error {
 			for _, change := range view.Changed {
 				now := time.Now()
 				if err := encoder.Encode(RecordedChange{
@@ -156,7 +156,7 @@ func replay(recording string, speed float64, again bool, waiting time.Duration) 
 		return 2
 	}
 
-	fake, err := subscribe.StartFake(root, slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	fake, err := subscriber.StartFake(root, slog.New(slog.NewTextHandler(os.Stderr, nil)))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "agent-notify replay: %v\n", err)
 		return 1
@@ -193,7 +193,7 @@ func replay(recording string, speed float64, again bool, waiting time.Duration) 
 	}
 }
 
-func waitForADisplayToConnect(ctx context.Context, fake *subscribe.Fake, within time.Duration) bool {
+func waitForADisplayToConnect(ctx context.Context, fake *subscriber.Fake, within time.Duration) bool {
 	deadline := time.Now().Add(within)
 	for time.Now().Before(deadline) && ctx.Err() == nil {
 		if len(fake.Connected()) > 0 {

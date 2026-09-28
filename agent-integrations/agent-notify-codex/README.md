@@ -223,7 +223,7 @@ edit would be a copy that can disagree with the first.
 
 In particular: **an agent-integration has no `[integration.codex]` table and no
 `settings`.** That table is for the long-lived tool-integrations core
-supervises. This program is started by codex, not by core.
+runs. This program is started by codex, not by core.
 
 ### `install`'s own flags
 

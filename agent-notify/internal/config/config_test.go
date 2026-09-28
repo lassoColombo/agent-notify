@@ -53,8 +53,7 @@ enabled = false
 binary  = "agent-notify-sketchybar"
 
 [integration.aerospace]
-binary              = "agent-notify-aerospace-container"
-capture-environment = true
+binary = "agent-notify-aerospace-container"
 
 [container]
 order = ["aerospace", "zellij"]
@@ -74,9 +73,6 @@ order = ["aerospace", "zellij"]
 	}
 	if settings.Integration["sketchybar"].IsEnabled() {
 		t.Errorf("enabled = false was ignored")
-	}
-	if !settings.Integration["aerospace"].CaptureEnvironment {
-		t.Errorf("capture-environment = true was not read")
 	}
 	if got := settings.Container.Order; len(got) != 2 || got[0] != "aerospace" {
 		t.Errorf("container.order = %q", got)
@@ -215,6 +211,34 @@ func TestAnIntegrationThatDoesNothingIsReported(t *testing.T) {
 // configuration get a sentence rather than the generic "not recognised", because
 // the generic one says a key was ignored and not that the mechanism has gone
 // (D-57).
+// TestCaptureEnvironmentIsRemovedAndSaysSo: the key that said "run this one on
+// the agent's path" is gone because all of them are run there now.
+//
+// A person whose file still has it deserves better than silence: leaving it in
+// changes nothing, but so does deleting it, and only the sentence says which.
+func TestCaptureEnvironmentIsRemovedAndSaysSo(t *testing.T) {
+	_, problems := config.Parse([]byte(`
+[integration.zellij-display]
+binary              = "agent-notify-zellij-display"
+capture-environment = true
+`), "old.toml")
+
+	var said string
+	for _, problem := range problems {
+		if strings.Contains(problem.Error(), "no longer read") {
+			said = problem.Error()
+		}
+	}
+	if said == "" {
+		t.Fatalf("nothing explained the removed key: %v", problems)
+	}
+	for _, want := range []string{"zellij-display", "Every integration is asked", "Delete the line"} {
+		if !strings.Contains(said, want) {
+			t.Errorf("the complaint does not mention %q:\n%s", want, said)
+		}
+	}
+}
+
 func TestTheRemovedCaptureKeysSayWhatToDoInstead(t *testing.T) {
 	_, problems := config.Parse([]byte(`
 [integration.zellij-display]
@@ -232,7 +256,7 @@ capture = ["ZELLIJ_SESSION_NAME", "ZELLIJ_PANE_ID"]
 		t.Fatalf("nothing explained the removed key: %v", problems)
 	}
 	for _, want := range []string{
-		"zellij-display", "capture", "capture-environment = true", "agent-notify install",
+		"zellij-display", "capture", "`capture-environment`", "agent-notify install",
 	} {
 		if !strings.Contains(said, want) {
 			t.Errorf("the complaint does not mention %q:\n%s", want, said)

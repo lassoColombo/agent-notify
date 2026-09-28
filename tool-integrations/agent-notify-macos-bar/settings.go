@@ -24,6 +24,27 @@ const Name = "macos-bar"
 // environment says", which is right everywhere but a test (D-69).
 var me = subscribe.Integration{Name: Name}
 
+// capabilities is what this display answers `capabilities` with, and the same
+// wake list it watches with.
+//
+// **No methods**, and that is the honest answer rather than a gap. A method is
+// something core may run, and core runs nothing here: a menu bar item dies with
+// the process that made it, so this display is started by launchd and watches
+// `agent-notify tail --json` on its own. Declaring `render` would invite core
+// to fork a fresh NSApplication per change and draw nothing with it.
+//
+// The wake list is still here, and is the one thing this value is for: it is
+// what the `tail` it runs is told to wake for, and a handshake that named
+// different fields from the watch would be the D-72 failure again, arrived at
+// from the other side.
+//
+// WantEnded stays false. This bar draws live sessions and owns nothing it would
+// have to give back, so an ended record tells it only that a row has gone —
+// which it learns from the transition either way (D-26).
+var capabilities = session.Capabilities{
+	WakeOn: WhatToWakeFor(),
+}
+
 // DefaultGlyphs is the mark on each count.
 //
 // Geometric shapes from the Unicode block every Mac font has, and NOT the Nerd

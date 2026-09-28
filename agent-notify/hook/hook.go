@@ -186,39 +186,23 @@ func look(opened *core.Core, report *session.Report) {
 	// hook costs 9.3ms when it captures and 4.9ms when it does not, so the
 	// spawns were most of what a hook cost — and every one after the first was
 	// thrown away.
-	if worthCapturing(previous, wouldBeAskedNow(opened.Settings), report.Process) {
-		captured := askEveryoneWhoCaptures(opened.Settings, opened.Logger, chain)
+	asked := sessionwatcher.TheIntegrationsToAsk(opened.Layout, opened.Settings)
+	if worthCapturing(previous, asked, report.Process) {
+		captured := askEveryoneWhoCaptures(opened.Settings, asked, opened.Logger, chain)
 		report.CapturedContext = &captured
 	}
 }
 
-// wouldBeAskedNow is every integration with a `capture-environment` to run, in
-// order, and it is the only definition of that predicate.
-//
-// It exists so that "has the set of contributing integrations changed" can be
-// asked WITHOUT running them, which is what took the spawns off the steady-state
-// hook path. askEveryoneWhoCaptures then iterates it rather than deciding
-// again, so the two cannot disagree about who runs — which is why there is no
-// test comparing them, and why this must stay the one place the question is
-// answered.
-func wouldBeAskedNow(settings config.Config) []string {
-	var names []string
-	for tool, integration := range settings.Integration {
-		if !integration.IsEnabled() {
-			continue
-		}
-		if !integration.CaptureEnvironment || integration.Binary == "" {
-			continue
-		}
-		names = append(names, tool)
-	}
-	slices.Sort(names)
-	return names
-}
-
-// askEveryoneWhoCaptures runs the `capture-environment` of every enabled
-// integration that has one, as a child of this process, which is the only place an agent's
+// askEveryoneWhoCaptures runs the `capture-environment` of every integration
+// core can run, as a child of this process, which is the only place an agent's
 // environment can be read at all (D-27).
+//
+// Every one of them, and not the ones a key in the config named. That key was
+// only ever there because the hook has no socket and cannot ask (D-39), and it
+// was a fact about the program living in the user's file — yes for an
+// integration that reads nothing, no for one that reads something, and no error
+// either way. An integration with nothing to say answers an empty object, which
+// is recorded as nothing at all.
 //
 // There is one form and there used to be two. The other was a list of variable
 // names in the config file, read by core — cheaper, because it spawned nothing,
@@ -234,13 +218,14 @@ func wouldBeAskedNow(settings config.Config) []string {
 // installed contributes nothing, the hook writes and exits, and the next hook
 // tries again (R13).
 func askEveryoneWhoCaptures(
-	settings config.Config, logger *slog.Logger, chain []session.Ancestor,
+	settings config.Config, asked []string, logger *slog.Logger, chain []session.Ancestor,
 ) session.CapturedContext {
 	captured := session.CapturedContext{Ancestry: chain}
 
-	// Who to run is wouldBeAskedNow's answer and never a second opinion: look()
-	// has already decided whether to be here at all on the strength of that same
-	// list, and a loop that re-derived it could send the two different answers.
+	// Who to run is handed in rather than worked out again, and it is the same
+	// list worthCapturing was shown: look() has already decided whether to be
+	// here at all on the strength of it, and a loop that derived its own could
+	// send the two different answers.
 	//
 	// Knowing the list before the loop is also why there is no channel here.
 	// Each capture writes its own slot and nothing is shared, so waiting is the
@@ -248,7 +233,6 @@ func askEveryoneWhoCaptures(
 	// skip most of them, which left the number of writers unknown until the loop
 	// had run — and a buffered channel sized to the whole table was the way to
 	// collect an unknown number of answers.
-	asked := wouldBeAskedNow(settings)
 	answered := make([]json.RawMessage, len(asked))
 	var running sync.WaitGroup
 
@@ -268,13 +252,20 @@ func askEveryoneWhoCaptures(
 	running.Wait()
 
 	for i, tool := range asked {
-		if answered[i] == nil {
-			// It hung, crashed, or is not installed. It contributes nothing and
-			// no empty entry, because an empty entry would read to
-			// worthCapturing as an answer and this session would never capture
-			// again.
+		if len(answered[i]) == 0 {
+			// It hung, crashed, or is not installed.
 			continue
 		}
+		var anything map[string]json.RawMessage
+		if err := json.Unmarshal(answered[i], &anything); err == nil && len(anything) == 0 {
+			// It ran and had nothing to say. That is the ordinary answer from
+			// an integration that reads no environment, now that every one of
+			// them is asked rather than the ones a config key named.
+			continue
+		}
+		// Neither is recorded, and for the same reason: an entry that says
+		// nothing is not evidence of anything. worthCapturing would read one as
+		// an answer, and this session would never be captured again.
 		if captured.By == nil {
 			captured.By = map[string]json.RawMessage{}
 		}

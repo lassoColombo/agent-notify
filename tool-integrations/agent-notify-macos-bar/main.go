@@ -25,8 +25,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/lassoColombo/agent-notify/session"
+	"github.com/lassoColombo/agent-notify/capture"
 	"github.com/lassoColombo/agent-notify/logs"
+	"github.com/lassoColombo/agent-notify/session"
 	"github.com/lassoColombo/agent-notify/subscribe"
 	"github.com/lassoColombo/agent-notify/tool"
 )
@@ -41,6 +42,14 @@ func main() {
 	arguments := os.Args[1:]
 	if len(arguments) > 0 {
 		switch arguments[0] {
+		case session.CapabilitiesCommand:
+			// The handshake, and the first thing core ever runs here.
+			os.Exit(capabilities.Answer(os.Stdout))
+		case capture.Command:
+			// A menu bar reads nothing out of the agent's process, and says so
+			// rather than failing: every integration is asked this one, and
+			// answering `{}` is what "nothing to add" sounds like.
+			os.Exit(capture.Main(Name, nil))
 		case "install":
 			os.Exit(install(arguments[1:]))
 		case "dump":
@@ -230,15 +239,14 @@ func paint() int {
 
 	outcome := make(chan error, 1)
 	go func() {
-		outcome <- subscribe.Run(ctx, subscribe.Integration{
-			Name:  Name,
-			Roles: []string{"display"},
+		outcome <- subscribe.RunThroughTheCLI(ctx, subscribe.Integration{
+			Name: Name,
 			// The message is on this list where the sketchybar display leaves
 			// it off, and the difference is what a paint costs. There, a paint
 			// is a process; here it is a JSON encode and a dispatch onto a
 			// queue, so a message that changes fifty times in a turn is
 			// affordable — and it is what a row's tooltip is made of.
-			WakeOn:   WhatToWakeFor(),
+			WakeOn:   capabilities.WakeOn,
 			OnChange: display.Render,
 			Logger:   log,
 		})
@@ -293,7 +301,7 @@ type Display struct {
 
 // Render is called with the current state, never with a transition, so there is
 // nothing to remember and nothing to get out of step with (R22).
-func (d *Display) Render(view subscribe.View) error {
+func (d *Display) Render(view session.View) error {
 	d.mu.Lock()
 	d.last = view.Sessions
 	d.mu.Unlock()

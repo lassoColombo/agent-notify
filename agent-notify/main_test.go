@@ -179,8 +179,7 @@ func startWith(t *testing.T, extraConfig string) *pretendAgent {
 binary = "fake-agent"
 
 [integration.paneish]
-binary              = "`+containerPath+`"
-capture-environment = true
+binary = "`+containerPath+`"
 `), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}

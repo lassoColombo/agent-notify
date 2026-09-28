@@ -94,11 +94,12 @@ on disk, and writes one record. That path never speaks: an agent reads its
 hook's exit code, so a hook that failed would reach back into the very session
 it is describing. Everything it has to say goes to the log.
 
-The **session-watcher** is the one long-lived process. It notices agents dying,
-sweeps up behind them, supervises the displays, and hands every subscriber the
-current state over a unix socket. There is one per machine and starting a second
-is refused by the first. Nobody has to start it: the first hook that finds
-nobody listening starts one.
+The **session-watcher** is the one long-lived process, and it is the only one.
+It notices agents dying, sweeps up behind them, runs each display when something
+that display watches moves, and hands anything that connects the current state
+over a unix socket. There is one per machine and starting a second is refused by
+the first. Nobody has to start it: the first hook that finds nobody listening
+starts one.
 
 A **tool-integration** either renders that state (a display) or acts on it (a
 container: where is this session, and bring it to the front). Several displays
@@ -172,7 +173,7 @@ agent-notify version
 
 `go install .` works too and puts the binary in
 `$(go env GOPATH)/bin`. Either way the binary must be somewhere your **shell**
-can find it *and* somewhere a supervised child can: see
+can find it *and* somewhere a program core starts can: see
 [`agent-notify-binary`](#the-top-level-keys) below, which is what a hook's PATH
 and a launchd child's PATH make necessary.
 
@@ -392,7 +393,7 @@ read through the standard rules.
 
 | Variable | What it does |
 | --- | --- |
-| `AGENT_NOTIFY_ROOT` | Moves everything beneath one directory: `<root>/state`, `<root>/run`, `<root>/config.toml`. One variable, so that running an isolated instance is one step. It is made absolute, so a relative value is resolved against the process's own working directory — which for a supervised child is not yours. |
+| `AGENT_NOTIFY_ROOT` | Moves everything beneath one directory: `<root>/state`, `<root>/run`, `<root>/config.toml`. One variable, so that running an isolated instance is one step. It is made absolute, so a relative value is resolved against the process's own working directory — which for a program core starts is not yours. |
 | `AGENT_NOTIFY_LOG_LEVEL` | `debug`, `info`, `warn` or `error`. Absent means `info`, and so does a value it cannot read — which it says in the log, because a typo in the variable you set precisely to see more must not be the reason you see the same as before. It is a variable rather than a configuration key because the log is opened before the configuration is read, deliberately, so that complaints about the configuration have somewhere to go. Setting it once before starting anything sets it for everything. |
 | `XDG_STATE_HOME` | Where records and the log go on Linux. Ignored on macOS, which uses `~/Library/Application Support`. |
 | `XDG_RUNTIME_DIR` | Where sockets and locks go on Linux. |
@@ -400,12 +401,12 @@ read through the standard rules.
 | `XDG_CONFIG_HOME` | Where the configuration file is, as above. |
 | `PATH` | How `install` and `doctor` find `agent-notify-<name>` programs. |
 
-Those are also almost the whole of what a supervised integration inherits. The
-session-watcher hands its children an explicit short list — `HOME`, `PATH`,
+Those are also almost the whole of what an integration inherits when core runs
+it. The session-watcher hands it an explicit short list — `HOME`, `PATH`,
 `TMPDIR`, `USER`, `LOGNAME`, the four XDG variables, `AGENT_NOTIFY_ROOT` and
-`AGENT_NOTIFY_LOG_LEVEL` —
-and leaves everything else behind, because an agent's environment holds API keys
-and a session-watcher would otherwise keep them in memory for days.
+`AGENT_NOTIFY_LOG_LEVEL` — and leaves everything else behind, because an agent's
+environment holds API keys and a session-watcher would otherwise keep them in
+memory for days.
 
 ### The top-level keys
 
@@ -414,7 +415,6 @@ and a session-watcher would otherwise keep them in memory for days.
 | `keep-ended-sessions` | duration | `"168h"` (7 days) | How long an ended session's record survives, so that resuming it is recognised as a return rather than a birth. It is also the set `list --all` and a picker offer you. Must be positive. |
 | `history-messages` | integer | `20` | How many of a session's messages are kept in its history file. `0` keeps none, which is the point of it being expressible. |
 | `history-changes` | integer | `100` | How many state transitions are kept, same rules. |
-| `integration-tries` | integer | `5` | How many consecutive failures an integration is allowed before the session-watcher stops starting it and says why in `doctor`. "Consecutive" means since the child last stayed connected long enough to count as working. Must be at least 1. |
 | `subscriber-queue` | integer | `128` | How many changed sessions may wait for one subscriber before its queue is thrown away and replaced by a single snapshot. Overflow degrades to a full redraw, never to a wrong render, so this trades bytes on the wire against redraws and nothing else. Must be at least 1. |
 | `agent-notify-binary` | string | empty, meaning "work it out" | Where the `agent-notify` binary is, for the one job that needs to start it: a hook whose poke found no session-watcher, and a display that offers a click. A hook's PATH is not your shell's PATH, and a click on a menu-bar item runs from launchd's, which is `/usr/bin:/bin` and nothing else. |
 
@@ -473,18 +473,14 @@ another being present.
 ```toml
 [integration.zellij-display]
 binary = "/opt/homebrew/bin/agent-notify-zellij-display"
-capture-environment = true
 
 [integration.picker]
-binary  = "/opt/homebrew/bin/agent-notify-picker"
-enabled = false
 ```
 
 | Key | Type | Default | What it does |
 | --- | --- | --- | --- |
-| `enabled` | boolean | absent means **yes** | `false` means "do not start this for me". The picker is the example: it needs a terminal and is run when you press a key, not supervised — so it wants a table without being started. |
-| `binary` | string | none, and an enabled table without one is a complaint | The program: the long-lived subprocess core supervises for a display, or the program it runs for a container. Looked up on PATH unless it is an absolute path. |
-| `capture-environment` | boolean | `false` | Says this integration answers `capture-environment`, and is therefore run as a child of the hook, inside the agent's process tree. It is one bit rather than a list precisely so that editing it by hand breaks something coarse rather than something subtle. Its own `install` writes it. |
+| `enabled` | boolean | absent means **yes** | `false` means "do not run this for me". Writing the table at all is how you ask for the integration, so absence means enabled. |
+| `binary` | string | none | The program, and naming one means **core may run this**: the hook runs it on the agent's path, the session-watcher runs it to ask what it answers and then to render or to focus. Looked up on PATH unless it is an absolute path. Leaving it out is a decision rather than an omission — a table with no binary belongs to something core never runs, like a menu bar, which owns its own process and is started by launchd. |
 | `settings` | table | empty | Handed to the integration verbatim. See below. |
 
 ### `[integration.<name>.settings]`
@@ -553,21 +549,18 @@ binary = "codex"
 
 [integration.zellij-display]
 binary = "/opt/homebrew/bin/agent-notify-zellij-display"
-capture-environment = true
 
 [integration.zellij-display.settings]
 zellij = "/opt/homebrew/bin/zellij"
 
 [integration.zellij-container]
 binary = "/opt/homebrew/bin/agent-notify-zellij-container"
-capture-environment = true
 
 [integration.zellij-container.settings]
 zellij = "/opt/homebrew/bin/zellij"
 
 [integration.aerospace-container]
 binary = "/opt/homebrew/bin/agent-notify-aerospace-container"
-capture-environment = true
 
 [integration.aerospace-container.settings]
 aerospace = "/opt/homebrew/bin/aerospace"
@@ -582,17 +575,13 @@ binary = "/opt/homebrew/bin/agent-notify-macos-bar"
 sign = "agent-notify self-signed"
 
 [integration.macos-notifications]
-binary = "/Users/you/Applications/agent-notify-macos-notifications.app/Contents/MacOS/agent-notify-macos-notifications"
-
 [integration.macos-notifications.settings]
 sign  = "agent-notify self-signed"
 sound = false
 
-# Run when you press a key, not supervised: it needs a terminal, so
-# `enabled = false` means "do not start this for me", not "off".
+# Run when you press a key. It needs a terminal, so it has no binary: the path
+# lives in the keybinding, which is the only thing that runs it.
 [integration.picker]
-binary  = "/opt/homebrew/bin/agent-notify-picker"
-enabled = false
 ```
 
 ### What happens when the file is wrong
@@ -666,9 +655,9 @@ every process writes to and which is in state rather than runtime because a log
 swept away by a reboot is a log missing exactly the failures worth reading about.
 Inside runtime: `subscribers.sock` (the stream, watcher to displays),
 `session-changes.sock` (the datagram, hook to watcher), `session-watcher.lock`
-and `integrations.json` (what the supervisor knows about its children, written
-so `doctor` can read it from another process — and so you can `cat` it at three
-in the morning).
+and `integrations.json` (what each integration said it answers, written so that
+`doctor`, a focus off a keybinding and the hook can all read it without running
+anything — and so you can `cat` it at three in the morning).
 
 A session key is `host~agent~session-id`, percent-encoded so the encoding cannot
 be ambiguous however strange an agent's session ids turn out to be, and capped
@@ -1204,8 +1193,9 @@ never open a socket, never wait. Whatever it returns is stored verbatim under
 that integration's name and is opaque to core in both directions; what it means
 is agreed between your `Capture` and your `Interpret` and nobody else.
 
-Declare it with `capture-environment = true` in your table — the hook has no
-socket and cannot ask you over one.
+There is nothing to declare. Every integration core can run is asked this one,
+and an integration with nothing to read answers an empty object, which core
+stores as no entry at all.
 
 ## What is not finished
 
@@ -1237,6 +1227,5 @@ The codebase says this in places and it is worth saying here.
 
 What does work, and has been the thing running on the machine it was written on
 since 2026-09-18: two agents tracked in one vocabulary, liveness, zellij pane
-and tab titles, the semaphore on the menu bar, notifications, focus through
-every layer a session is buried under, and supervision of the integrations that
-do it.
+and tab titles, the semaphore on the menu bar, notifications, and focus through
+every layer a session is buried under.

@@ -9,27 +9,25 @@ import (
 
 // The table this integration needs in agent-notify's config file.
 //
-// `capture-environment` is the load-bearing line. Only a process inside the
-// agent can read which pane it is in, so the hook runs this program and stores
-// what it returns opaquely under this integration's name. Without it every
-// record arrives with nowhere to paint, and the display is correct and
-// invisible.
+// It is one line now. There used to be a second, `capture-environment = true`,
+// which told the hook to run this program inside the agent — only a process in
+// there can read which pane it is in — and it is gone because every integration
+// is asked that now, so there is nothing left to say yes to.
 //
-// It used to be `capture = ["ZELLIJ_SESSION_NAME", "ZELLIJ_PANE_ID"]`, and the
-// two names are why it is not any more (D-57): they are already in this
+// Before that it was `capture = ["ZELLIJ_SESSION_NAME", "ZELLIJ_PANE_ID"]`, and
+// the two names are why it is not any more (D-57): they are already in this
 // program's source, where `capture-environment` and `PlaceOf` both read them,
 // and a third copy in a file the user edits is a copy that can disagree with
 // the other two — silently, because a capture naming the wrong variable
 // produces no error, just a display that paints nothing.
 //
-// `binary` is written as an ABSOLUTE path. It is what the session-watcher will
-// start (M13), and a supervised child's PATH is not your shell's PATH — a
-// launchd job's is /usr/bin:/bin and nothing else, which is how a display can be
-// perfectly correct and never once be started.
+// `binary` is written as an ABSOLUTE path. It is what core will run — the hook
+// on the agent's path, and the session-watcher — and neither has your shell's
+// PATH. A launchd job's is /usr/bin:/bin and nothing else, which is how a
+// display can be perfectly correct and never once be started.
 func table(program, zellij string) string {
 	written := fmt.Sprintf(`[integration.zellij-display]
-binary              = %q
-capture-environment = true
+binary = %q
 
 [integration.zellij-display.settings]
 `, program)

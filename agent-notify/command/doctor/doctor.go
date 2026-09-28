@@ -32,9 +32,9 @@ import (
 	"github.com/lassoColombo/agent-notify/internal/process"
 	"github.com/lassoColombo/agent-notify/internal/sessionstore"
 	"github.com/lassoColombo/agent-notify/internal/sessionwatcher"
+	"github.com/lassoColombo/agent-notify/internal/subscriber"
 	"github.com/lassoColombo/agent-notify/logs"
 	"github.com/lassoColombo/agent-notify/session"
-	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
 // Command is `agent-notify doctor`.
@@ -263,9 +263,9 @@ func askTheSocket(layout paths.Layout) string {
 	defer stop()
 
 	answered := make(chan int, 1)
-	go subscribe.Run(ctx, subscribe.Integration{
+	go subscriber.Run(ctx, subscriber.Subscription{
 		Name: "doctor", Root: layout.Root, WantEnded: true,
-		OnChange: func(view subscribe.View) error {
+		OnChange: func(view session.View) error {
 			select {
 			case answered <- len(view.Sessions):
 			default:
@@ -312,7 +312,7 @@ func reportIntegrations(
 
 	worst := "ok"
 	for _, one := range report.Integrations {
-		if one.Reason != "" {
+		if one.Answers.Problem != "" {
 			worst = "fail"
 			*healthy = false
 		}
@@ -325,18 +325,34 @@ func reportIntegrations(
 		if one.PID != 0 {
 			detail += fmt.Sprintf(", pid %d", one.PID)
 		}
-		if len(one.Roles) > 0 {
-			detail += fmt.Sprintf(" %v", one.Roles)
-		}
-		if one.Failures > 0 && one.Reason == "" {
-			detail += fmt.Sprintf(" — %d failure(s) of %d allowed", one.Failures, one.Attempts)
-		}
 		fmt.Printf("             %-22s %s\n", one.Name, detail)
-		if one.Reason != "" {
-			fmt.Printf("             %-22s %s\n", "", one.Reason)
-			fmt.Printf("             %-22s %s\n", "",
-				"fix it and run `agent-notify watcher reload`")
+		if one.Binary != "" {
+			// Only for something core runs. A client's table was never asked
+			// anything, so "answers nothing" would be a report on a
+			// conversation that did not happen.
+			fmt.Printf("             %-22s %s\n", "", whatItAnswers(one.Answers))
 		}
+		if one.Answers.Problem != "" {
+			fmt.Printf("             %-22s %s\n", "",
+				"rebuild and reinstall it, then run `agent-notify watcher reload`")
+		}
+	}
+}
+
+// whatItAnswers is one integration's handshake, in a line.
+//
+// It is printed for every integration and not only the broken ones, because
+// what core will and will not run is now entirely decided by this, and a line
+// that only appears when something is wrong is a line nobody learns to read.
+func whatItAnswers(answers sessionwatcher.WhatAnIntegrationAnswers) string {
+	switch {
+	case answers.Problem != "":
+		return "did not say what it answers: " + answers.Problem
+	case len(answers.Methods) == 0:
+		return "answers nothing, so core will never run it"
+	default:
+		return fmt.Sprintf("answers %s — built against %s",
+			strings.Join(answers.Methods, ", "), answers.Version)
 	}
 }
 

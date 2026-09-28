@@ -7,23 +7,33 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+
+	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
 // The theConfigTableToAdd this integration needs.
 //
-// The binary it names is the one INSIDE the bundle, and that is the whole point
-// of the bundle (see bundle.go): run the bare binary and the item's position is
-// forgotten on every restart. The path never changes, so this line never has to
-// — but what sits at it is a COPY, not a symlink, because codesign refuses a
-// symlinked executable outright (bundle.go). A rebuilt binary therefore does not
-// reach the bundle on its own: `install` has to run again, which is why it is
-// idempotent.
+// It has no `binary`, and the absence is the declaration. `binary` means "core
+// may run this" — the hook runs it, the session-watcher runs it — and neither
+// can run a menu bar: an NSStatusItem dies with the process that made it, and
+// AppKit wants a main thread and a run loop it can keep. So this display is not
+// something core starts. launchd starts it, and it connects on its own, which
+// §A10.2 has always allowed.
 //
-// No `capture` line: a menu bar does not care where a session lives, only what
-// it is doing. Choosing a row focuses one, and that is the container's job,
-// asked for through `agent-notify focus-session` rather than done here (D-37).
-func theConfigTableToAdd(binary, identity string) string {
-	written := fmt.Sprintf("[integration.%s]\nbinary = %q\n", Name, binary)
+// What is left in the table is settings, which is what a table is for. The
+// binary inside the bundle is named in the launch agent instead, and that is
+// the whole point of the bundle (see bundle.go): run the bare binary and the
+// item's position is forgotten on every restart. What sits at that path is a
+// COPY, not a symlink, because codesign refuses a symlinked executable outright
+// — so a rebuilt binary does not reach the bundle on its own and `install` has
+// to run again, which is why it is idempotent.
+//
+// Nothing about capturing either: a menu bar does not care where a session
+// lives, only what it is doing. Choosing a row focuses one, and that is the
+// container's job, asked for through `agent-notify focus-session` rather than
+// done here (D-37).
+func theConfigTableToAdd(identity string) string {
+	written := fmt.Sprintf("[integration.%s]\n", Name)
 	if identity != "" {
 		written += fmt.Sprintf("\n[integration.%s.settings]\nsign = %q\n", Name, identity)
 	}
@@ -41,8 +51,11 @@ func theConfigTableToAdd(binary, identity string) string {
 // D-57). Whether this display should be running is exactly that, and since
 // `enabled` defaults to true, writing the table IS turning it on.
 //
-// So the table is stated rather than filed, with the one path a person could
-// not work out for themselves — the binary inside the bundle — already resolved.
+// So the table is stated rather than filed, and so is the launch agent — with
+// the one path a person could not work out for themselves, the binary inside
+// the bundle, already resolved in it. Loading a launch agent puts a program in
+// your login session for ever, which is even less a thing a program should
+// arrange for itself while you are still reading its output.
 func install(arguments []string) int {
 	return setUp(os.Stdout, os.Stderr, arguments)
 }
@@ -107,17 +120,24 @@ func setUp(out, problems io.Writer, arguments []string) int {
 		return 1
 	}
 
-	fmt.Fprint(out, theConfigTableToAdd(bundle.PathOfTheBinaryInside(), bundle.Identity))
+	fmt.Fprint(out, theConfigTableToAdd(bundle.Identity))
 
 	where, err := me.ConfigFile()
 	if err != nil {
 		where = "agent-notify's config file"
 	}
 	fmt.Fprintf(problems, "\nThe bundle is at %s. Nothing else was written:\n"+
-		"put the table above in %s when you want this running, since the\n"+
-		"table being there is what turns it on.\n\n", bundle.Path, where)
-	fmt.Fprint(problems, "The bundle holds a COPY of the binary, so run this again after rebuilding.\n\n"+
-		"Banners are a second display, agent-notify-macos-notifications, with a table\n"+
+		"put the table above in %s when you want this configurable,\n"+
+		"and load the launch agent below when you want it running.\n\n", bundle.Path, where)
+	fmt.Fprint(problems, "The bundle holds a COPY of the binary, so run this again after rebuilding.\n\n")
+
+	fmt.Fprintf(problems, "This display runs itself rather than being started by agent-notify:\n"+
+		"a menu bar item dies with its process, so there is nothing core could\n"+
+		"usefully run. It watches `agent-notify tail --json` instead.\n\n%s\n%s\n",
+		subscribe.LaunchAgentPlist(Identifier, bundle.PathOfTheBinaryInside()),
+		subscribe.HowToLoadTheLaunchAgent(Identifier))
+
+	fmt.Fprint(problems, "\nBanners are a second display, agent-notify-macos-notifications, with a table\n"+
 		"of its own — install it too if you want to be interrupted as well as informed.\n")
 	return 0
 }

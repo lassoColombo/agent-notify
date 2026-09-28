@@ -3,7 +3,6 @@ package main
 import (
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -78,9 +77,12 @@ func TestOnlyTheTableGoesToStdout(t *testing.T) {
 	}
 }
 
-// TestTheTableNamesTheBinaryInsideTheBundle, which is the whole reason there is
-// a bundle: the bare binary has nowhere to remember where you put its item.
-func TestTheTableNamesTheBinaryInsideTheBundle(t *testing.T) {
+// TestTheTableNamesNoBinary: `binary` means "core may run this", and nothing
+// core runs can hold a menu bar item or answer a tap on a banner.
+//
+// The path it used to carry is in the launch agent now — see the bundle tests,
+// which is the whole reason there is a bundle. What is left here is settings.
+func TestTheTableNamesNoBinary(t *testing.T) {
 	t.Setenv("AGENT_NOTIFY_ROOT", t.TempDir())
 	table, code := printed(t)
 	if code != 0 {
@@ -99,12 +101,9 @@ func TestTheTableNamesTheBinaryInsideTheBundle(t *testing.T) {
 	if !present {
 		t.Fatalf("no [integration.%s] table in:\n%s", Name, table)
 	}
-	if !filepath.IsAbs(mine.Binary) {
-		t.Errorf("binary = %q is not absolute, and a supervised child's PATH is not yours",
+	if mine.Binary != "" {
+		t.Errorf("binary = %q, so core would try to run a display it cannot run",
 			mine.Binary)
-	}
-	if !strings.Contains(mine.Binary, ".app/") {
-		t.Errorf("binary = %q is not inside the bundle", mine.Binary)
 	}
 }
 

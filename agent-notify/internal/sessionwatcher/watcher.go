@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"slices"
 	"sync"
 	"syscall"
 	"time"
@@ -24,21 +25,14 @@ import (
 	"github.com/lassoColombo/agent-notify/session"
 )
 
-// SweepInterval is the safety net behind the exit watches, and — since D-23 —
-// the rate limit on restarting a failed integration, which is why nothing else
-// needs a backoff schedule (plan.md §A9.4).
+// SweepInterval is the safety net behind the exit watches: the longest a
+// session that died without saying so can sit in the store looking alive.
 //
 // It is a var and it is exported for one reason, and it is not configuration:
 // these are the pace of a loop a test has to watch go round several times, and
 // waiting the real interval would make that test a minute long. Nothing at
 // runtime writes it, and no user can — this package is internal.
 var SweepInterval = 5 * time.Second
-
-// IntegrationGrace is how long a started integration has to connect before it
-// is presumed broken, killed and counted as a failed attempt. The handshake is
-// the health check: without this rule a child that hangs before connecting
-// accumulates for ever (§A9.4). A var for SweepInterval's reason.
-var IntegrationGrace = 10 * time.Second
 
 // interpretTimeout bounds one `interpret-environment`, which runs here and may
 // talk to the tool it is asking about (§A11.1). On expiry that container has no
@@ -82,14 +76,21 @@ type Watcher struct {
 	// it will be the same mistake every sweep until somebody edits the file.
 	complained map[string]bool
 
-	// children, failures and retired are the supervisor's whole state
-	// (§A9.4). failures is consecutive-since-it-last-worked; retired is the
-	// reason it was given up on, and the only thing that stops it being
-	// started again. All three are cleared by a reload, which is how a person
-	// says "I fixed it".
-	children map[string]*child
-	failures map[string]int
-	retired  map[string]string
+	// answers is what each integration said when it was asked what it answers,
+	// as of this configuration. Filled at startup and on reload and read
+	// everywhere else, because asking is a process per integration and the
+	// answer cannot change without the program on disk changing.
+	answers map[string]WhatAnIntegrationAnswers
+
+	// renderers is one per display core runs, each with the goroutine that
+	// runs it and its own picture of what it was last handed.
+	//
+	// There used to be a supervisor here instead — children, consecutive
+	// failures, a grace period, a count of attempts before giving up — and it
+	// is gone with the last long-lived integration. A display core runs is a
+	// program it runs when something moves; a display that must own a process
+	// is started by launchd and connects on its own (§A10.2).
+	renderers map[string]*renderer
 }
 
 // Start takes the lock, binds the socket, and opens the exit queue.
@@ -195,6 +196,11 @@ func (w *Watcher) Run(ctx context.Context) error {
 		"pid", os.Getpid(), "version", session.Version,
 		"state", w.opened.Layout.State, "runtime", w.opened.Layout.Runtime)
 
+	// Before anything is run, what is there to run. Everything core does with
+	// an integration from here on is decided by what it said here.
+	w.askWhatEachIntegrationAnswers()
+	w.startRenderers(ctx)
+
 	// Reconciling from the store at startup is what makes every poke losable:
 	// a session-watcher that has just started knows everything a session-watcher
 	// that has been running all day knows (§A9.1, R4).
@@ -212,14 +218,13 @@ func (w *Watcher) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			w.logger.Info("session-watcher stopping")
-			w.StopIntegrations()
 			return nil
 		case <-reload:
-			w.reloadConfiguration()
+			w.reloadConfiguration(ctx)
 		case why := <-woken:
 			w.reconcile(why)
 		case <-tick.C:
-			w.supervise()
+			w.writeReport(w.opened.Settings)
 			if w.worldIsGone() {
 				w.logger.Info("the state directory is gone; nothing left to watch",
 					"state", w.opened.Layout.State)
@@ -307,6 +312,12 @@ func (w *Watcher) reconcile(why string) {
 	for _, end := range ending {
 		w.end(end)
 	}
+
+	// Once, at the end, rather than once per record: a render paints the whole
+	// world, so a sweep that touched nine sessions is still one render. Each
+	// display works out for itself whether anything it watches moved, and most
+	// of the time nothing did and no process is started at all.
+	w.drawEverythingAgain()
 }
 
 // derive turns what the hook captured into coordinates, by running each
@@ -323,7 +334,7 @@ func (w *Watcher) reconcile(why string) {
 // of the scheduling: no timers, no queue, and a container enabled today places a
 // session that started on Tuesday.
 func (w *Watcher) derive(live []session.Record) []session.Record {
-	configured, problems := containers.Configured(w.opened.Settings)
+	configured, problems := containers.Configured(w.opened.Settings, w.methodsByIntegration())
 	for _, problem := range problems {
 		w.complainOnce(problem.Error())
 	}
@@ -345,6 +356,12 @@ func (w *Watcher) derive(live []session.Record) []session.Record {
 				continue
 			}
 			if w.gaveUpOn(record.Key.String(), one.Name) {
+				continue
+			}
+			if !slices.Contains(one.Methods, session.MethodInterpret) {
+				// It places sessions but cannot turn a capture into
+				// coordinates. Asking anyway would cost a process to be told
+				// so, once per session per sweep.
 				continue
 			}
 
@@ -521,6 +538,12 @@ func (w *Watcher) prune() {
 		w.logger.Info("forgot an ended session past its welcome", "session", key.String())
 		w.subs.Forget(key)
 	}
+	if len(removed) > 0 {
+		// A display that asked for ended sessions has just lost some, and this
+		// is the one change that does not come through the store as a record
+		// moving: it comes through as a record ceasing to exist.
+		w.drawEverythingAgain()
+	}
 }
 
 // reloadConfiguration re-reads the file on SIGHUP.
@@ -528,40 +551,31 @@ func (w *Watcher) prune() {
 // Values that cannot change under a running process say so rather than
 // pretending to apply: the paths were fixed when this process started, and a
 // socket cannot move without every client being told (§A14).
-func (w *Watcher) reloadConfiguration() {
+func (w *Watcher) reloadConfiguration(ctx context.Context) {
 	settings, problems := config.Load(w.opened.Layout.ConfigFile)
 	for _, problem := range problems {
 		w.logger.Warn("configuration", "problem", problem.Error())
 	}
 	w.opened.Settings = settings
 
+	// Asked again, on the new file and on whatever binary is at each path now.
+	// This is the gesture a person makes after rebuilding an integration, so it
+	// is the one place a changed answer can be noticed.
+	w.askWhatEachIntegrationAnswers()
+	w.startRenderers(ctx)
+
 	// Reload is also how a person retries: a container that was broken, or
 	// missing, or misspelled, gets another go on the next sweep rather than
 	// being written off for the life of this process.
 	w.mu.Lock()
 	w.refused, w.complained = nil, nil
-	// Giving up is never a dead end. A reload retries every integration that
-	// was written off, which is the same thing a person was going to do after
-	// installing the missing tool anyway (§A9.4).
-	retired := len(w.retired)
-	w.failures, w.retired = nil, nil
 	w.mu.Unlock()
-	if retired > 0 {
-		w.logger.Info("integrations that had been given up on will be tried again",
-			"how many", retired)
-	}
 
-	// Everything supervised goes down and comes straight back up, on the new
-	// configuration and on whatever binary is at that path now. Reconciling
-	// here rather than waiting for the next sweep is what keeps the gap to a
-	// blink: a display takes its items off the bar when it stops.
-	w.restartIntegrations()
-	w.supervise()
-
+	w.writeReport(w.opened.Settings)
 	w.logger.Info("configuration re-read",
 		"note", "paths and sockets are fixed for the life of this process; "+
-			"the integrations were restarted on it and anything that had failed "+
-			"will be tried again")
+			"every integration was asked again what it answers, on whatever "+
+			"binary is at its path now, and anything that had failed will be tried again")
 }
 
 func (w *Watcher) close() {

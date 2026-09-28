@@ -114,7 +114,10 @@ func TestARefusalCarriesTheCodeAndTheToolsOwnWords(t *testing.T) {
 // complaint IS the answer: sketchybar reports a bad message on stderr and exits
 // non-zero, and a render has to be able to read it rather than propagate it.
 func TestWhatItPrintedComesBackEvenWhenItFailed(t *testing.T) {
-	out, err := tool.Run(program(t, "echo out; echo problem >&2; exit 1"), time.Second)
+	// Ten seconds for a script that echoes twice: the bound is not what this
+	// test is about, and a second of it is a coin toss on a machine running
+	// the rest of this suite alongside.
+	out, err := tool.Run(program(t, "echo out; echo problem >&2; exit 1"), 10*time.Second)
 	if err == nil {
 		t.Fatal("a non-zero exit was not an error")
 	}

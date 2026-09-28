@@ -1,4 +1,4 @@
-package subscribe
+package subscriber
 
 import (
 	"fmt"
@@ -31,12 +31,12 @@ type Fake struct {
 }
 
 // StartFake brings one up under root, which the integration under test points
-// at with Integration.Root or AGENT_NOTIFY_ROOT.
+// at with subscribe.Integration.Root or AGENT_NOTIFY_ROOT.
 func StartFake(root string, logger *slog.Logger) (*Fake, error) {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
-	layout, err := Integration{Root: root}.layout()
+	layout, err := paths.FromEnvironmentOrUnder(root)
 	if err != nil {
 		return nil, err
 	}
@@ -129,5 +129,5 @@ func (f *Fake) Stop() error {
 
 // FakeLayout is where a Fake keeps its socket, for a test that needs the path.
 func FakeLayout(root string) (paths.Layout, error) {
-	return Integration{Root: root}.layout()
+	return paths.FromEnvironmentOrUnder(root)
 }

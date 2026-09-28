@@ -9,11 +9,10 @@ import (
 
 // The table this integration needs.
 //
-// `capture-environment = true` is what tells the hook to RUN this program
-// rather than read variables itself. The hook has no socket and cannot ask
-// (D-39), so this line is the declaration — one boolean whose wrong value fails
-// coarsely, which is how it survived the test D-57 applied to everything else
-// in that file.
+// It used to carry `capture-environment = true`, which told the hook to RUN
+// this program rather than read variables itself, because the hook has no
+// socket and cannot ask (D-39). Every integration is asked now, so the line has
+// nothing left to declare and is gone.
 //
 // `binary` is an ABSOLUTE path, for the reason every integration here states
 // one: this program is run by the hook and by the session-watcher, and neither
@@ -21,8 +20,7 @@ import (
 // which is how a container can be perfectly correct and never once be found.
 func table(program, zellij string) string {
 	written := fmt.Sprintf(`[integration.zellij-container]
-binary              = %q
-capture-environment = true
+binary = %q
 
 [integration.zellij-container.settings]
 `, program)

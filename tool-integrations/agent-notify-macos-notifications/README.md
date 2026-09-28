@@ -141,8 +141,8 @@ are **two displays**, not two halves of one thing. Each is its own binary, in it
 bundle with its own identifier; each is installed by its own `install`, which prints its own
 table — `[integration.macos-notifications]` here, `[integration.macos-bar]` there; each is
 configured in its own `[…settings]` section and refuses a key it did not declare, the
-other's included; and each is started, supervised and retired separately by the
-session-watcher, neither knowing the other exists.
+other's included; and each is started by its own launch agent, neither knowing the
+other exists.
 
 They are separate for a reason that is not tidiness: **macOS files its decision about
 notifications against a bundle identifier, and that decision cannot be unmade.** The
@@ -257,14 +257,13 @@ somebody who has already decided can redirect it:
 ```console
 $ agent-notify install macos-notifications --sign "agent-notify self-signed"
 [integration.macos-notifications]
-binary = "/Users/you/Applications/agent-notify-macos-notifications.app/Contents/MacOS/agent-notify-macos-notifications"
 
 [integration.macos-notifications.settings]
 sign = "agent-notify self-signed"
 
 The bundle is at /Users/you/Applications/agent-notify-macos-notifications.app. Nothing else was written:
-put the table above in /Users/you/.config/agent-notify/config.toml when you want this running, since the
-table being there is what turns it on.
+put the table above in /Users/you/.config/agent-notify/config.toml when you want this configurable,
+and load the launch agent below when you want it running.
 …
 ```
 
@@ -292,11 +291,20 @@ true, **the table being there is what turns it on**.
 
 ```sh
 agent-notify install macos-notifications >> ~/.config/agent-notify/config.toml
-agent-notify watcher reload
+# then put the launch agent it printed in ~/Library/LaunchAgents and:
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.github.lassocolombo.agent-notify-notifications.plist
 ```
 
-The session-watcher starts it, supervises it and retires it with the rest. There is no
-launch agent, no plist of your own, and nothing to add to your login items.
+**agent-notify does not start this display, and that is deliberate.** Every other
+integration is a program core runs and waits for. A notifier cannot be written that way,
+and posting is not the reason — posting is XPC and a one-shot could do it. The reason is
+the tap: macOS delivers it to the process that posted the banner, on that process's main
+thread, so a poster that has exited leaves banners nobody can click. There has to be a
+process, and launchd keeps one: at login, restarted if it dies, inside your logged-in
+session.
+
+That is also why its table has no `binary`. `binary` means "core may run this", and
+nothing core runs could answer a tap.
 
 ### 5. Grant the permission
 
@@ -401,7 +409,6 @@ give up on.
 
 | Key | Type | Default | What it does |
 | --- | --- | --- | --- |
-| `binary` | string | — | the program the session-watcher runs. Must be the path **inside the bundle**; `install` prints it already resolved. Looked up on PATH if it is not absolute — which for this integration is never what you want, because the bare binary cannot notify |
 | `enabled` | bool | `true` | absence means yes: writing the table is how you ask for it. `false` keeps the table and stops it running |
 
 There is deliberately no `capture-environment` here, and no list of environment variables:
@@ -541,10 +548,11 @@ This program reads no environment variable of its own. Three reach it anyway:
 | `XDG_CONFIG_HOME` | where the config file is looked for, when the root is not set |
 | `TMPDIR` | holds `agent-notify-invaders/`, the fixed directory the coloured PNGs are cached in — one file per colour, about thirty kilobytes each, reused across restarts |
 
-The path to `agent-notify` itself — what tapping a banner runs — is not found on PATH, because
-a supervised child's PATH is not your shell's. It comes from core's own `agent-notify-binary`
-setting, and a display that cannot locate it refuses to start rather than discovering it when
-somebody taps a banner.
+The path to `agent-notify` itself is not found on PATH, because a launchd job's PATH is
+`/usr/bin:/bin` and nothing else. It comes from core's own `agent-notify-binary` setting, and
+it is needed twice over: it is what tapping a banner runs, and it is what this display watches
+(`agent-notify tail --json`). A display that cannot locate it refuses to start rather than
+discovering it when somebody taps a banner.
 
 ## Commands
 

@@ -15,6 +15,8 @@ package containers
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"time"
 
 	"github.com/lassoColombo/agent-notify/container"
@@ -41,16 +43,23 @@ const focusTimeout = 5 * time.Second
 type Container struct {
 	Name   string
 	Binary string
+	// Methods is what this one said it answers, so that a verb it never
+	// implemented costs a lookup rather than a process (§A10.3).
+	Methods []string
 }
 
-// Configured is every container in `[container] order`, outermost first.
+// Configured is every container, outermost first.
 //
-// Order is configuration rather than discovery because nesting is not
-// discoverable: zellij inside a window aerospace manages looks, from inside,
-// exactly like zellij on its own (§A11.2). A name in the order with no table
-// behind it is skipped rather than guessed at — and reported, because it is
-// almost always a typo in the one place that cannot be typo-checked.
-func Configured(settings config.Config) ([]Container, []error) {
+// A container is an integration that answers `focus`, and it says so itself.
+// `[container] order` no longer decides which programs are containers — it
+// keeps the one job that is genuinely the user's, which is how the shells nest:
+// zellij inside a window aerospace manages looks, from inside, exactly like
+// zellij on its own, so nesting is not discoverable and never will be (§A11.2).
+//
+// methodsByIntegration is what each one answered, handed over by whoever read
+// it: the session-watcher has it in memory and a command reads the report. This
+// package runs containers and does not decide what a container is.
+func Configured(settings config.Config, methodsByIntegration map[string][]string) ([]Container, []error) {
 	var found []Container
 	var problems []error
 	for _, name := range settings.Container.Order {
@@ -66,15 +75,37 @@ func Configured(settings config.Config) ([]Container, []error) {
 			problems = append(problems, fmt.Errorf(
 				"[integration.%s] is in [container] order but has no binary to run", name))
 			continue
+		case !slices.Contains(methodsByIntegration[name], session.MethodFocus):
+			problems = append(problems, fmt.Errorf(
+				"[integration.%s] is in [container] order and does not answer `focus`, "+
+					"so it cannot bring anything to the front", name))
+			continue
 		}
-		found = append(found, Container{Name: name, Binary: integration.Binary})
+		found = append(found, Container{
+			Name: name, Binary: integration.Binary, Methods: methodsByIntegration[name]})
+	}
+
+	// A container that answers `focus` and is not in the order is the mistake
+	// this change makes possible: it is a container by its own account and
+	// there is nowhere to put it in the nesting, so it is never walked. Before,
+	// the order was the definition and the two could not disagree.
+	for _, name := range slices.Sorted(maps.Keys(methodsByIntegration)) {
+		integration, present := settings.Integration[name]
+		if !present || !integration.IsEnabled() ||
+			slices.Contains(settings.Container.Order, name) ||
+			!slices.Contains(methodsByIntegration[name], session.MethodFocus) {
+			continue
+		}
+		problems = append(problems, fmt.Errorf(
+			"%s answers `focus` and is not in [container] order, so nothing will ever "+
+				"ask it to: add it, outermost first", name))
 	}
 	return found, problems
 }
 
 // Interpret turns a captured blob into coordinates.
 func Interpret(c Container, captured json.RawMessage, timeout time.Duration) (json.RawMessage, error) {
-	return subcommand.Ask(c.Binary, container.InterpretCommand, captured, timeout)
+	return subcommand.Ask(c.Binary, session.MethodInterpret, captured, timeout)
 }
 
 // Focus brings one container's place to the front.
@@ -83,7 +114,7 @@ func Focus(c Container, coordinates json.RawMessage, timeout time.Duration) cont
 		return container.Failed(container.NeverPlaced, c.Name+" has no coordinates for this session")
 	}
 
-	raw, err := subcommand.Ask(c.Binary, container.FocusCommand, coordinates, timeout)
+	raw, err := subcommand.Ask(c.Binary, session.MethodFocus, coordinates, timeout)
 	if err != nil {
 		return container.Failed(container.Unreachable, err.Error())
 	}
@@ -105,7 +136,7 @@ func Focused(c Container, coordinates json.RawMessage, timeout time.Duration) co
 		return container.Verdict{Answer: container.CannotTell,
 			Detail: c.Name + " has no coordinates for this session"}
 	}
-	raw, err := subcommand.Ask(c.Binary, container.FocusedCommand, coordinates, timeout)
+	raw, err := subcommand.Ask(c.Binary, session.MethodFocused, coordinates, timeout)
 	if err != nil {
 		return container.Verdict{Answer: container.CannotTell, Detail: err.Error()}
 	}
@@ -155,8 +186,10 @@ type Step struct {
 // second one exists because interpretation is not a yes-or-no — aerospace
 // interprets every session it is given and can place only the ones it can see a
 // window for (D-45).
-func FocusSession(settings config.Config, record session.Record) ([]Step, container.Outcome) {
-	configured, problems := Configured(settings)
+func FocusSession(
+	settings config.Config, methodsByIntegration map[string][]string, record session.Record,
+) ([]Step, container.Outcome) {
+	configured, problems := Configured(settings, methodsByIntegration)
 	if len(configured) == 0 {
 		detail := "nothing is listed in [container] order"
 		if len(problems) > 0 {
@@ -210,16 +243,29 @@ func FocusSession(settings config.Config, record session.Record) ([]Step, contai
 // is to notify anyway: silence would mean a user with no containers never
 // receives a notification at all, which is worse than an occasional redundant
 // one (R27, §A11.7).
-func IsFocused(settings config.Config, record session.Record) container.Verdict {
-	configured, _ := Configured(settings)
-	if len(configured) == 0 {
+func IsFocused(
+	settings config.Config, methodsByIntegration map[string][]string, record session.Record,
+) container.Verdict {
+	configured, _ := Configured(settings, methodsByIntegration)
+
+	// Only the ones that answer `focused` are in the vote. A container that
+	// never implemented it used to be asked anyway and to reply "cannot tell",
+	// which unanimity turns into a permanent "cannot tell" for every session on
+	// the machine — a whole layer voting nothing and vetoing everything.
+	canTell := make([]Container, 0, len(configured))
+	for _, one := range configured {
+		if slices.Contains(one.Methods, session.MethodFocused) {
+			canTell = append(canTell, one)
+		}
+	}
+	if len(canTell) == 0 {
 		return container.Verdict{Answer: container.CannotTell,
-			Detail: "no container is configured, so nothing can say what is in front"}
+			Detail: "no container can say what is in front"}
 	}
 
 	agreed := 0
 	var unsure string
-	for _, one := range configured {
+	for _, one := range canTell {
 		verdict := Focused(one, Coordinates(record, one.Name), focusTimeout)
 		switch verdict.Answer {
 		case container.No:
@@ -233,7 +279,7 @@ func IsFocused(settings config.Config, record session.Record) container.Verdict 
 			}
 		}
 	}
-	if agreed == len(configured) {
+	if agreed == len(canTell) {
 		return container.Verdict{Answer: container.Yes}
 	}
 	return container.Verdict{Answer: container.CannotTell, Detail: unsure}

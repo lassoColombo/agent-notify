@@ -18,7 +18,8 @@ import (
 
 	"github.com/lassoColombo/agent-notify/command/internal/exit"
 	"github.com/lassoColombo/agent-notify/command/internal/rows"
-	"github.com/lassoColombo/agent-notify/subscribe"
+	"github.com/lassoColombo/agent-notify/internal/subscriber"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // Command is `agent-notify tail`.
@@ -30,13 +31,17 @@ func Command() *cobra.Command {
 		Short: "watch sessions change, live",
 		Long: `Connects as a display would and prints every view it is handed. This is the
 same subscription an integration gets, which makes it the way to find out what
-a display is being told before blaming the display.`,
+a display is being told before blaming the display.
+
+With --json it is also the way to BE one: a display that has to own its own
+process reads these lines instead of linking the library.`,
 		Args: cobra.NoArgs,
 		Run: func(command *cobra.Command, arguments []string) {
 			exit.TheProcessWith(tail(asJSON, wakeOn, wantEnded))
 		},
 	}
-	command.Flags().BoolVar(&asJSON, "json", false, "print each record as JSON")
+	command.Flags().BoolVar(&asJSON, "json", false,
+		"print the whole view as one JSON object per line")
 	command.Flags().StringSliceVar(&wakeOn, "wake-on", nil,
 		"a record field worth waking for; repeat it, or separate them with commas")
 	command.Flags().BoolVar(&wantEnded, "all", false, "include sessions that have ended")
@@ -46,13 +51,12 @@ a display is being told before blaming the display.`,
 
 func tail(asJSON bool, wakeOn []string, wantEnded bool) int {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	err := subscribe.Run(context.Background(), subscribe.Integration{
+	err := subscriber.Run(context.Background(), subscriber.Subscription{
 		Name:      "tail",
-		Roles:     []string{"display"},
 		WakeOn:    wakeOn,
 		WantEnded: wantEnded,
 		Logger:    logger,
-		OnChange: func(view subscribe.View) error {
+		OnChange: func(view session.View) error {
 			return printTheViewJustHandedOver(view, asJSON)
 		},
 	})
@@ -63,15 +67,16 @@ func tail(asJSON bool, wakeOn []string, wantEnded bool) int {
 	return 0
 }
 
-func printTheViewJustHandedOver(view subscribe.View, asJSON bool) error {
+func printTheViewJustHandedOver(view session.View, asJSON bool) error {
 	if asJSON {
-		encoder := json.NewEncoder(os.Stdout)
-		for _, record := range view.Changed {
-			if err := encoder.Encode(record); err != nil {
-				return err
-			}
-		}
-		return nil
+		// The whole view, one object per line, and not just what changed.
+		// This is the transport a display that runs as its own process reads,
+		// so it has to carry what a display needs: a bar draws every row and
+		// the ordering is a property of the whole set, while `changed` is
+		// empty on the opening snapshot by contract. Printing only the changes
+		// left such a client blank until something moved and unable to order
+		// what it did get.
+		return json.NewEncoder(os.Stdout).Encode(view)
 	}
 
 	now := time.Now().UTC()
