@@ -119,13 +119,21 @@ func TestTenLineSubscriberSeesChangesLive(t *testing.T) {
 	// nothing in it: a display must be correct from the moment it attaches.
 	waitFor(t, "the opening snapshot", func() bool { return seen.count() >= 1 })
 	first, _ := seen.latest()
-	if first.Why != "snapshot" {
-		t.Errorf("the first thing a display saw was a %q", first.Why)
+	if len(first.Changed) != 0 {
+		t.Errorf("the first thing a display saw reported %d change(s)", len(first.Changed))
 	}
 
+	// One at a time, and waited for. Two published in the same breath are one
+	// world with two changes in it — a subscriber is sent what is true, not a
+	// message per write — and this test is about the second one being named as
+	// the thing that moved.
 	fake.Publish(aSession("one", session.Working, "building"))
-	fake.Publish(aSession("two", session.BlockedOnYou, "may I?"))
+	waitFor(t, "the first session", func() bool {
+		view, ok := seen.latest()
+		return ok && len(view.Sessions) == 1
+	})
 
+	fake.Publish(aSession("two", session.BlockedOnYou, "may I?"))
 	waitFor(t, "both sessions", func() bool {
 		view, ok := seen.latest()
 		return ok && len(view.Sessions) == 2
@@ -202,13 +210,14 @@ func TestASubscriberSurvivesASessionWatcherRestart(t *testing.T) {
 	}
 }
 
-// TestASubscriberIsCorrectAfterOverflowing is the last third.
+// TestASubscriberThatFellBehindIsCorrectWhenItCatchesUp is the last third.
 //
-// A subscriber that stops reading has its queue thrown away and replaced by a
-// single snapshot. It must end up showing exactly what is true, not what it
-// happened to catch: overflow degrades to a full redraw, never to a wrong
-// render (§A9.3, R15).
-func TestASubscriberIsCorrectAfterOverflowing(t *testing.T) {
+// A subscriber that stops reading misses worlds, and must still end up showing
+// exactly what is true rather than what it happened to catch. There is nothing
+// to degrade to now: every write is the whole world, asked for at the moment it
+// is written, so falling behind costs pictures nobody saw and never a wrong one
+// (§A9.3, R15).
+func TestASubscriberThatFellBehindIsCorrectWhenItCatchesUp(t *testing.T) {
 	root := shortRoot(t)
 	fake, err := subscriber.StartFake(root, nil)
 	if err != nil {
@@ -237,7 +246,7 @@ func TestASubscriberIsCorrectAfterOverflowing(t *testing.T) {
 	}
 	waitFor(t, "the slow display to connect", func() bool { return len(fake.Connected()) == 1 })
 
-	// Far more distinct sessions than the queue holds, while it reads nothing.
+	// Far more writes than a stopped reader can take, while it reads nothing.
 	const many = 400
 	for i := range many {
 		fake.Publish(aSession("s"+strconv.Itoa(i), session.Working, "busy"))
@@ -252,7 +261,6 @@ func TestASubscriberIsCorrectAfterOverflowing(t *testing.T) {
 	_ = connection.SetReadDeadline(time.Now().Add(10 * time.Second))
 
 	sessions := map[string]session.Record{}
-	sawSnapshot := false
 	deadline := time.Now().Add(8 * time.Second)
 	for time.Now().Before(deadline) {
 		_ = connection.SetReadDeadline(time.Now().Add(700 * time.Millisecond))
@@ -264,31 +272,21 @@ func TestASubscriberIsCorrectAfterOverflowing(t *testing.T) {
 		if err != nil {
 			continue
 		}
-		switch kind {
-		case session.KindSnapshot:
-			var snapshot session.Snapshot
-			if err := json.Unmarshal(line, &snapshot); err != nil {
-				t.Fatalf("unreadable snapshot: %v", err)
-			}
-			if snapshot.Why == "overflow" {
-				sawSnapshot = true
-			}
-			sessions = map[string]session.Record{}
-			for _, record := range snapshot.Sessions {
-				sessions[record.Key.SessionID] = record
-			}
-		case session.KindDelta:
-			var delta session.Delta
-			if err := json.Unmarshal(line, &delta); err != nil {
-				t.Fatalf("unreadable delta: %v", err)
-			}
-			sessions[delta.Session.Key.SessionID] = delta.Session
+		if kind != session.KindSnapshot {
+			continue
+		}
+		var snapshot session.Snapshot
+		if err := json.Unmarshal(line, &snapshot); err != nil {
+			t.Fatalf("unreadable snapshot: %v", err)
+		}
+		// Replaced, never merged: each one is the whole world, so the last one
+		// read is the only one that has to be right.
+		sessions = map[string]session.Record{}
+		for _, record := range snapshot.Sessions {
+			sessions[record.Key.SessionID] = record
 		}
 	}
 
-	if !sawSnapshot {
-		t.Error("it never received the snapshot its overflow should have produced")
-	}
 	if len(sessions) != many {
 		t.Errorf("it ended up holding %d sessions, want %d", len(sessions), many)
 	}

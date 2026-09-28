@@ -213,37 +213,42 @@ func TestTotalIsTheFourDisjointCounters(t *testing.T) {
 	}
 }
 
-// TestAUsageOnlyChangeIsStillOfferedAround is the distinction the live system
-// caught and the unit tests above could not: the session-watcher asks once
-// whether anybody could want a change before asking each subscriber whether it
-// asked for the fields that moved. Answering the second question in the first
-// one's place drops a usage-only write on the floor, and the display that named
-// `usage` in its wake_on never hears about the thing it named.
-func TestAUsageOnlyChangeIsStillOfferedAround(t *testing.T) {
+// TestAUsageOnlyChangeReachesWhoeverNamedItAndNobodyElse is the distinction the
+// live system caught and the unit tests above could not.
+//
+// Tokens move on every response, so a display is woken by them only if it said
+// `usage` out loud — and the one that did must actually hear about the thing it
+// named. Both halves are this one comparison, which is why there is no second
+// gate in front of it to answer the first half on somebody else's behalf.
+func TestAUsageOnlyChangeReachesWhoeverNamedItAndNobodyElse(t *testing.T) {
 	before := session.Apply(session.Record{}, session.Report{Key: key, Event: session.AgentProgressed}, when)
 	spent := session.Apply(before, session.Report{
 		Key: key, Event: session.AgentProgressed,
 		Spent: []session.Spend{spend("req-1", 10)},
 	}, later)
 
-	if !session.WorthOfferingAround(before, spent) {
-		t.Error("a write that moved only tokens was not offered around, so nobody could ask for it")
+	if !session.Differs(before, spent, []string{"usage"}) {
+		t.Error("a write that moved only tokens did not reach the display that named usage")
 	}
 	if session.Differs(before, spent, nil) {
 		t.Error("and it must still wake nobody who did not ask")
 	}
 }
 
-// TestAStampOnlyChangeIsOfferedToNobody keeps the gate a gate. A record that
-// moved only its sequence is a write that means nothing to anyone.
-func TestAStampOnlyChangeIsOfferedToNobody(t *testing.T) {
+// TestAStampOnlyChangeWakesNobody keeps the gate a gate. A record that moved
+// only its sequence is a write that means nothing to anyone, including the
+// display that asked about the most volatile field there is.
+func TestAStampOnlyChangeWakesNobody(t *testing.T) {
 	before := session.Apply(session.Record{}, session.Report{Key: key, Event: session.AgentProgressed}, when)
 	again := session.Apply(before, session.Report{Key: key, Event: session.AgentProgressed}, later)
 
 	if again.Sequence == before.Sequence {
 		t.Fatal("the fixture did not write twice")
 	}
-	if session.WorthOfferingAround(before, again) {
-		t.Error("a write that moved only the stamps was offered around")
+	if session.Differs(before, again, nil) {
+		t.Error("a write that moved only the stamps woke somebody")
+	}
+	if session.Differs(before, again, []string{"usage"}) {
+		t.Error("and it woke the display that named the field it did not move")
 	}
 }

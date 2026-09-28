@@ -87,15 +87,15 @@ func (r *renderer) serve(ctx context.Context) {
 
 func (r *renderer) renderOnce() {
 	first := !r.shown.HasSeenAView()
-	changed := r.shown.Replace(r.theWorldNow(r.wantEnded), r.wakeOn)
-	if !first && len(changed) == 0 {
-		// Nothing this display asked about moved. This is where `wake_on`
-		// earns its keep now: it used to save a write to a socket somebody was
-		// already listening on, and it saves a process.
+	changed, departed := r.shown.Replace(r.theWorldNow(r.wantEnded), r.wakeOn)
+	if !first && len(changed) == 0 && !departed {
+		// Nothing this display asked about moved and nothing left. This is
+		// where `wake_on` earns its keep now: it used to save a write to a
+		// socket somebody was already listening on, and it saves a process.
 		return
 	}
 
-	view := r.shown.ViewOf(changed, "render")
+	view := r.shown.ViewOf(changed)
 	handed, err := json.Marshal(view)
 	if err != nil {
 		r.logger.Warn("a view could not be encoded", "display", r.name, "problem", err.Error())
@@ -162,10 +162,16 @@ func (w *Watcher) startRenderers(ctx context.Context) {
 	}
 }
 
-// drawEverythingAgain asks every display to render, if anything it cares about
+// drawEverythingAgain asks every display to draw, if anything it cares about
 // moved. Nothing here waits.
+//
+// Both kinds, on one line, which is the point: a display core RUNS and a display
+// that CONNECTED are woken by the same event and answer the same question about
+// it. All that differs is how the world reaches them — an argument on stdin, or
+// a line on a socket.
 func (w *Watcher) drawEverythingAgain() {
 	for _, drawing := range w.renderers {
 		drawing.poke()
 	}
+	w.subs.PokeEveryone()
 }

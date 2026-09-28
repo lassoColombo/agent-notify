@@ -84,7 +84,7 @@ func TestAReconnectionIsNotAChange(t *testing.T) {
 
 	waitFor(t, "the display to connect", func() bool { return len(first.Connected()) == 1 })
 	unmoved := aSession("steady", session.Working, "building")
-	first.Reported(unmoved, session.AgentProgressed)
+	first.Publish(unmoved)
 	waitFor(t, "the session to arrive", func() bool {
 		view, ok := seen.latest()
 		return ok && len(view.Sessions) == 1
@@ -106,9 +106,6 @@ func TestAReconnectionIsNotAChange(t *testing.T) {
 	waitFor(t, "a view after reconnecting", func() bool { return seen.count() > before })
 
 	after, _ := seen.latest()
-	if after.Why != "snapshot" {
-		t.Fatalf("the view after reconnecting was a %q", after.Why)
-	}
 	if len(after.Sessions) != 1 {
 		t.Errorf("the state is wrong after reconnecting: %d session(s)", len(after.Sessions))
 	}
@@ -178,10 +175,9 @@ func TestASnapshotComparesOnlyTheFieldsAskedFor(t *testing.T) {
 
 // TestAChangeCarriesWhatItMovedFrom: the transition was on the wire all along.
 //
-// Every delta carries the previous kernel and the event that caused it. Both
-// were decoded and dropped one line before they would have been handed over,
-// which is why the only notifier in the world rebuilds a weaker version of them
-// from remembered timestamps.
+// The previous kernel used to be decoded and dropped one line before it would
+// have been handed over, which is why the only notifier in the world rebuilt a
+// weaker version of it from remembered timestamps.
 func TestAChangeCarriesWhatItMovedFrom(t *testing.T) {
 	root := shortRoot(t)
 	fake, err := subscriber.StartFake(root, nil)
@@ -198,7 +194,7 @@ func TestAChangeCarriesWhatItMovedFrom(t *testing.T) {
 	})
 
 	waitFor(t, "the display to connect", func() bool { return len(fake.Connected()) == 1 })
-	fake.Reported(aSession("one", session.Working, "building"), session.UserSentPrompt)
+	fake.Publish(aSession("one", session.Working, "building"))
 	waitFor(t, "the session to arrive", func() bool {
 		view, ok := seen.latest()
 		return ok && len(view.Changed) == 1
@@ -209,11 +205,8 @@ func TestAChangeCarriesWhatItMovedFrom(t *testing.T) {
 	if got := arrival.Changed[0].PreviousKernel; got != "" {
 		t.Errorf("a session nobody had seen before moved from %q", got)
 	}
-	if got := arrival.Changed[0].Event; got != session.UserSentPrompt {
-		t.Errorf("event = %q, want the one that was reported", got)
-	}
 
-	fake.Reported(aSession("one", session.BlockedOnYou, "may I?"), session.BlockedOnHuman)
+	fake.Publish(aSession("one", session.BlockedOnYou, "may I?"))
 	waitFor(t, "the transition", func() bool {
 		view, ok := seen.latest()
 		return ok && len(view.Changed) == 1 &&
@@ -223,9 +216,6 @@ func TestAChangeCarriesWhatItMovedFrom(t *testing.T) {
 	change := mostRecentChange(t, seen)
 	if change.PreviousKernel != session.Working {
 		t.Errorf("previous kernel = %q, want working", change.PreviousKernel)
-	}
-	if change.Event != session.BlockedOnHuman {
-		t.Errorf("event = %q, want blocked-on-human", change.Event)
 	}
 	// Which is the whole point: a state that moved can be told from a change
 	// that left it alone, without the subscriber remembering anything.
@@ -253,13 +243,13 @@ func TestSomethingOtherThanTheStateMovingIsNotATransition(t *testing.T) {
 	})
 
 	waitFor(t, "the display to connect", func() bool { return len(fake.Connected()) == 1 })
-	fake.Reported(aSession("one", session.Working, "building"), session.UserSentPrompt)
+	fake.Publish(aSession("one", session.Working, "building"))
 	waitFor(t, "the session to arrive", func() bool {
 		view, ok := seen.latest()
 		return ok && len(view.Sessions) == 1
 	})
 
-	fake.Reported(aSession("one", session.Working, "still building"), session.AgentProgressed)
+	fake.Publish(aSession("one", session.Working, "still building"))
 	waitFor(t, "the second message", func() bool {
 		view, ok := seen.latest()
 		return ok && len(view.Changed) == 1 && view.Changed[0].Record.Message == "still building"
@@ -290,7 +280,7 @@ func TestASnapshotStillSaysWhatASessionMovedFrom(t *testing.T) {
 	})
 
 	waitFor(t, "the display to connect", func() bool { return len(first.Connected()) == 1 })
-	first.Reported(aSession("one", session.Working, "building"), session.UserSentPrompt)
+	first.Publish(aSession("one", session.Working, "building"))
 	waitFor(t, "the session to arrive", func() bool {
 		view, ok := seen.latest()
 		return ok && len(view.Sessions) == 1
@@ -315,18 +305,10 @@ func TestASnapshotStillSaysWhatASessionMovedFrom(t *testing.T) {
 	})
 
 	after, _ := seen.latest()
-	if after.Why != "snapshot" {
-		t.Fatalf("this was meant to arrive in a snapshot, not a %q", after.Why)
-	}
 	change := after.Changed[0]
 	if change.PreviousKernel != session.Working {
 		t.Errorf("previous kernel = %q, want working — what this subscriber last saw",
 			change.PreviousKernel)
-	}
-	// No event, and that is honest rather than missing: nothing told this
-	// subscriber what happened, it worked out that something had.
-	if change.Event != "" {
-		t.Errorf("event = %q, and a snapshot is never accompanied by one", change.Event)
 	}
 }
 

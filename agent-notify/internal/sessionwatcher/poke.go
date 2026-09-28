@@ -14,19 +14,18 @@ import (
 )
 
 // Poke is the whole of what record-agent-event says to the session-watcher:
-// this session changed, and this is how far along it is.
+// this session changed.
 //
-// It carries nothing else on purpose. The 2048-byte datagram cap is not an
-// obstacle to work around; it is the rule "events are hints" enforced by the
-// kernel. The content is in the store, and a poke that never arrives costs
-// nothing but a sweep's worth of delay (plan.md §A13.1, R4).
+// One field, and it carries nothing else on purpose. The 2048-byte datagram cap
+// is not an obstacle to work around; it is the rule "events are hints" enforced
+// by the kernel. The content is in the store, and a poke that never arrives
+// costs nothing but a sweep's worth of delay (plan.md §A13.1, R4).
+//
+// It used to carry a sequence nobody read and the event that caused the change,
+// which travelled from here all the way to a display's JSON without ever being
+// read at the far end either.
 type Poke struct {
-	Key      string `json:"key"`
-	Sequence uint64 `json:"sequence"`
-	// Event is what caused the change, carried so that a delta can say so
-	// (§A13.1). It is an optimisation like the rest of the poke: lose it and
-	// the sweep publishes the same change without it.
-	Event session.Event `json:"event,omitempty"`
+	Key string `json:"key"`
 }
 
 // ErrNobodyListening means there is no session-watcher, which is the signal to
@@ -126,6 +125,6 @@ func Receive(connection *net.UnixConn, within time.Duration) (Poke, bool) {
 }
 
 // PokeFor is the poke a record deserves.
-func PokeFor(record session.Record, event session.Event) Poke {
-	return Poke{Key: record.Key.String(), Sequence: record.Sequence, Event: event}
+func PokeFor(record session.Record) Poke {
+	return Poke{Key: record.Key.String()}
 }

@@ -256,6 +256,42 @@ func TestADisplayIsHandedTheViewOnStdin(t *testing.T) {
 	}
 }
 
+// TestADisplayIsDrawnAgainWhenASessionLeaves is the change no comparison of
+// records can see.
+//
+// A display is woken, compares every record it still holds against every record
+// it is now given, and finds them all identical — because the one that moved is
+// not in either list. It moved out. Deciding "nothing happened" there is how a
+// bar keeps a row for an agent that finished ten minutes ago, and it is why
+// Replace reports a departure separately from a change.
+func TestADisplayIsDrawnAgainWhenASessionLeaves(t *testing.T) {
+	atATestablePace(t, 200*time.Millisecond)
+	root := shortRoot(t)
+	// It watches the kernel, and the kernel of what leaves is not in the view
+	// it is given: this display never asked for ended sessions.
+	binary, painted := aDisplay(t, root, "painter", "kernel")
+	write(t, root+"/config.toml", fmt.Sprintf(
+		"[integration.painter]\nbinary = %q\n", binary))
+
+	layout := running(t, root)
+	aTurnFinished(t, layout, "one")
+	waitFor(t, "a render carrying the session", func() bool {
+		painted := everythingPainted(t, painted)
+		return len(painted) > 0 && len(painted[len(painted)-1].Sessions) == 1
+	})
+
+	applyToTheStore(t, layout, session.Report{
+		Key:    session.Key{Host: "mac", Agent: "fake", SessionID: "one"},
+		Event:  session.SessionEnded,
+		Detail: "exited",
+	})
+
+	waitFor(t, "a render with it gone", func() bool {
+		painted := everythingPainted(t, painted)
+		return len(painted) > 0 && len(painted[len(painted)-1].Sessions) == 0
+	})
+}
+
 // TestADisplayIsNotRunForSomethingItDoesNotWatch is what `wake_on` buys now.
 //
 // It used to save a write to a socket somebody was already listening on. It
@@ -331,12 +367,8 @@ func TestSomethingThatConnectsOnItsOwnIsReported(t *testing.T) {
 
 	waitFor(t, "the unsolicited subscriber to be reported", func() bool {
 		one, found := reported(t, layout, "bar")
-		return found && one.PID != 0
+		return found && strings.Contains(one.State, "connected")
 	})
-	one, _ := reported(t, layout, "bar")
-	if !strings.Contains(one.State, "connected") {
-		t.Errorf("state = %q, want it to say it is connected", one.State)
-	}
 }
 
 // aTurnFinished puts one session in the store, the way an agent-integration

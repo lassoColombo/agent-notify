@@ -36,8 +36,6 @@ type Integration struct {
 	// State is what core can say about it as a process, which for most of them
 	// is "nothing, until somebody needs it".
 	State string `json:"state"`
-	PID   int    `json:"pid,omitempty"`
-	Since string `json:"since,omitempty"`
 }
 
 // Report is what the session-watcher knows about its integrations.
@@ -56,7 +54,7 @@ type Report struct {
 // writeReport puts what core knows on disk.
 func (w *Watcher) writeReport(settings config.Config) {
 	report := Report{PID: os.Getpid(), Written: time.Now().UTC().Format(time.RFC3339)}
-	listening := w.subs.Listening()
+	connected := w.subs.Connected()
 
 	seen := map[string]bool{}
 	for _, name := range everyIntegrationCoreCanRun(settings) {
@@ -92,24 +90,20 @@ func (w *Watcher) writeReport(settings config.Config) {
 	// business, and it may come and go as it likes — but a person running
 	// doctor should still see it, and seeing it is how they know the launch
 	// agent they loaded is doing something.
-	for _, one := range listening {
-		if seen[one.Name] {
+	for _, name := range connected {
+		if seen[name] {
 			// Configured as well as connected: say so on the line it already
 			// has rather than printing it twice.
 			for i := range report.Integrations {
-				if report.Integrations[i].Name == one.Name {
+				if report.Integrations[i].Name == name {
 					report.Integrations[i].State = "connected"
-					report.Integrations[i].PID = one.PID
-					report.Integrations[i].Since = one.Since.UTC().Format(time.RFC3339)
 				}
 			}
 			continue
 		}
-		seen[one.Name] = true
+		seen[name] = true
 		report.Integrations = append(report.Integrations, Integration{
-			Name: one.Name, State: "connected, and in no table here", PID: one.PID,
-			Since: one.Since.UTC().Format(time.RFC3339),
-		})
+			Name: name, State: "connected, and in no table here"})
 	}
 
 	encoded, err := json.MarshalIndent(report, "", "  ")

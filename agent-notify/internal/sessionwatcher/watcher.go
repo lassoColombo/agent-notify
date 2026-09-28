@@ -62,10 +62,6 @@ type Watcher struct {
 	// (§A7.6), and so that fan-out can skip a change nobody can see (§A9.3).
 	mu    sync.Mutex
 	known map[string]session.Record
-	// caused remembers what a poke said caused a change, so that the delta can
-	// say so too. Losing it costs the `event` field on one delta and nothing
-	// else (§A13.1).
-	caused map[string]session.Event
 	// refused counts how often a container failed to interpret one session, so
 	// that a broken one stops being run every sweep. It is a count and not a
 	// flag because the first failure is not evidence: a session-watcher can
@@ -140,10 +136,10 @@ func Start(layout paths.Layout, toTerminal bool) (*Watcher, error) {
 	watching := &Watcher{
 		opened: opened, held: held, exits: exits, socket: socket,
 		boot: boot, prober: process.ProcessesOnThisMachine{}, logger: logger,
-		known: map[string]session.Record{}, caused: map[string]session.Event{},
+		known: map[string]session.Record{},
 	}
 
-	subs, err := Serve(layout, held, logger, opened.Settings.SubscriberQueue, watching.snapshotFor)
+	subs, err := Serve(layout, held, logger, watching.snapshotFor)
 	if err != nil {
 		exits.Close()
 		socket.Close()
@@ -241,12 +237,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 // any number of lost messages (R4).
 func (w *Watcher) listenForPokes(ctx context.Context, woken chan<- string) {
 	for ctx.Err() == nil {
-		if poke, arrived := Receive(w.socket, time.Second); arrived {
-			if poke.Event != "" {
-				w.mu.Lock()
-				w.caused[poke.Key] = poke.Event
-				w.mu.Unlock()
-			}
+		if _, arrived := Receive(w.socket, time.Second); arrived {
 			select {
 			case woken <- "poke":
 			default:
@@ -304,19 +295,20 @@ func (w *Watcher) reconcile(why string) {
 			_ = w.exits.Watch(record.Process.PID)
 		}
 		seen[record.Key.String()] = true
-		w.publish(record)
+		w.remember(record)
 	}
-	w.publishDepartures(seen)
+	w.forgetWhatLeft(seen)
 
 	ending := process.Ended(live, w.boot, process.Self(), w.prober)
 	for _, end := range ending {
 		w.end(end)
 	}
 
-	// Once, at the end, rather than once per record: a render paints the whole
-	// world, so a sweep that touched nine sessions is still one render. Each
-	// display works out for itself whether anything it watches moved, and most
-	// of the time nothing did and no process is started at all.
+	// Once, at the end, rather than once per record: everything core hands a
+	// display carries the whole world, so a sweep that touched nine sessions is
+	// still one render and one write. Each display works out for itself whether
+	// anything it watches moved, and most of the time nothing did — no process
+	// is started and nothing goes down the socket.
 	w.drawEverythingAgain()
 }
 
@@ -451,53 +443,38 @@ func (w *Watcher) complainOnce(message string) {
 	}
 }
 
-// publish offers one record to the subscribers, if anything about it moved.
-func (w *Watcher) publish(record session.Record) {
-	key := record.Key.String()
-
+// remember keeps one record as this process last saw it, which is what every
+// world handed to a display is built from.
+//
+// It decides nothing. It used to ask whether a change was worth offering around
+// at all before offering it, which was the generous half of a two-gate
+// arrangement — the narrow half being whether THIS display asked about the
+// fields that moved. There is one gate now, the narrow one, asked by each
+// display of its own copy of what it last saw, which is the only place the
+// answer was ever knowable (§A7.4.3).
+func (w *Watcher) remember(record session.Record) {
 	w.mu.Lock()
-	previous, had := w.known[key]
-	w.known[key] = record
-	event := w.caused[key]
-	delete(w.caused, key)
+	w.known[record.Key.String()] = record
 	w.mu.Unlock()
-
-	// The generous question, on purpose: whether anybody could want this. The
-	// narrow one — whether *this* subscriber asked for the fields that moved —
-	// is Publish's, per subscriber, and asking it here as well would answer it
-	// with a default that no subscriber chose (§A7.4.3).
-	if had && !session.WorthOfferingAround(previous, record) {
-		return
-	}
-	w.subs.Publish(previous, record, event)
 }
 
-// publishDepartures handles a session that has left sessions/ since the last
-// look: it either ended and was filed, or it was pruned and is gone for good.
-func (w *Watcher) publishDepartures(seen map[string]bool) {
+// forgetWhatLeft drops a session that has left sessions/ since the last look.
+//
+// It used to matter a great deal whether it ended and was filed or was pruned
+// and is gone: the first was a delta carrying the ended record, the second a
+// `gone` telling everybody to drop the key. Both took a read of the store.
+//
+// Neither is a question now. A filed session is in ListEnded and reaches
+// whoever asked for ended sessions; a pruned one is in neither place and leaves
+// everybody's world at once. The distinction lives in snapshotFor, where it was
+// always going to be looked up anyway.
+func (w *Watcher) forgetWhatLeft(seen map[string]bool) {
 	w.mu.Lock()
-	var left []session.Record
-	for key, record := range w.known {
+	defer w.mu.Unlock()
+	for key := range w.known {
 		if !seen[key] {
-			left = append(left, record)
 			delete(w.known, key)
 		}
-	}
-	w.mu.Unlock()
-
-	for _, previous := range left {
-		record, found, err := w.opened.Store.Read(previous.Key)
-		if err != nil {
-			w.logger.Warn("reading a departed session", "session", previous.Key.String(),
-				"problem", err.Error())
-			continue
-		}
-		if !found {
-			// Pruned. Nobody's map should keep it forever.
-			w.subs.Forget(previous.Key)
-			continue
-		}
-		w.subs.Publish(previous, record, session.SessionEnded)
 	}
 }
 
@@ -521,10 +498,8 @@ func (w *Watcher) end(ending process.Ending) {
 		"session", ending.Key.String(), "why", ending.Detail, "sequence", written.Sequence)
 
 	w.mu.Lock()
-	previous := w.known[ending.Key.String()]
 	delete(w.known, ending.Key.String())
 	w.mu.Unlock()
-	w.subs.Publish(previous, written, session.SessionEnded)
 }
 
 // prune forgets what has outlived keep-ended-sessions. It runs on the tick
@@ -536,7 +511,6 @@ func (w *Watcher) prune() {
 	}
 	for _, key := range removed {
 		w.logger.Info("forgot an ended session past its welcome", "session", key.String())
-		w.subs.Forget(key)
 	}
 	if len(removed) > 0 {
 		// A display that asked for ended sessions has just lost some, and this

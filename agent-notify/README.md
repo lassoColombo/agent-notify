@@ -415,7 +415,6 @@ memory for days.
 | `keep-ended-sessions` | duration | `"168h"` (7 days) | How long an ended session's record survives, so that resuming it is recognised as a return rather than a birth. It is also the set `list --all` and a picker offer you. Must be positive. |
 | `history-messages` | integer | `20` | How many of a session's messages are kept in its history file. `0` keeps none, which is the point of it being expressible. |
 | `history-changes` | integer | `100` | How many state transitions are kept, same rules. |
-| `subscriber-queue` | integer | `128` | How many changed sessions may wait for one subscriber before its queue is thrown away and replaced by a single snapshot. Overflow degrades to a full redraw, never to a wrong render, so this trades bytes on the wire against redraws and nothing else. Must be at least 1. |
 | `agent-notify-binary` | string | empty, meaning "work it out" | Where the `agent-notify` binary is, for the one job that needs to start it: a hook whose poke found no session-watcher, and a display that offers a click. A hook's PATH is not your shell's PATH, and a click on a menu-bar item runs from launchd's, which is `/usr/bin:/bin` and nothing else. |
 
 `keep-ended-sessions` is written the way a person writes a duration. It is
@@ -1122,11 +1121,15 @@ func main() {
 The callback is handed **the current state**, never a stream of transitions,
 which makes it structurally impossible to write a display that breaks after a
 dropped message, a restart or a closed laptop. `view.Changed` is what moved
-since the *last call* — across reconnections, overflows and resyncs — and is
-empty on the very first one, which is what stops a notifier that started thirty
-seconds ago announcing every agent that happens to be blocked.
+since the *last call* — across a reconnection and a session-watcher restart,
+because what it is compared against is what YOU were last shown rather than what
+arrived on any one connection — and is empty on the very first one, which is
+what stops a notifier that started thirty seconds ago announcing every agent
+that happens to be blocked.
 
-`Run` owns connect, declare, snapshot, coalesce, reconnect, resync and shutdown.
+`Run` owns connect, declare, coalesce, reconnect and shutdown. There is no
+resync to own: the session-watcher sends the whole world every time, so being
+out of date is not a state you can be in.
 It starts a watcher if there is none. Beside it: `Settings(&mine)` decodes this
 integration's own settings table and refuses a key nobody declared,
 `Read()`/`ReadIncludingEnded()` are the cold read with no socket, `History(key)`

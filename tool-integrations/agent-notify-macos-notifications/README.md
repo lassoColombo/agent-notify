@@ -108,8 +108,8 @@ remembered:
 
 This program remembers nothing at all between views, and that is the point rather than a
 tidy-up. What it was last shown is the SDK's to keep, which is the only place that can keep
-it right across a reconnection, an overflow and a resync — three things this program cannot
-see happen. Two consequences you can rely on: **starting it never opens with a burst of
+it right across a reconnection and a session-watcher restart — two things this program
+cannot see happen. Two consequences you can rely on: **starting it never opens with a burst of
 banners** for every agent that happens to be blocked, and **the session-watcher restarting
 posts nothing**.
 

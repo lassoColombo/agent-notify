@@ -10,6 +10,11 @@
 // That is not a convenience: it makes R22 structural, so a display physically
 // cannot be written in a way that breaks after a dropped message, a restart or
 // a closed laptop.
+//
+// It is also all the socket carries. The session-watcher sends whole worlds and
+// nothing else, and what changed in one is worked out HERE, against what was
+// last handed over — which is the only end that can, because this memory
+// outlives both the connection and the session-watcher behind it.
 package subscriber
 
 import (
@@ -55,10 +60,15 @@ type Subscription struct {
 	Root string
 }
 
-// Refused is what a version mismatch returns, and it is permanent.
+// Refused is the session-watcher declining the handshake, and it is permanent.
 //
-// There is no negotiation and no retry: across majors nothing meets at all, so
-// the right response is to stop and say what to upgrade (§A10.5, R12).
+// It is NOT about versions. A version is announced and logged and never
+// negotiated on, because everything here is released together and a mismatch is
+// a half-finished deployment rather than a protocol to arbitrate (D-77). What
+// gets refused is a hello that cannot be acted on: unreadable, or nameless.
+//
+// There is no retry either. Reconnecting produces the same answer, so the right
+// response is to stop and repeat the sentence the session-watcher sent.
 type Refused struct {
 	Reason string
 }
@@ -199,51 +209,18 @@ func attach(
 				logger.Warn("unreadable snapshot", "problem", err.Error())
 				continue
 			}
-			// A snapshot replaces everything. That is what makes overflow,
-			// reconnection and a cold start the same code path (§A12.2).
-			changed := holding.Replace(snapshot.Sessions, watching.WakeOn)
-			deliver(watching, logger, holding, changed, "snapshot")
-
-		case session.KindDelta:
-			var delta session.Delta
-			if err := json.Unmarshal(line, &delta); err != nil {
-				logger.Warn("unreadable delta", "problem", err.Error())
-				continue
-			}
-			key := delta.Session.Key.String()
-			if !watching.WantEnded && delta.Session.Kernel == session.Ended {
-				// It ended, and this subscriber said it did not want ended
-				// sessions. It leaves the view now rather than sitting in it
-				// until the store prunes it days later, so that WantEnded
-				// means the same thing in a delta as it already meant in a
-				// snapshot. Without this every display writes the same filter
-				// for itself and D-26 — ended sessions are not displayed,
-				// period — is a convention rather than a mechanism.
-				if !holding.Forget(key) {
-					continue
-				}
-				deliver(watching, logger, holding, nil, "delta")
-				continue
-			}
-			// The previous kernel comes off the wire rather than out of what
-			// is held, because the session-watcher knows it exactly and a
-			// subscriber that missed a delta does not.
-			if !holding.Applied(delta.Session) {
-				continue
-			}
-			deliver(watching, logger, holding, []session.Change{{
-				Record:         delta.Session,
-				PreviousKernel: delta.PreviousKernel,
-				Event:          delta.Event,
-			}}, "delta")
-
-		case session.KindGone:
-			var gone session.Gone
-			if err := json.Unmarshal(line, &gone); err != nil {
-				continue
-			}
-			holding.Forget(gone.Key.String())
-			deliver(watching, logger, holding, nil, "delta")
+			// A snapshot replaces everything, which is what makes a cold
+			// start, a reconnection and an ordinary change one code path
+			// (§A12.2) — and what deleted the three messages that used to be
+			// the other cases of this switch.
+			//
+			// An ended session a subscriber did not ask for simply is not in
+			// the world it is sent, so D-26 needs no filter here: it is
+			// enforced where the world is built.
+			// Every world that arrives is handed on, departures included: the
+			// session-watcher has already decided this one was worth sending.
+			changed, _ := holding.Replace(snapshot.Sessions, watching.WakeOn)
+			deliver(watching, logger, holding, changed)
 
 		default:
 			logger.Debug("a message this build ignores", "kind", kind)
@@ -257,9 +234,9 @@ func attach(
 
 func deliver(
 	watching Subscription, logger *slog.Logger,
-	holding *session.LastShown, changed []session.Change, why string,
+	holding *session.LastShown, changed []session.Change,
 ) {
-	if err := watching.OnChange(holding.ViewOf(changed, why)); err != nil {
+	if err := watching.OnChange(holding.ViewOf(changed)); err != nil {
 		// Its failure is its own. Nothing waits for a display and nothing
 		// stops because one could not draw (R13).
 		logger.Warn("rendering", "problem", err.Error())

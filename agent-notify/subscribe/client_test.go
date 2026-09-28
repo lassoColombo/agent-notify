@@ -42,8 +42,8 @@ func pretendToBeTheCLI(t *testing.T, lines ...string) string {
 
 func TestEveryViewTailPrintsReachesTheDisplay(t *testing.T) {
 	root := pretendToBeTheCLI(t,
-		`{"why":"snapshot","sessions":[{"key":{"host":"mac","agent":"claude","session_id":"a"},"kernel":"working"}]}`,
-		`{"why":"delta","sessions":[],"changed":[{"record":{"key":{"host":"mac","agent":"claude","session_id":"a"},"kernel":"finished-a-turn"},"previous_kernel":"working"}]}`)
+		`{"sessions":[{"key":{"host":"mac","agent":"claude","session_id":"a"},"kernel":"working"}]}`,
+		`{"sessions":[],"changed":[{"record":{"key":{"host":"mac","agent":"claude","session_id":"a"},"kernel":"finished-a-turn"},"previous_kernel":"working"}]}`)
 
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
@@ -71,13 +71,13 @@ func TestEveryViewTailPrintsReachesTheDisplay(t *testing.T) {
 
 	holding.Lock()
 	defer holding.Unlock()
-	if seen[0].Why != "snapshot" || len(seen[0].Sessions) != 1 {
-		t.Errorf("the first view is %+v, want the snapshot and its one session", seen[0])
+	if len(seen[0].Changed) != 0 || len(seen[0].Sessions) != 1 {
+		t.Errorf("the first view is %+v, want the world arriving with its one session", seen[0])
 	}
 	// The whole view, not only what changed: a bar draws every row, and the
 	// ordering is a property of the set rather than of any one change.
-	if seen[1].Why != "delta" || len(seen[1].Changed) != 1 {
-		t.Errorf("the second view is %+v, want the delta and its one change", seen[1])
+	if len(seen[1].Changed) != 1 {
+		t.Errorf("the second view is %+v, want its one change", seen[1])
 	}
 	if got := seen[1].Changed[0].PreviousKernel; got != session.Working {
 		t.Errorf("previous kernel = %q, and a notifier reads nothing else", got)
@@ -85,7 +85,7 @@ func TestEveryViewTailPrintsReachesTheDisplay(t *testing.T) {
 }
 
 func TestWhatItWakesForIsWhatTailIsAskedFor(t *testing.T) {
-	root := pretendToBeTheCLI(t, `{"why":"snapshot"}`)
+	root := pretendToBeTheCLI(t, `{"sessions":[]}`)
 
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
@@ -128,7 +128,7 @@ func TestWhatItWakesForIsWhatTailIsAskedFor(t *testing.T) {
 // and a person who restarts one does not expect to restart the other.
 func TestTailIsStartedAgainWhenItStops(t *testing.T) {
 	// The script prints one view and exits, so every run is a restart.
-	root := pretendToBeTheCLI(t, `{"why":"snapshot"}`)
+	root := pretendToBeTheCLI(t, `{"sessions":[]}`)
 
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
@@ -158,7 +158,7 @@ func TestTailIsStartedAgainWhenItStops(t *testing.T) {
 // path too: a name that matches no field matches nothing for ever, and the
 // display would simply never be woken.
 func TestAWakeOnNameThatIsNotAFieldIsRefusedBeforeAnythingRuns(t *testing.T) {
-	root := pretendToBeTheCLI(t, `{"why":"snapshot"}`)
+	root := pretendToBeTheCLI(t, `{"sessions":[]}`)
 
 	err := subscribe.RunThroughTheCLI(context.Background(), subscribe.Integration{
 		Name: "bar", Root: root,

@@ -5,28 +5,31 @@ import (
 	"fmt"
 )
 
-// The protocol a tool-integration speaks: newline-delimited JSON over a stream
-// socket, in both directions (plan.md §A13).
+// The protocol core's own client speaks to the session-watcher:
+// newline-delimited JSON over a stream socket (plan.md §A13).
 //
-// It is written down here, in the public package, because it is a published
-// interface between separately released repositories — an author who cannot use
-// the Go SDK speaks this directly, in whatever language they have.
+// Three messages, and the conversation is almost one-way. A subscriber says
+// hello; it is welcomed or refused; and from then on it is sent the whole world
+// whenever something it asked about moves. There is no message for "this one
+// session changed", none for "this one is gone", and none for "send it all
+// again", because a whole world is the answer to all three.
+//
+// What a DISPLAY sees is not this. Core hands a display a [View] — on stdin for
+// one it runs, on stdout for one reading `agent-notify tail --json` — and a view
+// is the world plus what changed in it since that display last looked. Only
+// something with a memory of its own can say that, which is why the world is
+// what crosses the socket and the view is made at whichever end survives.
 //
 // Every message carries `kind`, and a reader dispatches on it.
 
 // Message kinds, client to server.
-const (
-	KindHello  = "hello"
-	KindResync = "resync"
-)
+const KindHello = "hello"
 
 // Message kinds, server to client.
 const (
 	KindWelcome  = "welcome"
 	KindRefused  = "refused"
 	KindSnapshot = "snapshot"
-	KindDelta    = "delta"
-	KindGone     = "gone"
 )
 
 // Hello is the first thing a subscriber says, and the only thing it must say.
@@ -46,9 +49,9 @@ type Hello struct {
 	// WakeOn names the record fields it cares about, so that nothing is woken
 	// for a change it does not care about (R23). Empty means everything.
 	WakeOn []string `json:"wake_on,omitempty"`
-	// WantEnded asks for ended sessions in the opening snapshot. A bar says no
-	// and a picker says yes; the *transition* to ended is delivered either way,
-	// because that is how a bar learns to remove the row (D-26).
+	// WantEnded asks for ended sessions. A bar says no and a picker says yes;
+	// a bar learns to remove the row by the row not being in the next world it
+	// is sent, which is D-26 as a mechanism rather than a convention.
 	WantEnded bool `json:"want_ended,omitempty"`
 }
 
@@ -90,49 +93,35 @@ type Refused struct {
 	Version string `json:"version"`
 }
 
-// Snapshot is every session the subscriber asked to see, and it always arrives
-// before any delta.
+// Snapshot is every session the subscriber asked to see, and it is the only
+// thing the session-watcher ever sends it.
 //
-// It is also what a queue overflow degrades to, and what answering a resync
-// sends: a display must be able to arrive at any moment and be correct
-// (§A12.2).
+// It carries whole records rather than "these keys changed, re-read them",
+// because the stream has no size limit and a record is about a kilobyte —
+// sending them takes the store off the hot read path entirely (§A13.1). A
+// subscriber that has just connected, one that fell behind, and one that has
+// been up for a week all read the same message, which is why arriving at any
+// moment and being correct is structural here rather than a case that has to be
+// handled (§A12.2).
 type Snapshot struct {
 	Kind     string   `json:"kind"`
 	Sessions []Record `json:"sessions"`
-	// Why is "connect", "asked" or "overflow". Nothing needs to act on it; it
-	// is there so that a log can explain a redraw.
-	Why string `json:"why,omitempty"`
 }
 
-// Delta is one session that changed.
+// There were three more messages here, and all three answered a question a
+// whole world answers by itself.
 //
-// It carries the whole record rather than "session X changed, re-read", because
-// the stream has no size limit and a record is about a kilobyte — sending it
-// takes the store off the hot read path entirely (§A13.1).
-type Delta struct {
-	Kind    string `json:"kind"`
-	Session Record `json:"session"`
-	// PreviousKernel saves a subscriber from re-examining a record when nothing
-	// it cares about moved. It is an optimisation, never the mechanism:
-	// correctness rests on comparing what was last done with what is true now
-	// (R22).
-	PreviousKernel Kernel `json:"previous_kernel,omitempty"`
-	Event          Event  `json:"event,omitempty"`
-}
-
-// Gone says a session has been forgotten entirely — pruned past
-// `keep-ended-sessions` — so that a display's map does not keep it forever.
-type Gone struct {
-	Kind string `json:"kind"`
-	Key  Key    `json:"key"`
-}
-
-// Resync asks for a fresh snapshot. `sketchybar --reload` restarts a whole bar,
-// and a display that cannot ask ends up blank until an agent happens to do
-// something (§A12.2).
-type Resync struct {
-	Kind string `json:"kind"`
-}
+// `delta` said one session had changed, and carried the kernel it moved from
+// and the event that caused it. The kernel it moved from is something the far
+// end already knows, because it holds what it was last shown; the event was
+// read by nobody, anywhere, in the whole system.
+//
+// `gone` said a session had been pruned, so that nobody's map kept it for ever.
+// A map rebuilt from the world it was just sent cannot keep it.
+//
+// `resync` asked for a fresh snapshot, for a display that had been restarted
+// under core — `sketchybar --reload` was the case, and sketchybar went in D-79.
+// Every write is a fresh snapshot now, so there is nothing to ask for.
 
 // KindOf reads the kind out of a line without decoding the rest of it.
 func KindOf(line []byte) (string, error) {

@@ -37,14 +37,6 @@ import (
 type RecordedChange struct {
 	AfterMS int64          `json:"after_ms"`
 	Session session.Record `json:"session"`
-	// Event is what the agent-integration reported, when the change carried
-	// one. Kept because a recording that drops it can never exercise the one
-	// display that reads it, and a notifier replayed against an eventless
-	// recording is a notifier tested against something it will never meet.
-	//
-	// Absent from recordings made before this field existed, which is what
-	// omitempty is for: they play back exactly as they did.
-	Event session.Event `json:"event,omitempty"`
 }
 
 // Record writes what happens to a file, so that it can be played back
@@ -93,7 +85,7 @@ func record(output string) int {
 				now := time.Now()
 				if err := encoder.Encode(RecordedChange{
 					AfterMS: now.Sub(last).Milliseconds(),
-					Session: change.Record, Event: change.Event,
+					Session: change.Record,
 				}); err != nil {
 					return err
 				}
@@ -185,7 +177,7 @@ func replay(recording string, speed float64, again bool, waiting time.Duration) 
 				case <-time.After(pause):
 				}
 			}
-			fake.Reported(one.Session, one.Event)
+			fake.Publish(one.Session)
 		}
 		if !again {
 			return 0

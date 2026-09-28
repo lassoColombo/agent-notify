@@ -60,13 +60,6 @@ type Config struct {
 	HistoryMessages int `toml:"history-messages"`
 	HistoryChanges  int `toml:"history-changes"`
 
-	// SubscriberQueue bounds how many changed sessions may wait for one
-	// subscriber before its queue is thrown away and replaced by a single
-	// snapshot (§A9.3). Overflow degrades to a full redraw, never to a wrong
-	// render, so this number trades bytes on the wire against redraws and
-	// nothing else.
-	SubscriberQueue int `toml:"subscriber-queue"`
-
 	// AgentNotifyBinary is where the agent-notify binary lives, for the one
 	// job that needs to start it: a hook whose poke found no session-watcher.
 	//
@@ -146,7 +139,6 @@ func Defaults() Config {
 		KeepEndedSessions: session.NewDuration(7 * 24 * time.Hour),
 		HistoryMessages:   20,
 		HistoryChanges:    100,
-		SubscriberQueue:   128,
 		Agent:             map[string]Agent{},
 		Integration:       map[string]Integration{},
 		Container:         Container{},
@@ -206,9 +198,9 @@ func Parse(data []byte, name string) (Config, []error) {
 	return config, problems
 }
 
-// removedKeys names the two keys that used to describe a container written
-// entirely in configuration, so that a file carrying them gets an answer rather
-// than the generic "not recognised" the strict pass would otherwise give.
+// removedKeys names the keys that used to do something, so that a file carrying
+// one gets an answer rather than the generic "not recognised" the strict pass
+// would otherwise give.
 //
 // It is here because the generic message is true and useless: it says a key was
 // ignored, not that the thing the key did has gone and what to do instead. A
@@ -218,11 +210,21 @@ func Parse(data []byte, name string) (Config, []error) {
 // It can be deleted once no config file in the world still has them.
 func removedKeys(data []byte, name string) []error {
 	var file struct {
-		Integration map[string]map[string]any `toml:"integration"`
+		Integration     map[string]map[string]any `toml:"integration"`
+		SubscriberQueue any                       `toml:"subscriber-queue"`
 	}
 	if err := toml.Unmarshal(data, &file); err != nil {
 		// The first pass already reported whatever is wrong with it.
 		return nil
+	}
+
+	var problems []error
+	if file.SubscriberQueue != nil {
+		problems = append(problems, fmt.Errorf(
+			"%s: subscriber-queue is no longer read. There is no queue to bound: a "+
+				"subscriber is sent the whole world and the newest one replaces any "+
+				"still waiting, so falling behind costs worlds nobody would have "+
+				"seen rather than a queue to size. Delete the line", name))
 	}
 
 	// Each key with the sentence that says what happened to it. "Ignored" on
@@ -238,7 +240,6 @@ func removedKeys(data []byte, name string) []error {
 			"with an empty object and core records nothing for it",
 	}
 
-	var problems []error
 	for tool, table := range file.Integration {
 		for _, key := range []string{"capture", "focus", "capture-environment"} {
 			if _, present := table[key]; !present {
@@ -306,13 +307,6 @@ func (c *Config) problemsWith(name string) []error {
 		{"history-messages", &c.HistoryMessages},
 		{"history-changes", &c.HistoryChanges},
 	}
-	if c.SubscriberQueue < 1 {
-		problems = append(problems, fmt.Errorf(
-			"%s: subscriber-queue must be at least 1; using %d",
-			name, defaults.SubscriberQueue))
-		c.SubscriberQueue = defaults.SubscriberQueue
-	}
-
 	for _, count := range counts {
 		if *count.value < 0 {
 			problems = append(problems, fmt.Errorf(

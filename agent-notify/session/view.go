@@ -17,27 +17,23 @@ type View struct {
 	// ignores it; a notifier reads it and nothing else.
 	//
 	// "Since the last call" is meant literally, and it is the whole contract:
-	// it survives a reconnection, an overflow and a resync, because what it is
-	// compared against is what this display was last SHOWN rather than what
+	// it survives a reconnection and a session-watcher restart, because what it
+	// is compared against is what this display was last SHOWN rather than what
 	// arrived on this particular connection. On the very first call it is
 	// empty — nothing has moved when there was no previous call — which is
 	// what stops a display that started thirty seconds ago opening with a
 	// banner for every agent that happens to be blocked.
 	Changed []Change `json:"changed,omitempty"`
-
-	// Why is "snapshot" or "delta", for a log line.
-	Why string `json:"why,omitempty"`
 }
 
 // Change is one session that moved, and what it moved from.
 //
 // It exists because a notifier is the one display that genuinely needs the
-// transition rather than the state (§A12.1), and everything needed to give it
-// one is already here: the session-watcher puts the previous kernel and the
-// event in every delta, and whoever holds the last view knows the previous
-// kernel even for a change it learns about from a snapshot. Before this, both
-// were decoded and dropped, and the one notifier in the world rebuilt a weaker
-// version of them from remembered timestamps.
+// transition rather than the state (§A12.1), and the fact that gives it one is
+// already here: whoever holds the last view knows what kernel it last showed.
+// Before this, the previous kernel was decoded and dropped one line before it
+// would have been handed over, and the one notifier in the world rebuilt a
+// weaker version of it from remembered timestamps.
 //
 // The record is a named field rather than an embedded one on purpose: Record
 // has a MarshalJSON, and embedding it would mean a Change logged as JSON
@@ -47,33 +43,28 @@ type Change struct {
 	// Record is the session as it now stands.
 	Record Record `json:"record"`
 
-	// PreviousKernel is the kernel this display last saw it in, in the
-	// vocabulary [Delta] uses for the same fact. It is empty for a session it
-	// has never seen before, which is not a transition at all — it is an
-	// arrival.
+	// PreviousKernel is the kernel this display last saw it in. It is empty for
+	// a session it has never seen before, which is not a transition at all — it
+	// is an arrival.
 	//
 	// `PreviousKernel == Record.Kernel` is the ordinary case and means
 	// something other than the state moved: a new message, a rename, a fresh
 	// token count. A notifier skips those; a preview pane wants them.
 	PreviousKernel Kernel `json:"previous_kernel,omitempty"`
-
-	// Event is what the agent-integration reported, when this change arrived
-	// as a delta and something reported it.
-	//
-	// It is empty in two honest cases, and neither means "nothing happened":
-	// a change the session-watcher OBSERVED rather than was told about carries
-	// no event (D-12 — death and supersession), and a change first seen in a
-	// snapshot was never accompanied by one. PreviousKernel is the field to
-	// reason from; this one is for saying why out loud.
-	Event Event `json:"event,omitempty"`
 }
 
 // LastShown is the world as one display was last handed it.
 //
 // It exists so that [View.Changed] can mean "since the last view" rather than
-// "since this connection opened", and it is kept by whoever does the handing:
-// core, for a display it runs; the SDK, for one that connects. Either way it
-// outlives the thing on the other end, which is the point. A session-watcher
+// "since this connection opened", and it is kept by whoever has the memory that
+// outlives the change: core, for a display it RUNS, because a process forked to
+// paint once remembers nothing; the display itself, for one that connects,
+// because it outlives both its own connection and the session-watcher.
+//
+// The session-watcher keeps one per connection as well, for a narrower job — it
+// answers "is this worth writing", never "what changed" — and that one dies
+// with the connection, which is exactly why it cannot answer the second
+// question. A session-watcher
 // restarting hands out a fresh picture of the world, and a picture that began
 // empty at the same moment reports every session in it as changed — so a
 // notifier written to the documented contract would post a banner per live
@@ -92,7 +83,16 @@ type LastShown struct {
 // that only a view with something in it is.
 func (l *LastShown) HasSeenAView() bool { return l.shown }
 
-// Replace swaps the whole world in and reports what actually moved.
+// Replace swaps the whole world in and reports what actually moved, and
+// separately whether anything LEFT.
+//
+// The second value is not a detail. A departure is not a change to any record —
+// there is no record any more — so it can never appear in the first, and a
+// caller deciding whether a view is worth handing over will otherwise conclude
+// that a session vanishing was nothing happening at all. That is how a bar ends
+// up with a row for an agent that finished ten minutes ago: it was woken, it
+// compared every record it still had against every record it was given, found
+// them all identical, and drew nothing.
 //
 // It compares on the fields this display asked to be woken for, which is the
 // same rule applied before it is woken at all. Comparing on everything instead
@@ -103,7 +103,7 @@ func (l *LastShown) HasSeenAView() bool { return l.shown }
 // The previous kernel is carried out with each one. A whole world says nothing
 // about how a session got where it is, but whoever has been shown a view before
 // knows what it last saw, and that is the same fact.
-func (l *LastShown) Replace(fresh []Record, wakeOn []string) []Change {
+func (l *LastShown) Replace(fresh []Record, wakeOn []string) (changed []Change, departed bool) {
 	if l.sessions == nil {
 		l.sessions = make(map[string]Record, len(fresh))
 	}
@@ -123,47 +123,31 @@ func (l *LastShown) Replace(fresh []Record, wakeOn []string) []Change {
 	for key := range l.sessions {
 		if !arrived[key] {
 			delete(l.sessions, key)
+			departed = true
 		}
 	}
 
 	// Ordered here, while these are still records, so that the one urgency
 	// rule does the work rather than a second spelling of it (R24).
 	ByUrgency(moved)
-	changed := make([]Change, 0, len(moved))
+	changed = make([]Change, 0, len(moved))
 	for _, record := range moved {
 		changed = append(changed, Change{Record: record, PreviousKernel: was[record.Key.String()]})
 	}
-	return changed
+	return changed, departed
 }
 
-// Applied puts one record in and says whether it was worth keeping.
+// There were two more methods here, Applied and Forget, and they put one record
+// in or took one out. Both existed for deltas: one to stop a late delta undoing
+// a fresher picture (R16), one to drop a session a `gone` had announced.
 //
-// False means it is older than what is already held, which is what stops a late
-// delta undoing a fresher picture (R16).
-func (l *LastShown) Applied(record Record) bool {
-	if l.sessions == nil {
-		l.sessions = map[string]Record{}
-	}
-	key := record.Key.String()
-	if was, have := l.sessions[key]; have && was.Sequence > record.Sequence {
-		return false
-	}
-	l.sessions[key] = record
-	return true
-}
-
-// Forget drops one, and says whether it was there to drop.
-func (l *LastShown) Forget(key string) bool {
-	if _, have := l.sessions[key]; !have {
-		return false
-	}
-	delete(l.sessions, key)
-	return true
-}
+// Replace does both by construction. A world that arrives is the whole truth,
+// so there is no such thing as a stale part of it to guard against, and a
+// session missing from it is a session that is gone.
 
 // ViewOf is the view to hand over: everything held, most urgent first, with
 // these changes — or with none at all if this is the first.
-func (l *LastShown) ViewOf(changed []Change, why string) View {
+func (l *LastShown) ViewOf(changed []Change) View {
 	all := make([]Record, 0, len(l.sessions))
 	for _, record := range l.sessions {
 		all = append(all, record)
@@ -177,5 +161,5 @@ func (l *LastShown) ViewOf(changed []Change, why string) View {
 		changed = nil
 		l.shown = true
 	}
-	return View{Sessions: all, Changed: changed, Why: why}
+	return View{Sessions: all, Changed: changed}
 }

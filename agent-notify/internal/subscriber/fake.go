@@ -17,10 +17,10 @@ import (
 // real terminal, by a person watching a bar (§A10.4).
 //
 // It is not a second implementation of anything. It is the real fan-out — the
-// same handshake, the same snapshot-on-connect, the same bounded queues and the
-// same overflow behaviour — with a script instead of a store behind it. A
-// display that works against this works against the real one, because the only
-// difference is where the records came from.
+// same handshake, the same world on connecting, the same one slot per
+// subscriber — with a script instead of a store behind it. A display that works
+// against this works against the real one, because the only difference is where
+// the records came from.
 type Fake struct {
 	root string
 	held *sessionwatcher.TheOnlyRunningWatcher
@@ -50,7 +50,7 @@ func StartFake(root string, logger *slog.Logger) (*Fake, error) {
 	}
 
 	fake := &Fake{root: root, held: held, sessions: map[string]session.Record{}}
-	subs, err := sessionwatcher.Serve(layout, held, logger, 128, fake.snapshot)
+	subs, err := sessionwatcher.Serve(layout, held, logger, fake.snapshot)
 	if err != nil {
 		held.Release()
 		return nil, err
@@ -60,32 +60,16 @@ func StartFake(root string, logger *slog.Logger) (*Fake, error) {
 	return fake, nil
 }
 
-// Publish plays one record with no event named.
+// Publish plays one record, which is the whole of what a display can be told.
 //
-// That is a real thing to play rather than a shortcut: a change the
-// session-watcher OBSERVED rather than was told about carries no event either
-// (D-12 — death and supersession), which is why the field is omitempty on the
-// wire. Where the event matters, play [Fake.Reported].
+// It used to have a sibling that played the event an agent-integration reported
+// alongside it, for a notifier to read. Nothing read it, here or anywhere, and
+// what a notifier actually tells a transition by is the kernel it last saw.
 func (f *Fake) Publish(record session.Record) {
-	f.Reported(record, "")
-}
-
-// Reported plays one record as the outcome of an event an agent-integration
-// reported, which is what most real changes carry.
-//
-// It exists because the event reaches a subscriber — it is in every delta and
-// now in [View.Changed] — and a fake that could only ever play an empty one
-// would be a fake no notifier could be tested against, which is the one thing
-// this is here to prevent.
-func (f *Fake) Reported(record session.Record, event session.Event) {
-	key := record.Key.String()
-
 	f.mu.Lock()
-	previous := f.sessions[key]
-	f.sessions[key] = record
+	f.sessions[record.Key.String()] = record
 	f.mu.Unlock()
-
-	f.subs.Publish(previous, record, event)
+	f.subs.PokeEveryone()
 }
 
 // Forget plays a session being pruned.
@@ -93,7 +77,7 @@ func (f *Fake) Forget(key session.Key) {
 	f.mu.Lock()
 	delete(f.sessions, key.String())
 	f.mu.Unlock()
-	f.subs.Forget(key)
+	f.subs.PokeEveryone()
 }
 
 // Connected is who has joined, which is how a test waits for its display to

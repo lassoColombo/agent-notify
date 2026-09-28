@@ -211,7 +211,7 @@ func (l Layout) SubscribersSocket() string {
 	return filepath.Join(l.Runtime, "subscribers.sock")
 }
 
-// IntegrationsFile is what the supervisor knows about its children, written for
+// IntegrationsFile is what the session-watcher knows about its integrations, written for
 // doctor to read from another process.
 //
 // It is in the runtime directory because it must not survive a reboot: a report

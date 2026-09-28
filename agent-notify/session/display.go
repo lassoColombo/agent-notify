@@ -310,18 +310,16 @@ func Differs(previous, next Record, fields []string) bool {
 	return false
 }
 
-// WorthOfferingAround reports whether a change could matter to anybody at all,
-// which is the question the session-watcher asks once before asking each
-// subscriber the narrower one.
+// There was a WorthOfferingAround here: a generous gate the session-watcher
+// asked once — "could ANYBODY want this?" — before asking each subscriber the
+// narrow one Differs answers. It ignored the stamps and nothing else, so that a
+// write moving only `usage` survived to reach the one display that named it.
 //
-// It ignores the stamps and nothing else, so it is deliberately more generous
-// than Differs with no fields named: a write that moves only `usage` wakes
-// nobody who did not ask for it and must still reach the display that did. A
-// gate that answered the default question here would decide, on that display's
-// behalf, that it did not mean what it said.
-func WorthOfferingAround(previous, next Record) bool {
-	return moved(previous, next, stampFields)
-}
+// There is one gate now. Every display, whether core runs it or it connected,
+// compares the world it is offered against the world it last took, on the
+// fields it named. That is the narrow question, asked in the only place the
+// answer was ever knowable, and a generous one in front of it can no longer
+// answer on a display's behalf because there is no longer anywhere to put it.
 
 // moved compares two records while ignoring whole classes of field.
 func moved(previous, next Record, ignoring ...map[string]bool) bool {

@@ -72,10 +72,14 @@ func OpenFile(path, component string) (*slog.Logger, io.Closer) {
 }
 
 // File opens the log itself, for the one writer that does not go through a
-// logger: a supervised integration's stderr, which the session-watcher points
-// here so that what no program can log for itself — a panic on a goroutine
-// other than the one holding the recover, a runtime fatal error, a crash inside
-// cgo — lands in the same place as everything else.
+// logger: the session-watcher's own stderr, pointed here by whoever spawns it,
+// so that what no program can log for itself — a panic on a goroutine other
+// than the one holding the recover, a runtime fatal error, a crash inside cgo —
+// lands in the same place as everything else.
+//
+// An integration's stderr does not come here. Core runs one and reads what it
+// printed back out of the pipe (see the tool package), which is the better
+// answer anyway: it arrives attached to the call that caused it.
 func File(path string) (*os.File, error) {
 	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, paths.FileMode)
 }

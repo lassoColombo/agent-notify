@@ -15,21 +15,29 @@ import (
 )
 
 // Subscribers is the fan-out half of the session-watcher: every connected
-// tool-integration, and the bounded queue in front of each one.
+// tool-integration, and the one slot in front of each.
+//
+// It sends the whole world, every time, and that one decision is most of this
+// file. There used to be deltas, a queue per subscriber, coalescing by session
+// key, a bound on that queue, and a degradation path that threw the queue away
+// and sent a snapshot when it overflowed — five mechanisms to deliver what one
+// slot holding the newest world delivers by construction. A snapshot was
+// already the answer to every hard case (a cold start, a reconnection, an
+// overflow); making it the answer to the easy case too is what deleted the
+// other four.
 //
 // Nothing here may affect anything else. A display may be slow, may crash, may
 // be killed, may be a shell script — none of that may reach the agent, the
 // store, the session-watcher or another display (§A12.3, R13). So every write
-// happens on that subscriber's own goroutine, behind its own queue, and the
-// worst a stuck one can do is overflow its own queue and be sent a fresh
-// snapshot.
+// happens on that subscriber's own goroutine, behind its own slot, and the
+// worst a stuck one can do is miss worlds it would have painted over anyway.
 type Subscribers struct {
 	listener net.Listener
 	logger   *slog.Logger
-	bound    int
-	// snapshot is how a subscriber gets the current state, whether because it
-	// just connected, asked, or fell behind.
-	snapshot func(wantEnded bool) []session.Record
+	// theWorldNow is asked at the moment of writing rather than carried in: a
+	// write that has been waiting on a slow reader should send what is true
+	// now, not what was true when it was asked for.
+	theWorldNow func(wantEnded bool) []session.Record
 
 	mu        sync.Mutex
 	connected []*subscriber
@@ -42,8 +50,8 @@ type Subscribers struct {
 // removed first, and that is safe only because the caller holds the singleton
 // lock (§A9.2).
 func Serve(
-	layout paths.Layout, held *TheOnlyRunningWatcher, logger *slog.Logger, bound int,
-	snapshot func(wantEnded bool) []session.Record,
+	layout paths.Layout, held *TheOnlyRunningWatcher, logger *slog.Logger,
+	theWorldNow func(wantEnded bool) []session.Record,
 ) (*Subscribers, error) {
 	if held == nil {
 		return nil, fmt.Errorf("the socket is bound by whoever holds the lock, and nobody does")
@@ -60,12 +68,9 @@ func Serve(
 		listener.Close()
 		return nil, err
 	}
-	if bound < 1 {
-		bound = 1
-	}
 	return &Subscribers{
-		listener: listener, logger: logger, bound: bound,
-		snapshot: snapshot, since: time.Now().UTC(),
+		listener: listener, logger: logger,
+		theWorldNow: theWorldNow, since: time.Now().UTC(),
 	}, nil
 }
 
@@ -114,26 +119,22 @@ func (s *Subscribers) welcome(connection net.Conn) {
 		return
 	}
 
-	// Who is really on the other end, asked of the kernel rather than of the
-	// peer (R25). The supervisor uses it to tell "the child I started has
-	// connected" from "something calling itself that is connected".
-	pid, _ := peerPID(connection)
-
 	joined := &subscriber{
 		hello: hello, connection: connection, reader: reader,
-		pid: pid, since: time.Now(),
-		logger: s.logger.With("subscriber", hello.Name),
-		bound:  s.bound, pending: map[string]outbound{},
-		signal: make(chan struct{}, 1), snapshot: s.snapshot,
+		logger:      s.logger.With("subscriber", hello.Name),
+		theWorldNow: s.theWorldNow,
+		wake:        make(chan struct{}, 1),
 	}
 	s.mu.Lock()
 	s.connected = append(s.connected, joined)
 	s.mu.Unlock()
 
 	s.logger.Info("a subscriber connected",
-		"name", hello.Name, "pid", pid, "wake_on", hello.WakeOn)
+		"name", hello.Name, "wake_on", hello.WakeOn)
 
-	joined.ask("connect")
+	// Once, now, with nothing having moved: a subscriber that has just arrived
+	// has a world to be told about and no change to be told of (§A7.6).
+	joined.poke()
 	go joined.write()
 	joined.read()
 
@@ -166,43 +167,29 @@ func (s *Subscribers) drop(leaving *subscriber) {
 	s.logger.Info("a subscriber disconnected", "name", leaving.hello.Name)
 }
 
-// Publish offers one change to every subscriber that cares about it.
+// PokeEveryone tells every subscriber that the world may have moved.
 //
-// It never blocks: a subscriber that cannot keep up overflows its own queue and
-// is sent a snapshot instead. That is why record-agent-event can never be
-// stalled by a slow display, which is the failure this whole shape exists to
-// prevent (§A9.3, R1).
-func (s *Subscribers) Publish(previous, next session.Record, event session.Event) {
+// It never blocks, and it says nothing about WHAT moved: each subscriber works
+// that out for itself against the world it last sent, which is the same
+// question a renderer answers for itself on the same tick. That is why
+// record-agent-event can never be stalled by a slow display, which is the
+// failure this whole shape exists to prevent (§A9.3, R1).
+func (s *Subscribers) PokeEveryone() {
 	s.mu.Lock()
 	listening := append([]*subscriber(nil), s.connected...)
 	s.mu.Unlock()
 
 	for _, one := range listening {
-		if !session.Differs(previous, next, one.hello.WakeOn) {
-			continue
-		}
-		one.offer(next.Key.String(), outbound{delta: &session.Delta{
-			Kind: session.KindDelta, Session: next,
-			PreviousKernel: previous.Kernel, Event: event,
-		}})
+		one.poke()
 	}
 }
 
-// Forget tells every subscriber that a session has been pruned entirely, so
-// that nobody's map keeps it forever.
-func (s *Subscribers) Forget(key session.Key) {
-	s.mu.Lock()
-	listening := append([]*subscriber(nil), s.connected...)
-	s.mu.Unlock()
-
-	for _, one := range listening {
-		one.offer(key.String(), outbound{gone: &session.Gone{
-			Kind: session.KindGone, Key: key,
-		}})
-	}
-}
-
-// Connected is who is listening, for doctor.
+// Connected is who is listening: for doctor, and for a test waiting to play
+// something at a display that has arrived.
+//
+// Names, and nothing else. It used to answer with a pid as well, asked of the
+// kernel because the supervisor had to tell the child it started from something
+// merely calling itself that name (R25) — and core starts none of this now.
 func (s *Subscribers) Connected() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -211,28 +198,6 @@ func (s *Subscribers) Connected() []string {
 		names = append(names, one.hello.Name)
 	}
 	return names
-}
-
-// A Listener is one connection, as the supervisor needs to see it.
-type Listener struct {
-	Name  string
-	PID   int
-	Since time.Time
-}
-
-// Listening is who is connected, with enough to tell one from another. The
-// supervisor matches on PID where the platform can supply one and falls back to
-// the name where it cannot.
-func (s *Subscribers) Listening() []Listener {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	listening := make([]Listener, 0, len(s.connected))
-	for _, one := range s.connected {
-		listening = append(listening, Listener{
-			Name: one.hello.Name, PID: one.pid, Since: one.since,
-		})
-	}
-	return listening
 }
 
 // Close stops accepting and drops everybody.
@@ -248,138 +213,83 @@ func (s *Subscribers) Close() error {
 	return err
 }
 
-// outbound is one thing waiting to be written to one subscriber.
-type outbound struct {
-	delta *session.Delta
-	gone  *session.Gone
-}
-
-type subscriber struct {
-	hello      session.Hello
-	connection net.Conn
-	reader     *bufio.Reader
-	// pid is who the kernel says is on the other end, or 0 where the platform
-	// cannot say. since is when the handshake completed.
-	pid      int
-	since    time.Time
-	logger   *slog.Logger
-	bound    int
-	snapshot func(wantEnded bool) []session.Record
-
-	mu         sync.Mutex
-	pending    map[string]outbound
-	order      []string
-	overflowed bool
-	resync     string
-	done       bool
-	signal     chan struct{}
-}
-
-// offer queues one change, coalescing it with anything already waiting for the
-// same session.
+// A subscriber is one connection, and the goroutine that writes to it.
 //
-// Coalescing is universal and no subscriber may opt out, because none needs to:
-// a renderer draws the current state, and anything acting on change compares
-// what it last did with what is true now (R22, D-10). A fifty-tool-call turn
-// therefore becomes one render, not fifty.
-func (s *subscriber) offer(key string, what outbound) {
+// It keeps what a renderer keeps and for the same reason — one slot to be woken
+// in, and a picture of what it last handed over — but the picture answers a
+// different question here. A renderer's says what CHANGED, because the display
+// on the other end is a fresh process that remembers nothing. This one only
+// says whether to write at all: the client on the far end survives its own
+// reconnection and this session-watcher's restart, so it is the end that can
+// say what changed, and it is the end that does.
+type subscriber struct {
+	hello       session.Hello
+	connection  net.Conn
+	reader      *bufio.Reader
+	logger      *slog.Logger
+	theWorldNow func(wantEnded bool) []session.Record
+
+	// wake holds at most one. That single slot is both halves of the problem:
+	// it COALESCES, because every write carries the whole world and a waiting
+	// one is therefore never worth keeping beside a newer one; and it
+	// SERIALISES, because the loop reading it writes one world at a time.
+	wake chan struct{}
+
+	// sent is the world this connection was last given, touched only by the
+	// write goroutine. It is what keeps `wake_on` meaning something on the
+	// wire: without it, a subscriber that asked about kernels alone is written
+	// to every time an agent spends a token (R23).
+	sent session.LastShown
+
+	mu   sync.Mutex
+	done bool
+}
+
+// poke asks for a write, and never waits for one.
+func (s *subscriber) poke() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.done {
 		return
 	}
-
-	if _, waiting := s.pending[key]; !waiting {
-		if len(s.pending) >= s.bound {
-			// It is not keeping up. Throw the queue away and replace it with a
-			// single snapshot: overflow degrades to a full redraw, never to a
-			// wrong render (§A9.3, R15).
-			s.pending = map[string]outbound{}
-			s.order = nil
-			s.overflowed = true
-			s.resync = "overflow"
-			s.wake()
-			return
-		}
-		s.order = append(s.order, key)
-	}
-	s.pending[key] = what
-	s.wake()
-}
-
-// ask queues a snapshot, replacing anything waiting: a snapshot answers every
-// pending delta by construction.
-func (s *subscriber) ask(why string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.done {
-		return
-	}
-	s.pending = map[string]outbound{}
-	s.order = nil
-	s.overflowed = true
-	s.resync = why
-	s.wake()
-}
-
-// wake nudges the writer without ever blocking. A signal already waiting says
-// everything a second one would.
-func (s *subscriber) wake() {
 	select {
-	case s.signal <- struct{}{}:
+	case s.wake <- struct{}{}:
 	default:
+		// One is already waiting, and it will send the same world this one
+		// would have.
 	}
 }
 
 // write is the only goroutine that touches this connection's write side, so a
 // slow peer blocks here and nowhere else.
 func (s *subscriber) write() {
-	for range s.signal {
-		s.mu.Lock()
-		if s.done {
-			s.mu.Unlock()
+	for range s.wake {
+		if !s.sendTheWorld() {
 			return
-		}
-		overflowed, why := s.overflowed, s.resync
-		pending, order := s.pending, s.order
-		s.overflowed, s.resync = false, ""
-		s.pending, s.order = map[string]outbound{}, nil
-		s.mu.Unlock()
-
-		if overflowed {
-			if !s.send(session.Snapshot{
-				Kind: session.KindSnapshot, Why: why,
-				Sessions: s.snapshot(s.hello.WantEnded),
-			}) {
-				return
-			}
-			if why == "overflow" {
-				s.logger.Warn("a subscriber fell behind and was sent a fresh snapshot")
-			}
-			continue
-		}
-		for _, key := range order {
-			what := pending[key]
-			var ok bool
-			switch {
-			case what.delta != nil:
-				ok = s.send(*what.delta)
-			case what.gone != nil:
-				ok = s.send(*what.gone)
-			default:
-				ok = true
-			}
-			if !ok {
-				return
-			}
 		}
 	}
 }
 
-func (s *subscriber) send(message any) bool {
-	encoded, err := json.Marshal(message)
+func (s *subscriber) sendTheWorld() bool {
+	first := !s.sent.HasSeenAView()
+	moved, departed := s.sent.Replace(s.theWorldNow(s.hello.WantEnded), s.hello.WakeOn)
+	if !first && len(moved) == 0 && !departed {
+		// Nothing this subscriber asked about moved. The changes are thrown
+		// away rather than sent: they are this end's answer to "is this worth
+		// writing", and the far end's memory outlives this connection, so its
+		// answer to "what changed" is the one that survives a restart (R22).
+		return true
+	}
+
+	// ViewOf is what a renderer calls here too. Only half of what it returns is
+	// wanted on the wire — the world, not the changes — and calling it anyway is
+	// what marks this connection as having been handed something.
+	world := s.sent.ViewOf(moved)
+	encoded, err := json.Marshal(session.Snapshot{
+		Kind: session.KindSnapshot, Sessions: world.Sessions,
+	})
 	if err != nil {
-		s.logger.Warn("cannot encode a message", "problem", err.Error())
+		s.logger.Warn("cannot encode the world", "problem", err.Error())
 		return true
 	}
 	_ = s.connection.SetWriteDeadline(time.Now().Add(10 * time.Second))
@@ -390,25 +300,20 @@ func (s *subscriber) send(message any) bool {
 	return true
 }
 
-// read handles what a subscriber says after the handshake, which today is only
-// "send me a snapshot".
+// read exists to notice the far end going away.
+//
+// A subscriber says one thing — its hello — and after that the conversation is
+// one-way. It used to be able to ask for a fresh snapshot, back when there was
+// such a thing as being out of date; every write is one now.
 func (s *subscriber) read() {
 	for {
 		line, err := s.reader.ReadBytes('\n')
 		if err != nil {
 			return
 		}
-		kind, err := session.KindOf(line)
-		if err != nil {
-			s.logger.Warn("a subscriber said something unreadable", "problem", err.Error())
-			continue
-		}
-		switch kind {
-		case session.KindResync:
-			s.ask("asked")
-		default:
-			// Carried and ignored: a newer subscriber within the same major
-			// version may say things this build has never heard of (R12).
+		// Carried and ignored: a newer subscriber within the same major
+		// version may say things this build has never heard of (R12).
+		if kind, err := session.KindOf(line); err == nil {
 			s.logger.Debug("a subscriber said something this build ignores", "kind", kind)
 		}
 	}
@@ -421,7 +326,7 @@ func (s *subscriber) close() {
 		return
 	}
 	s.done = true
-	close(s.signal)
+	close(s.wake)
 	s.mu.Unlock()
 	_ = s.connection.Close()
 }

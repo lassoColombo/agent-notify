@@ -284,8 +284,8 @@ func askTheSocket(layout paths.Layout) string {
 	}
 }
 
-// reportIntegrations is the supervisor's report, read from the file it writes
-// rather than asked for over the socket.
+// reportIntegrations is what the session-watcher knows about its integrations,
+// read from the file it writes rather than asked for over the socket.
 //
 // That is deliberate. doctor's hardest job is a session-watcher that holds the
 // lock and does not answer (§A9.2), and a report you have to ask for over the
@@ -321,11 +321,7 @@ func reportIntegrations(
 		fmt.Sprintf("reported by pid %d at %s", report.PID, report.Written))
 
 	for _, one := range report.Integrations {
-		detail := one.State
-		if one.PID != 0 {
-			detail += fmt.Sprintf(", pid %d", one.PID)
-		}
-		fmt.Printf("             %-22s %s\n", one.Name, detail)
+		fmt.Printf("             %-22s %s\n", one.Name, one.State)
 		if one.Binary != "" {
 			// Only for something core runs. A client's table was never asked
 			// anything, so "answers nothing" would be a report on a

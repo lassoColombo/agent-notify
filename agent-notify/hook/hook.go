@@ -122,20 +122,19 @@ func Record(report session.Report) (session.Record, bool) {
 	opened.Logger.Info("recorded",
 		"session", written.Key.String(), "event", string(report.Event),
 		"kernel", string(written.Kernel), "sequence", written.Sequence)
-	wake(opened, written, report.Event)
+	wake(opened, written)
 	return written, true
 }
 
 // wake tells a running session-watcher that something changed, and starts one
 // if nobody answers.
 //
-// Both halves are best-effort by design. The poke carries a key and a sequence
-// and nothing else, so losing it costs one sweep interval of latency and
-// nothing more (R4). Starting one is a race several hooks may enter at once,
+// Both halves are best-effort by design. The poke carries a key and nothing
+// else, so losing it costs one sweep interval of latency and nothing more (R4). Starting one is a race several hooks may enter at once,
 // and the singleton lock is what makes that harmless — so this neither waits
 // for the result nor reports it (§A9.2).
-func wake(opened *core.Core, written session.Record, event session.Event) {
-	err := sessionwatcher.Send(opened.Layout, sessionwatcher.PokeFor(written, event))
+func wake(opened *core.Core, written session.Record) {
+	err := sessionwatcher.Send(opened.Layout, sessionwatcher.PokeFor(written))
 	if err == nil {
 		return
 	}

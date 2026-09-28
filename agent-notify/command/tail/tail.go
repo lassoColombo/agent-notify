@@ -80,7 +80,11 @@ func printTheViewJustHandedOver(view session.View, asJSON bool) error {
 	}
 
 	now := time.Now().UTC()
-	if view.Why == "snapshot" {
+	if len(view.Changed) == 0 {
+		// The world arriving rather than the world moving, which is exactly
+		// what an empty Changed means: the first view a display is handed
+		// carries no changes by contract, and no later one is handed over at
+		// all unless something moved.
 		fmt.Printf("── %s: %d session(s) ──\n", now.Format("15:04:05"), len(view.Sessions))
 		rows.OneLinePerSession(view.Sessions, now)
 		return nil

@@ -4647,8 +4647,72 @@ of this section is that it prevents re-litigating.
     start this" to a rule that said "started if enabled and has a binary", and
     it said it by calling a thing that was on off.
 
+- **D-82** (2026-09-28) — **The session-watcher sends whole worlds, and what
+  changed is worked out by whoever has the memory.** The socket carries `hello`,
+  `welcome`, `refused` and `snapshot`, and nothing else. *Amends* §A12.2 (a
+  resync is not a first-class path, it is no path at all), §A13.1 (a delta was
+  the steady state; a snapshot is), §A9.3 and R15 (a backlog does not degrade to
+  a resync — there is no backlog), and §A7.4.3 (one gate, not two). *Retires*
+  the `event` half of D-12's delta and the `subscriber-queue` setting.
 
-**The payload discussion of 2026-09-17 is now ratified** in D-10 through D-18.
+  - **Two implementations of one thing.** D-81 gave a display core RUNS a whole
+    `View` on stdin: one cap-1 channel, `LastShown.Replace`, hand it over, 171
+    lines. The socket did the same job in 843 — deltas, a bounded queue per
+    subscriber, coalescing by session key, and a degradation path that threw the
+    queue away and sent a snapshot on overflow. A snapshot was already the
+    answer to a cold start, a reconnection and an overflow; making it the answer
+    to the ordinary case too deleted the other four mechanisms.
+  - **`event` went the whole way and nobody looked.** An agent-integration
+    reported it, the hook put it in a datagram, the session-watcher held it in a
+    map until the next sweep, and it was handed to every display in
+    `View.Changed`. Its only reader in the system was `replay`, writing it to a
+    recording so it could play it back into a fake and have it come out the
+    other side. The notifier it was for tells a transition from a nudge by
+    comparing kernels — a fact about the record, not a claim somebody made about
+    it. Renderers never got one at all, which is the tell: the two display paths
+    already disagreed about whether "why" existed and nothing noticed.
+  - **`gone` and `resync` answered questions a whole world answers.** A map
+    rebuilt from the world it was just sent cannot keep a pruned session. And
+    `resync` existed for a display restarted under core — `sketchybar --reload`
+    was the case, and sketchybar went in D-79 — where every write is a fresh
+    snapshot now.
+  - **What changed is computed at the end that survives.** This is the one place
+    the collapse stops. A display core RUNS is a fresh process that remembers
+    nothing, so core keeps its `LastShown` and fills in `Changed` for it. A
+    client on the socket outlives both its own connection and this
+    session-watcher, so it keeps its own and fills in `Changed` for itself —
+    which is why an agent that moved while the daemon was restarting is still
+    reported as having moved. Hand that job to the server and the fact dies with
+    the process that knew it. So the socket carries the world, and a view — the
+    world plus what it means to you — is made where the memory is.
+  - **The server keeps a second, narrower one.** Per connection, answering "is
+    this worth writing" and never "what changed". Without it `wake_on` stops
+    meaning anything on the wire: a subscriber that asked about kernels alone
+    would be written to every time an agent spends a token (R23).
+  - **One gate, asked where the answer is knowable.** `WorthOfferingAround` was
+    the generous question — "could ANYBODY want this?" — that the
+    session-watcher asked once before asking each subscriber the narrow one.
+    With every display comparing the world it is offered against the world it
+    last took, on the fields it named, the narrow question is the only question
+    and there is nowhere left to put a gate that answers it on somebody's
+    behalf. The outcome is unchanged: a usage-only write still reaches exactly
+    the displays that named `usage`.
+  - **It found a bug that predates it.** A session LEAVING the world is not a
+    change to any record — there is no record any more — so a display woken by
+    a prune compared everything it held against everything it was given, found
+    them identical, and drew nothing. A bar kept the row of an agent that
+    finished ten minutes ago, and `prune`'s "wake them, this one does not come
+    through as a record moving" comment was describing a wake-up that then
+    decided nothing had happened. `Replace` now reports a departure separately
+    from a change, and both display paths ask about both.
+  - **What it cost.** Two writes in the same instant to different sessions used
+    to be two messages and are now one world carrying two changes. That is
+    coalescing working, not a loss: `Changed` means "since the last view" and
+    says so accurately.
+
+
+**The payload discussion of 2026-09-17 is now ratified**
+ in D-10 through D-18.
 What is still marked [proposed] elsewhere — the field list of §A7.4, the event
 list and reducer of §A5.7, §A9.3, §A10.2–A10.3, §A11.5–A11.6, §A12.1, §A13.1 —
 is implementation detail to be confirmed while building, not unanswered design.

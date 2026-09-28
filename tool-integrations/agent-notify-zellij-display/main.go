@@ -138,7 +138,9 @@ func viewOnStdinOrTheStore() (session.View, error) {
 	if err != nil {
 		return session.View{}, err
 	}
-	return session.View{Sessions: sessions, Why: "the store, read directly"}, nil
+	// No changes to name: a view read straight out of the store is the world
+	// arriving, and nothing here was shown it before.
+	return session.View{Sessions: sessions}, nil
 }
 
 // WhatToWakeFor is what this display asks the session-watcher to wake it for.
