@@ -316,16 +316,15 @@ func (c *Config) problemsWith(name string) []error {
 		}
 	}
 
-	for tool, integration := range c.Integration {
-		if !integration.IsEnabled() {
-			continue
-		}
-		if integration.Binary == "" {
-			problems = append(problems, fmt.Errorf(
-				"%s: [integration.%s] has no binary to run, so nothing will happen for it",
-				name, tool))
-		}
-	}
+	// A table with no `binary` used to be reported here as "nothing will happen
+	// for it". It is a declaration now, not an omission (D-81): the absence is
+	// how a client says core must not run it, which is what both macOS displays
+	// and the picker say. `install` prints exactly such a table for all three,
+	// so this check called its own output a failure.
+	//
+	// Where a binary IS still required, the requirement belongs to whatever
+	// needs to run one — [container] order says so for a container, because a
+	// container that cannot be run cannot answer `focus`.
 
 	if c.Agent == nil {
 		c.Agent = map[string]Agent{}

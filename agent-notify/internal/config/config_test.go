@@ -197,13 +197,25 @@ func TestEveryDurationIsValidated(t *testing.T) {
 	}
 }
 
-func TestAnIntegrationThatDoesNothingIsReported(t *testing.T) {
-	_, problems := config.Parse([]byte("[integration.zellij]\n"), "empty.toml")
-	if len(problems) != 1 {
-		t.Fatalf("got %d complaints, want 1: %v", len(problems), problems)
+// TestATableWithNoBinaryIsAccepted: the absence is a declaration, not an
+// omission (D-81).
+//
+// It is how a client says core must not run it — both macOS displays and the
+// picker say exactly this, and `install` prints exactly this table for all
+// three. Complaining here meant complaining about our own printed output, which
+// is what it did: three FAILs on a correct config file.
+//
+// Where running one IS required, the requirement belongs to whatever needs to
+// run it. [container] order still refuses a container with no binary, because a
+// container that cannot be run cannot answer `focus`
+// (containers.TestAContainerWithNoBinaryIsRefusedAndNamed).
+func TestATableWithNoBinaryIsAccepted(t *testing.T) {
+	settings, problems := config.Parse([]byte("[integration.macos-bar]\n"), "client.toml")
+	if len(problems) != 0 {
+		t.Fatalf("a client's settings table was complained about: %v", problems)
 	}
-	if !strings.Contains(problems[0].Error(), "zellij") {
-		t.Errorf("the complaint does not name the integration:\n%v", problems[0])
+	if _, present := settings.Integration["macos-bar"]; !present {
+		t.Error("the table was accepted and then not kept, so nothing can read its settings")
 	}
 }
 
