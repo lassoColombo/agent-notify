@@ -52,7 +52,7 @@ func appliedWith(t *testing.T, body string) []string {
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	return Apply(given)
+	return Read(given)
 }
 
 func TestAUserWithNoOpinionKeepsThePalette(t *testing.T) {

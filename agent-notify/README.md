@@ -923,14 +923,11 @@ by the first. `doctor` says whether it is running.
 | Flag (on `run`) | Type | Description |
 | --- | --- | --- |
 | `--foreground` | switch | stay attached and log to the terminal |
-| `--state` | string | the state directory, when not resolved from the environment |
-| `--runtime` | string | the runtime directory |
-| `--config` | string | the configuration file |
 
-The three path flags exist because the spawner passes them: it also sanitises
-the environment that path resolution reads, and without them a detached watcher
-can end up watching a different directory than its clients write to — and
-nothing errors, it simply never sees anything.
+It resolves where things are from its environment, like every other command.
+The spawner cuts the agent's environment down to the variables that decide
+where things are, so a detached watcher resolves the same directories its
+clients write to.
 
 Losing the race to take the lock is the ordinary outcome and exits 0. Anyone may
 start one; the lock is what makes that harmless.
@@ -1026,12 +1023,22 @@ differently, are here once: `Record.DisplayName()`, `Record.State()`,
 A translation and one call.
 
 ```go
-hook.Record(session.Report{
-    Key:     session.Key{Agent: "claude", SessionID: payload.SessionID},
-    Event:   session.TurnFinished,
-    Message: &payload.LastAssistantMessage,
-})
+var payload Payload
+os.Exit(hook.Main(os.Args[1:], usage, install, &payload, func() (session.Report, bool) {
+    return session.Report{
+        Key:     session.Key{Agent: "claude", SessionID: payload.SessionID},
+        Event:   session.TurnFinished,
+        Message: &payload.LastAssistantMessage,
+    }, true
+}))
 ```
+
+`Main` hands `install` its arguments, refuses any other word with the usage,
+and otherwise decodes the payload on stdin, calls the translation and records
+what it returns. It never exits non-zero and never writes to stdout, because
+an agent reads both as verdicts. `LastResponses` reads the agent's transcript
+backwards for what the newest responses cost, given the one function that
+knows what a line of that transcript looks like.
 
 `Record` does the rest: resolves where things live, reads the configuration,
 walks its own ancestry to find the agent's process, runs the
@@ -1091,18 +1098,21 @@ Beside them: `Settings(&mine)` decodes this integration's own settings table
 and refuses a key nobody declared, `Read()`/`ReadIncludingEnded()` are the cold
 read, `History(key)` is one session's last few messages and transitions,
 `Focus(key)` runs `agent-notify focus-session` for a display that offers a
-click, `PrintTable` is what an `install` prints, and `Bundle` writes a macOS
-`.app` around a display that needs one.
+click, and `Install`/`InstallBundle` are the two shapes an `install` takes: a
+table with this program's path and its tool's filled in and printed, or a
+macOS `.app` built around a copy of this binary with the table and the launch
+agent printed after it. Both write nothing to your config file.
 
-One trap worth knowing about, because it is silent: a field your renderer reads
-and your `WakeOn` omits wakes you never for that change, and nothing errors.
-`EachFieldMoved` exists so a test can find that for you.
+`Main` refuses a `WakeOn` naming a field no record has, and a `Named`
+subcommand called `focus` or `render`. One trap it cannot catch, because it
+is silent: a field your renderer reads and your `WakeOn` omits wakes you never
+for that change. `FieldsRenderedButNotWokenFor` exists so a test can find that
+for you.
 
 ```go
-for field, moved := range session.EachFieldMoved(base) {
-    if render(base) != render(moved) && !slices.Contains(wakeOn, field) {
-        t.Errorf("the render moves with %q and this display does not wake for it", field)
-    }
+missing := session.FieldsRenderedButNotWokenFor(base, WhatToWakeFor(), render)
+if len(missing) > 0 {
+    t.Errorf("the render moves with %v and this display does not wake for them", missing)
 }
 ```
 
@@ -1120,8 +1130,21 @@ that integration's name and is opaque to core in both directions; what it means
 is agreed between your `Reads` and your `Interpret` and nobody else.
 
 There is nothing to declare. Every integration core can run is asked this one,
-and an integration with nothing to read answers an empty object, which core
-stores as no entry at all.
+and an integration with nothing to read answers an empty object, which is
+stored like any other answer: it is how core knows the question was answered
+and need not be asked again.
+
+### How core finds an integration
+
+Five things are true of a working integration, and each is a different
+mechanism. It is on your PATH as `agent-notify-<name>`, which is what `install`
+execs and `doctor` lists. It has a `[integration.<name>]` table, which is what
+turns it on. The table names a `binary` when core may run it; a display that
+owns its process leaves that out. It answered `capabilities`, which the
+session-watcher asks at startup and on `reload` and writes to
+`integrations.json` for `focus` and `doctor` to read. And a container is named
+in `[container] order`, which is the one fact only you know. `doctor` prints
+where each of yours stands.
 
 ## What is not finished
 

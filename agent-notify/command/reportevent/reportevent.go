@@ -18,7 +18,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/lassoColombo/agent-notify/command/internal/exit"
 	"github.com/lassoColombo/agent-notify/hook"
 	"github.com/lassoColombo/agent-notify/internal/core"
 	"github.com/lassoColombo/agent-notify/session"
@@ -46,7 +45,9 @@ exactly the same function.`,
 		SilenceUsage:       true,
 		SilenceErrors:      true,
 		Run: func(command *cobra.Command, arguments []string) {
-			exit.TheProcessWith(reportEvent(reported))
+			if code := reportEvent(reported); code != 0 {
+				os.Exit(code)
+			}
 		},
 	}
 	flags := command.Flags()

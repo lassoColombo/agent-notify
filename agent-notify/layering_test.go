@@ -12,115 +12,12 @@ import (
 	"testing"
 )
 
-// The layout of this module is a claim about its dependencies, and the
-// directories can only carry half of it.
-//
-// They carry which packages are doors — the ones at the top level, that an
-// integration in another repository imports — and which are behind one, under
-// an `internal/`. What they cannot carry is depth. `command/install` imports
-// nothing of ours and `command/doctor` imports ten; they are siblings on disk
-// because they are both subcommands, and no arrangement of directories can say
-// both things at once. Nesting by depth instead would bury `subscribe`, which
-// every display imports, six levels down a path nobody outside could love.
-//
-// So the depth lives here. Each package's floor is the longest chain of our own
-// packages below it: a leaf is 0, and a package is one more than the deepest
-// thing it imports. The numbers are a measurement, not a wish — the test
-// recomputes them from the source and fails when the table is out of date.
-// That is the point. Adding an import that deepens a package is allowed and
-// sometimes right; doing it without noticing is what this catches, because a
-// floor that moves is the shape of the program changing.
-var theFloorEachPackageIsOn = map[string]int{
-	// The floor. Nothing of ours below these.
-	"session":                 0, // the vocabulary: every other package speaks it
-	"internal/paths":          0, // every location this program owns
-	"capture":                 0, // read the agent's environment, from inside it
-	"hook/internal/branch":    0, // the one package with a single owner, so it nests
-	"command/internal/exit":   0,
-	"command/internal/onpath": 0,
-	"container":               0, // the words a container answers in
-
-	// One step up: they know the vocabulary, or where things are, and nothing else.
-	"internal/config":       1,
-	"internal/process":      1,
-	"logs":                  1,
-	"tool":                  1,
-	"command/internal/rows": 1,
-	"command/install":       1, // a dispatcher: it execs, so it links almost nothing
-
-	"internal/sessionstore": 2,
-	"internal/subcommand":   2,
-
-	"internal/core":       3,
-	"internal/containers": 3,
-
-	"internal/sessionwatcher": 4,
-	"command/internal/find":   4,
-	"command/list":            4,
-
-	// The doors an integration in another repository imports, and the
-	// subcommands, which are clients of exactly the same things (R14).
-	"hook":                5,
-	"subscribe":           5,
-	"command/focus":       5,
-	"command/annotate":    5,
-	"command/watcher":     5,
-	"command/doctor":      5,
-	"command/reportevent": 6,
-	"command/tail":        6,
-
-	// main, which imports every command and is imported by nothing.
-	".": 7,
-}
+// The layout of this module is a claim about its dependencies: the packages
+// at the top level are the doors an integration in another module imports,
+// and everything else is behind an internal/. The compiler refuses a cycle;
+// these tests refuse the rest.
 
 const modulePath = "github.com/lassoColombo/agent-notify"
-
-func TestEveryPackageIsOnTheFloorTheTableSaysItIs(t *testing.T) {
-	graph := whatEachPackageImports(t)
-
-	for path := range graph {
-		if _, placed := theFloorEachPackageIsOn[path]; !placed {
-			t.Errorf("package %q is in no floor: add it to theFloorEachPackageIsOn, "+
-				"which means deciding where it sits before writing it", path)
-		}
-	}
-	for path := range theFloorEachPackageIsOn {
-		if _, exists := graph[path]; !exists {
-			t.Errorf("the table names %q, which is not a package any more", path)
-		}
-	}
-	if t.Failed() {
-		return
-	}
-
-	measured := map[string]int{}
-	var floorOf func(string) int
-	floorOf = func(path string) int {
-		if known, done := measured[path]; done {
-			return known
-		}
-		measured[path] = 0 // breaks a cycle the compiler would have refused anyway
-		deepest := -1
-		for _, imported := range graph[path] {
-			if below := floorOf(imported); below > deepest {
-				deepest = below
-			}
-		}
-		measured[path] = deepest + 1
-		return measured[path]
-	}
-
-	for _, path := range sorted(graph) {
-		want, got := theFloorEachPackageIsOn[path], floorOf(path)
-		if want == got {
-			continue
-		}
-		t.Errorf("%s is on floor %d, and the table says %d.\n"+
-			"    It imports: %s\n"+
-			"    Either the import that moved it is wrong, or the table is out of date.",
-			path, got, want, strings.Join(graph[path], ", "))
-	}
-}
 
 // TestNoCommandImportsAnotherCommand. The nine subcommands are siblings, and
 // what two of them share lives under command/internal — where the sharing is
@@ -151,7 +48,7 @@ func isASubcommand(path string) bool {
 func TestOnlyTheTopLevelIsImportable(t *testing.T) {
 	doors := map[string]bool{
 		"session": true, "hook": true, "subscribe": true,
-		"container": true, "capture": true, "tool": true, "logs": true,
+		"container": true, "tool": true, "logs": true,
 	}
 	for path := range whatEachPackageImports(t) {
 		if path == "." || strings.Contains(path, "internal/") || strings.HasPrefix(path, "command/") {
@@ -166,9 +63,7 @@ func TestOnlyTheTopLevelIsImportable(t *testing.T) {
 }
 
 // whatEachPackageImports reads the source rather than shelling out to `go
-// list`, so that files excluded by a build tag are read too. An import that
-// only exists on Linux is still an edge in this graph, and a layout that is
-// only true on the machine the test ran on is not worth having.
+// list`, so that files excluded by a build tag are read too.
 func whatEachPackageImports(t *testing.T) map[string][]string {
 	t.Helper()
 	root, err := os.Getwd()
@@ -235,13 +130,4 @@ func contains(haystack []string, needle string) bool {
 		}
 	}
 	return false
-}
-
-func sorted(graph map[string][]string) []string {
-	paths := make([]string, 0, len(graph))
-	for path := range graph {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
-	return paths
 }

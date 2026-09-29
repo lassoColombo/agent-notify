@@ -40,10 +40,10 @@ func main() {
 	os.Exit(subscribe.Main(me, subscribe.Commands{
 		Named: map[string]func([]string) int{
 			"install":   install,
-			"--preview": func(arguments []string) int { Apply(me); return previewOf(arguments) },
-			"--label":   func(arguments []string) int { Apply(me); return labelOf(arguments) },
+			"--preview": func(arguments []string) int { Read(me); return previewOf(arguments) },
+			"--label":   func(arguments []string) int { Read(me); return labelOf(arguments) },
 		},
-		Default: func(arguments []string) int { return run(arguments, Apply(me)) },
+		Default: func(arguments []string) int { return run(arguments, Read(me)) },
 	}, os.Args[1:]))
 }
 

@@ -18,11 +18,10 @@ import (
 // beyond running the list: each blob is kept under its own integration's name,
 // and neither a failure nor an empty answer leaves an entry behind.
 //
-// The two silent ones matter for the same reason. worthCapturing compares who
-// would be asked against who is stored, so an entry that says nothing would
-// read as a success and that session would never be captured again. And an
-// empty answer is now the ordinary reply from every integration that reads
-// nothing, since all of them are asked.
+// An empty answer is kept and a failure is not, and worthCapturing tells them
+// apart: it compares who would be asked against who answered, so a broken
+// integration is asked again on every hook until it is fixed, and one with
+// nothing to read is not.
 func TestEachAnswerLandsUnderItsOwnName(t *testing.T) {
 	// This test is about routing, not about the bound. Three shell scripts
 	// against the production second is a race with whatever else the machine
@@ -43,8 +42,11 @@ func TestEachAnswerLandsUnderItsOwnName(t *testing.T) {
 	captured := askEveryoneWhoCaptures(settings,
 		[]string{"bar", "broken", "pane", "window"}, slog.New(slog.DiscardHandler), nil)
 
-	if got := owners(captured.By); !slices.Equal(got, []string{"pane", "window"}) {
-		t.Fatalf("captured for %v, want only the two with something to say", got)
+	if got := owners(captured.By); !slices.Equal(got, []string{"bar", "pane", "window"}) {
+		t.Fatalf("captured for %v, want everybody that answered", got)
+	}
+	if got := string(captured.By["bar"]); got != `{}` {
+		t.Errorf("bar's blob is %s, want the empty object it printed", got)
 	}
 	if got := string(captured.By["pane"]); got != `{"PANE":"7"}` {
 		t.Errorf("pane's blob is %s", got)

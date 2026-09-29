@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lassoColombo/agent-notify/internal/onewatcher"
 	"github.com/lassoColombo/agent-notify/internal/paths"
-	"github.com/lassoColombo/agent-notify/internal/sessionwatcher"
 	"github.com/lassoColombo/agent-notify/session"
 )
 
@@ -22,10 +22,10 @@ func watching(t *testing.T, root string) (int, bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !sessionwatcher.Running(layout) {
+	if !onewatcher.Running(layout) {
 		return 0, false
 	}
-	held, err := sessionwatcher.WhoHolds(layout)
+	held, err := onewatcher.WhoHolds(layout)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -17,14 +17,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lassoColombo/agent-notify/capture"
 	"github.com/lassoColombo/agent-notify/hook/internal/branch"
 	"github.com/lassoColombo/agent-notify/internal/config"
 	"github.com/lassoColombo/agent-notify/internal/core"
+	"github.com/lassoColombo/agent-notify/internal/onewatcher"
 	"github.com/lassoColombo/agent-notify/internal/process"
-	"github.com/lassoColombo/agent-notify/internal/sessionwatcher"
-	"github.com/lassoColombo/agent-notify/internal/subcommand"
 	"github.com/lassoColombo/agent-notify/session"
+	"github.com/lassoColombo/agent-notify/tool"
 )
 
 // captureTimeout bounds every integration's `capture-environment` at once: they
@@ -91,7 +90,7 @@ func Record(report session.Report) (session.Record, bool) {
 	// The session-watcher wakes on the store itself; all that is left is to
 	// make sure there is one. A race between hooks is harmless: the lock
 	// means exactly one survives (§A9.2).
-	if err := sessionwatcher.StartIfNobodyIs(opened.Layout, opened.Settings.AgentNotifyBinary); err != nil {
+	if err := onewatcher.StartIfNobodyIs(opened.Layout, opened.Settings.AgentNotifyBinary); err != nil {
 		opened.Logger.Warn("cannot start a session-watcher", "problem", err.Error())
 	}
 	return written, true
@@ -136,8 +135,8 @@ func look(opened *core.Core, report *session.Report) {
 
 // askEveryoneWhoCaptures runs every runnable integration's `capture-environment`
 // concurrently, as children of this process (D-27). One that reads nothing
-// answers an empty object, which is recorded as nothing at all; one that hangs,
-// crashes or is missing contributes nothing (R13).
+// answers an empty object, kept as it is; one that hangs, crashes or is
+// missing contributes nothing (R13).
 func askEveryoneWhoCaptures(
 	settings config.Config, asked []string, logger *slog.Logger, chain []session.Ancestor,
 ) session.CapturedContext {
@@ -145,14 +144,14 @@ func askEveryoneWhoCaptures(
 
 	answered := make([]json.RawMessage, len(asked))
 	var running sync.WaitGroup
-	for i, tool := range asked {
+	for i, name := range asked {
 		running.Add(1)
 		go func() {
 			defer running.Done()
-			blob, err := subcommand.Ask(settings.Integration[tool].Binary,
-				capture.Command, nil, captureTimeout)
+			blob, err := tool.Ask(settings.Integration[name].Binary,
+				session.CaptureCommand, nil, captureTimeout)
 			if err != nil {
-				logger.Warn("capture-environment", "integration", tool, "problem", err.Error())
+				logger.Warn("capture-environment", "integration", name, "problem", err.Error())
 				return
 			}
 			answered[i] = blob
@@ -160,18 +159,14 @@ func askEveryoneWhoCaptures(
 	}
 	running.Wait()
 
-	for i, tool := range asked {
+	for i, name := range asked {
 		if len(answered[i]) == 0 {
-			continue
-		}
-		var anything map[string]json.RawMessage
-		if err := json.Unmarshal(answered[i], &anything); err == nil && len(anything) == 0 {
 			continue
 		}
 		if captured.By == nil {
 			captured.By = map[string]json.RawMessage{}
 		}
-		captured.By[tool] = answered[i]
+		captured.By[name] = answered[i]
 	}
 	return captured
 }
@@ -179,8 +174,9 @@ func askEveryoneWhoCaptures(
 // worthCapturing: an agent's environment does not change while it runs, and a
 // capture voids everything derived from the previous one (§A7.4.1). So only
 // when nothing is stored, the process is a different one, or the set of
-// integrations to ask has changed. An integration that is asked and fails never
-// appears in `stored.By`, so every hook captures again until it is fixed.
+// integrations that answered is not the set that would be asked. One that
+// fails never appears in `stored.By`, so every hook captures again until it
+// is fixed.
 func worthCapturing(
 	previous session.Record, wouldAsk []string, agentProcess session.Process,
 ) bool {

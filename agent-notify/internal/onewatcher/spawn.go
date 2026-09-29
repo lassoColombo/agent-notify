@@ -1,6 +1,4 @@
-//go:build unix
-
-package sessionwatcher
+package onewatcher
 
 import (
 	"fmt"
@@ -35,11 +33,8 @@ import (
 //     Cut by chdir to /.
 //   - **The agent's environment**, which holds API keys, and which the
 //     session-watcher would then keep in memory for days. Cut by passing an
-//     explicit short list.
-//
-// Because the environment is cut, the layout is passed as arguments instead of
-// being resolved again — the safer of the two options the plan names, since it
-// cannot drift.
+//     explicit short list, which keeps everything path resolution reads, so
+//     the child resolves the same layout this process did.
 func Spawn(layout paths.Layout, configured string) error {
 	program, err := CoreBinary(configured)
 	if err != nil {
@@ -52,10 +47,7 @@ func Spawn(layout paths.Layout, configured string) error {
 	}
 	defer null.Close()
 
-	command := exec.Command(program, "watcher", "run",
-		"--state", layout.State,
-		"--runtime", layout.Runtime,
-		"--config", layout.ConfigFile)
+	command := exec.Command(program, "watcher", "run")
 	command.Stdin, command.Stdout, command.Stderr = null, null, null
 	// Only what the runtime writes over the program's head lands here; the
 	// session-watcher logs everything it means to say through logs.OpenFile,
@@ -86,15 +78,13 @@ func Spawn(layout paths.Layout, configured string) error {
 // So, in order: what the configuration named, this executable if it is
 // agent-notify, then PATH. PATH is last and not trusted much — a hook's PATH is
 // not your shell's PATH, which is exactly why `agent-notify-binary` exists in
-// the configuration.
-//
-// An integration that runs `agent-notify focus-session` on a click has the
-// same problem: a launchd job's PATH is not your shell's either.
+// the configuration. An integration that runs `agent-notify focus-session` on
+// a click has the same problem: a launchd job's PATH is not your shell's
+// either.
 //
 // Failing to find it is not fatal to anything. The record is already written,
 // `list` still reads it and still applies liveness as it reads; what is lost is
-// the daemon, and with it only the speed of noticing a death. The system
-// degrades to what it was before there was a session-watcher at all.
+// the daemon, and with it only the speed of noticing a death.
 func CoreBinary(configured string) (string, error) {
 	if configured != "" {
 		if found, err := exec.LookPath(configured); err == nil {
@@ -113,26 +103,15 @@ func CoreBinary(configured string) (string, error) {
 			"program and not on PATH. Name it as `agent-notify-binary` in the configuration.")
 }
 
-// keptEnvironment is the explicit short list. Everything not named here is left
-// behind, which is the point: an agent's environment holds API keys and a
+// keptEnvironment is the explicit short list. Everything not named here is
+// left behind, which is the point: an agent's environment holds API keys and a
 // session-watcher would otherwise keep them in memory for days.
 //
-// The list is short but it is not arbitrary. Two kinds of thing are on it and
-// nothing else is:
-//
-//   - **Everything that decides where things are.** TMPDIR and the XDG
-//     variables are not preferences, they are part of what
-//     FromEnvironment answers. A child that resolves the runtime
-//     directory differently from the session-watcher looks for the socket in a
-//     place nobody is listening, and what a person sees is an integration that
-//     starts, never connects, and is given up on with a message about
-//     handshakes.
-//   - **Who you are.** USER and LOGNAME, because a per-user service is found by
-//     name on macOS: `sketchybar` with no USER set exits with "'env USER' not
-//     set! abort", which is how M14 found this (D-43).
-//
-// Nothing here can hold a secret. A key lives in an agent's own environment and
-// is named after the service it opens, never after a directory or a person.
+// Two kinds of thing are on it. Everything that decides where things are:
+// TMPDIR and the XDG variables are part of what paths.FromEnvironment answers,
+// and a child that resolved a different directory would watch an empty one.
+// And who you are: a per-user service is found by name on macOS (D-43).
+// Nothing here can hold a secret.
 func keptEnvironment() []string {
 	var kept []string
 	for _, name := range []string{

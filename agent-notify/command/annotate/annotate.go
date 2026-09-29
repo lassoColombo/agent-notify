@@ -20,7 +20,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/lassoColombo/agent-notify/command/internal/exit"
 	"github.com/lassoColombo/agent-notify/command/internal/find"
 	"github.com/lassoColombo/agent-notify/internal/core"
 	"github.com/lassoColombo/agent-notify/session"
@@ -43,7 +42,9 @@ somebody wants remembered — and they belong to whoever wrote them.
 			if len(arguments) < 3 && !remove {
 				return fmt.Errorf("annotate needs the JSON to write, or --remove")
 			}
-			exit.TheProcessWith(annotate(arguments, remove))
+			if code := annotate(arguments, remove); code != 0 {
+				os.Exit(code)
+			}
 			return nil
 		},
 	}

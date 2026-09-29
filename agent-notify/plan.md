@@ -4754,6 +4754,55 @@ of this section is that it prevents re-litigating.
     write, and the tests that read them off the pure reducer now read them
     off the store.
 
+- **D-84** (2026-09-28) — **Simplification: one world, one shape, one place
+  for what every integration copied.** The architecture review of the same day
+  found no fault with the bus and eighteen places where the code around it did
+  the same thing twice or kept the scaffolding of a mechanism D-83 retired. All
+  of them are closed; nothing was added and no module was merged. The working
+  plan is [simplification-plan.md](../simplification-plan.md). *Amends* §A9.1
+  (the watcher keeps no picture of the world; it reads the store), §A10.4 (the
+  SDK owns install, bundle install, an agent's main and the transcript reader),
+  §A7.4.1 (an empty capture is stored). *Retires* the floor table of
+  `layering_test.go`, `capture` as a package, `Capabilities.Answer`,
+  `internal/subcommand` and `command/internal/exit`.
+
+  - **One world.** The watcher's renderers read `Core.WhatIsRunning`, the
+    same read every other display and `list` make, with liveness applied. The
+    in-memory `known` map served renders a world without it, so a killed agent
+    was `ended` on the menu bar and `working` in zellij until the next sweep.
+  - **One shape for capabilities.** `session.Capabilities` is what is asked,
+    what `integrations.json` carries, and what `containers.Configured` and the
+    renderers read; a program that could not be asked has a `problem` beside
+    it rather than a second type. The watcher's wake channel holds one wake,
+    so the record it writes from `derive` costs one empty `reconcile`.
+  - **An empty capture is stored.** `worthCapturing` compares who was asked
+    with who answered; an integration that answers `{}` because it reads
+    nothing is an answer, and one that failed is not. Before, the designed
+    empty answer was dropped, so the day a runnable integration had no `Reads`
+    every hook forked every integration again.
+  - **`Core` is opened once per process** and kept by `subscribe.Integration`,
+    which carries the configuration's problems, so a picker's preview no
+    longer creates six directories and parses the file per row. `watcher run`
+    resolves its layout from the environment the spawner kept, which is what
+    the kept environment was for; the three flags that duplicated it are gone.
+  - **The daemon is the daemon.** `internal/onewatcher` is the lock and the
+    spawn; `internal/storewatch` is the kqueue on the store; `hook` and
+    `subscribe` import those and not the process.
+  - **What every integration copied is in core.** `Integration.Install` and
+    `Integration.InstallBundle` are the two install shapes; `hook.Main` is an
+    agent-integration's dispatch; `hook.LastResponses` reads a transcript
+    backwards for what the last responses cost;
+    `session.FieldsRenderedButNotWokenFor` is the D-73 test's body. Every
+    tool-integration reads its settings through `Read(me)`, lazily, so
+    `install` runs against a broken file.
+  - **`subscribe.Main` refuses a `WakeOn` naming no field and a `Named`
+    subcommand that shadows a verb core runs**, because both failed silently.
+  - **The prose describes the bus that exists**: no socket, datagram, poke or
+    subscriber survives in a comment, and `tail` derives its completion from
+    the record. `//go:build unix` is off files whose only implementation is
+    darwin; the XDG branches in `paths` stay because M17 is still planned.
+    `container` stays a package, as D-83 chose.
+
 **The payload discussion of 2026-09-17 is now ratified**
  in D-10 through D-18.
 What is still marked [proposed] elsewhere — the field list of §A7.4, the event

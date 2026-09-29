@@ -18,28 +18,27 @@ const renderTimeout = 5 * time.Second
 // A renderer is one display core runs: `render` with the view on stdin, once
 // per change it asked about.
 type renderer struct {
-	name      string
-	binary    string
-	wakeOn    []string
-	wantEnded bool
-	logger    *slog.Logger
-	// theWorldNow is asked at the moment of rendering, so a render that waited
+	name   string
+	binary string
+	asked  session.Capabilities
+	logger *slog.Logger
+	// theWorldNow is read at the moment of rendering, so a render that waited
 	// paints what is true now.
 	theWorldNow func(wantEnded bool) []session.Record
 
-	// wake holds at most one: it coalesces, because a render paints the whole
-	// world, and it serialises, because two `zellij action rename-pane` in
-	// flight together is how a pane ends up wearing the wrong name.
-	wake chan struct{}
+	// woken holds at most one: it coalesces, because a render paints the
+	// whole world, and it serialises, because two `zellij action rename-pane`
+	// in flight together is how a pane ends up wearing the wrong name.
+	woken chan struct{}
 
 	// shown is what this display was last handed. Kept here because a process
 	// started fresh for one render remembers nothing.
 	shown session.LastShown
 }
 
-func (r *renderer) poke() {
+func (r *renderer) wake() {
 	select {
-	case r.wake <- struct{}{}:
+	case r.woken <- struct{}{}:
 	default:
 	}
 }
@@ -49,7 +48,7 @@ func (r *renderer) serve(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-r.wake:
+		case <-r.woken:
 			r.renderOnce()
 		}
 	}
@@ -57,7 +56,7 @@ func (r *renderer) serve(ctx context.Context) {
 
 func (r *renderer) renderOnce() {
 	first := !r.shown.HasSeenAView()
-	changed, departed := r.shown.Replace(r.theWorldNow(r.wantEnded), r.wakeOn)
+	changed, departed := r.shown.Replace(r.theWorldNow(r.asked.WantEnded), r.asked.WakeOn)
 	if !first && len(changed) == 0 && !departed {
 		return
 	}
@@ -81,11 +80,13 @@ func (w *Watcher) startRenderers(ctx context.Context) {
 		w.renderers = map[string]*renderer{}
 	}
 	settings := w.opened.Settings
-	methods := w.methodsByIntegration()
+	w.mu.Lock()
+	answers := w.answers
+	w.mu.Unlock()
 
 	wanted := map[string]bool{}
 	for _, name := range settings.Runnable() {
-		if !slices.Contains(methods[name], session.MethodRender) {
+		if !slices.Contains(answers[name].Methods, session.MethodRender) {
 			continue
 		}
 		wanted[name] = true
@@ -93,19 +94,17 @@ func (w *Watcher) startRenderers(ctx context.Context) {
 			continue
 		}
 
-		answered := w.answers[name]
 		drawing := &renderer{
-			name: name, binary: settings.Integration[name].Binary,
-			wakeOn: answered.WakeOn, wantEnded: answered.WantEnded,
-			logger: w.logger, theWorldNow: w.snapshotFor,
-			wake: make(chan struct{}, 1),
+			name: name, binary: settings.Integration[name].Binary, asked: answers[name],
+			logger: w.logger, theWorldNow: w.opened.WhatIsRunning,
+			woken: make(chan struct{}, 1),
 		}
 		w.renderers[name] = drawing
 		go drawing.serve(ctx)
 		// The cold path: a world to draw and no change to be told about.
-		drawing.poke()
+		drawing.wake()
 		w.logger.Info("rendering on demand", "display", name,
-			"binary", drawing.binary, "wake on", drawing.wakeOn)
+			"binary", drawing.binary, "wake on", drawing.asked.WakeOn)
 	}
 
 	for name := range w.renderers {
@@ -118,6 +117,6 @@ func (w *Watcher) startRenderers(ctx context.Context) {
 
 func (w *Watcher) drawEverythingAgain() {
 	for _, drawing := range w.renderers {
-		drawing.poke()
+		drawing.wake()
 	}
 }

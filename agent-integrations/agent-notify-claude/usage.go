@@ -9,7 +9,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"slices"
 	"strings"
 
 	"github.com/lassoColombo/agent-notify/hook"
@@ -43,24 +42,6 @@ import (
 // carrying 1869 distinct requestIds in one 51 MB transcript, so adding up lines
 // overcounts output by 2.11× and cache reads by 1.77×. The requestId rides
 // along with every response for exactly that reason.
-const (
-	// oneReadWorthOfTranscript is how much is read at a time, working backwards
-	// from the end.
-	oneReadWorthOfTranscript = 64 << 10
-	// enoughResponses is how many the search is content to stop at. A hook
-	// fires on every tool call, so one new response since the last read is the
-	// ordinary case; eight is the margin for the hooks that do not fire.
-	enoughResponses = 8
-	// asFarBackAsItIsWorthGoing stops a search that is not finding any.
-	//
-	// A block can hold no responses at all, and not rarely: a tool result is a
-	// line too, and reading a file writes a megabyte of one. So the search
-	// cannot be a single read of the end — the newest response is often behind
-	// a result far larger than the window — and it cannot be unbounded either,
-	// on a path the agent is waiting on.
-	asFarBackAsItIsWorthGoing = 4 << 20
-)
-
 // ClaudeTranscript is what the transcript has to say about this session, or
 // nothing at all.
 //
@@ -81,42 +62,20 @@ type ClaudeTranscript struct {
 	Model string
 }
 
-// WhatTheTranscriptSays reads backwards from the end of the transcript until it
-// has enough responses or has looked far enough.
-//
-// Backwards, because the newest are the ones core has not counted, and a
-// transcript only grows: a session an hour in is fifty megabytes, and reading
-// it in full to find the last few hundred bytes that changed is a cost that
-// grows with every turn taken.
+// WhatTheTranscriptSays reads the newest responses off the end of the
+// transcript, and which model produced the newest of them.
 func WhatTheTranscriptSays(transcriptPath string) ClaudeTranscript {
-	transcriptPath = strings.TrimSpace(transcriptPath)
-	if transcriptPath == "" {
-		return ClaudeTranscript{}
-	}
 	var said ClaudeTranscript
-	_ = hook.ReadBackwards(transcriptPath, oneReadWorthOfTranscript, asFarBackAsItIsWorthGoing,
-		func(line []byte) bool {
+	said.Responses = hook.LastResponses(strings.TrimSpace(transcriptPath),
+		func(line []byte) (session.Spend, bool) {
 			response, model, itCost := whatThisLineCost(line)
-			if !itCost {
-				return true
-			}
-			if newest := len(said.Responses) - 1; newest >= 0 &&
-				said.Responses[newest].Response == response.Response {
-				// The same response written across another content block.
-				return true
-			}
-			if len(said.Responses) == 0 {
-				// The newest response is the only one whose model is still
-				// true after a `/model` halfway through.
+			if itCost && said.Model == "" {
+				// Newest first, and the newest response is the only one whose
+				// model is still true after a `/model` halfway through.
 				said.Model = model
 			}
-			said.Responses = append(said.Responses, response)
-			return len(said.Responses) < enoughResponses
+			return response, itCost
 		})
-
-	// Oldest first, which is the order core walks them in and the order they
-	// were written in.
-	slices.Reverse(said.Responses)
 	return said
 }
 
@@ -147,13 +106,9 @@ type transcriptLine struct {
 }
 
 // assistantLine is the cheap test that decides whether a line is worth
-// decoding. Most of a transcript is prompts, tool results and attachments, and
-// a file read can put a megabyte of one of them in front of this.
-//
-// It matches the value rather than the pair, because a filter that depends on
-// how the writer spaces its JSON is a filter that stops matching on a day
-// nobody is watching, and what it costs to be wrong here is silence. The decode
-// below is what actually decides.
+// decoding. It matches the value rather than the pair, because a filter that
+// depends on how the writer spaces its JSON stops matching on a day nobody is
+// watching. The decode below is what actually decides.
 var assistantLine = []byte(`"assistant"`)
 
 // whatThisLineCost reads one line of the transcript, and says whether it is a

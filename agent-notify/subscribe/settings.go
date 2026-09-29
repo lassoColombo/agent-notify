@@ -11,12 +11,12 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"sync"
 
-	"github.com/lassoColombo/agent-notify/capture"
 	"github.com/lassoColombo/agent-notify/internal/config"
 	"github.com/lassoColombo/agent-notify/internal/core"
+	"github.com/lassoColombo/agent-notify/internal/onewatcher"
 	"github.com/lassoColombo/agent-notify/internal/paths"
-	"github.com/lassoColombo/agent-notify/internal/sessionwatcher"
 	"github.com/lassoColombo/agent-notify/session"
 	"github.com/pelletier/go-toml/v2"
 )
@@ -32,16 +32,47 @@ type Integration struct {
 	// WantEnded asks for ended sessions too: a picker, or a display that owns
 	// panes it must give back (D-26).
 	WantEnded bool
-	// Reads answers `capture-environment`, from inside the agent (D-27). Nil
-	// answers an empty object.
-	Reads capture.Reads
+	// Reads answers `capture-environment`, from inside the agent (D-27):
+	// read local state and return, never ask the tool anything. Whatever it
+	// returns is stored verbatim under this integration's name, opaque to
+	// core (R7). Nil answers an empty object.
+	Reads func() (any, error)
 	// Root overrides where agent-notify's files are; empty means the
 	// environment says (D-69).
 	Root string
 }
 
 func (i Integration) layout() (paths.Layout, error) {
-	return paths.FromEnvironmentOrUnder(i.Root)
+	if i.Root == "" {
+		return paths.FromEnvironment()
+	}
+	return paths.Under(i.Root)
+}
+
+// Core is opened once per process and kept: every read after the first costs
+// no directory, no log file and no parse.
+var (
+	openedMu sync.Mutex
+	opened   = map[string]*core.Core{}
+)
+
+func (i Integration) core() (*core.Core, error) {
+	openedMu.Lock()
+	defer openedMu.Unlock()
+	key := i.Name + "\x00" + i.Root
+	if have, found := opened[key]; found {
+		return have, nil
+	}
+	layout, err := i.layout()
+	if err != nil {
+		return nil, err
+	}
+	have, err := core.OpenAt(layout, i.Name)
+	if err != nil {
+		return nil, err
+	}
+	opened[key] = have
+	return have, nil
 }
 
 // Settings decodes this integration's own `settings` table into whatever shape
@@ -49,20 +80,19 @@ func (i Integration) layout() (paths.Layout, error) {
 // glyph that changes nothing and says nothing is the config bug people give
 // up on. No table at all leaves `into` as it was.
 func (i Integration) Settings(into any) error {
-	layout, err := i.layout()
+	opened, err := i.core()
 	if err != nil {
 		return err
 	}
-	settings, problems := config.Load(layout.ConfigFile)
-	for _, problem := range problems {
+	for _, problem := range opened.Problems {
 		// A file refused whole took this table down with it; anything else is
 		// core's to report.
 		if errors.Is(problem, config.ErrRefused) {
-			return fmt.Errorf("%s: %w", layout.ConfigFile, problem)
+			return fmt.Errorf("%s: %w", opened.Layout.ConfigFile, problem)
 		}
 	}
 
-	section := settings.Integration[i.Name].Settings
+	section := opened.Settings.Integration[i.Name].Settings
 	if len(section) == 0 {
 		return nil
 	}
@@ -96,12 +126,11 @@ func (i Integration) ConfigFile() (string, error) {
 // CoreBinary is where the agent-notify command lives: what the configuration
 // names, or a lookup, since a launchd job's PATH is not your shell's (D-33).
 func (i Integration) CoreBinary() (string, error) {
-	layout, err := i.layout()
+	opened, err := i.core()
 	if err != nil {
 		return "", err
 	}
-	settings, _ := config.Load(layout.ConfigFile)
-	return sessionwatcher.CoreBinary(settings.AgentNotifyBinary)
+	return onewatcher.CoreBinary(opened.Settings.AgentNotifyBinary)
 }
 
 // Read is the cold read: what is running, straight from the store, with the
@@ -118,29 +147,19 @@ func (i Integration) ReadIncludingEnded() ([]session.Record, error) {
 }
 
 func (i Integration) read(includeEnded bool) ([]session.Record, error) {
-	layout, err := i.layout()
+	opened, err := i.core()
 	if err != nil {
 		return nil, err
 	}
-	opened, err := core.OpenAt(layout, i.Name)
-	if err != nil {
-		return nil, err
-	}
-	defer opened.Close()
 	return opened.WhatIsRunning(includeEnded), nil
 }
 
 // History is one session's history, read on demand (§A7.7). A session with
 // nothing recorded yet is an empty History and no error.
 func (i Integration) History(key session.Key) (session.History, error) {
-	layout, err := i.layout()
+	opened, err := i.core()
 	if err != nil {
 		return session.History{}, err
 	}
-	opened, err := core.OpenAt(layout, i.Name)
-	if err != nil {
-		return session.History{}, err
-	}
-	defer opened.Close()
 	return opened.Store.History(key)
 }

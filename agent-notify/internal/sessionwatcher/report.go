@@ -13,8 +13,12 @@ import (
 
 // Integration is one line of the report.
 type Integration struct {
-	Name    string                   `json:"name"`
-	Answers WhatAnIntegrationAnswers `json:"answers"`
+	Name    string               `json:"name"`
+	Answers session.Capabilities `json:"answers"`
+	// Problem is why it could not be asked. Kept because a program that
+	// answers no methods and one that could not be asked look identical and
+	// mean opposite things.
+	Problem string `json:"problem,omitempty"`
 	// Binary is what core runs; a table without one is a client's settings.
 	Binary string `json:"binary,omitempty"`
 	State  string `json:"state"`
@@ -38,7 +42,7 @@ func (w *Watcher) writeReport(settings config.Config) {
 		if slices.Contains(runnable, name) {
 			line.Binary = settings.Integration[name].Binary
 			w.mu.Lock()
-			line.Answers = w.answers[name]
+			line.Answers, line.Problem = w.answers[name], w.unanswered[name]
 			w.mu.Unlock()
 			line.State = "run when core needs it"
 			if slices.Contains(line.Answers.Methods, session.MethodRender) {

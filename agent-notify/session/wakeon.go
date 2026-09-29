@@ -9,17 +9,11 @@ import (
 	"time"
 )
 
-// What a subscriber may ask to be woken for, and how a display can find out
-// what it actually needs rather than declare it and hope.
-//
-// Both halves of this file exist because the same mistake was made twice in
-// different directions. A name that is not a field wakes a display never
-// (D-70). A field the renderer reads and the declaration omits wakes it never
-// for that change, which is the same silence arrived at honestly — sketchybar
-// drew the agent's message in a popup and did not ask for `message`, so a
-// second prompt queued at a working agent left the popup showing the first one
-// (D-72). Neither produces an error, a log line, or anything but a display
-// that is right when it starts and wrong later.
+// What a display may ask to be woken for, and how it can find out what it
+// actually needs rather than declare it and hope. A name that is not a field
+// wakes a display never (D-70); a field the renderer reads and the declaration
+// omits wakes it never for that change (D-72). Neither produces an error, so
+// both are checked here.
 
 // settledFields do not move once a session exists, so nothing can be woken by
 // one of them.
@@ -36,30 +30,10 @@ var settledFields = map[string]bool{"key": true, "created_at": true}
 // ReasonTheseFieldsCannotBeWokenOn names any of them that is not a field of a
 // record, and is nil when they are all real.
 //
-// It exists because [Differs] matches by string, and a name that matches
-// nothing matches nothing forever: the field is absent from both records, so
-// "" equals "", nothing ever differs, and the subscriber is never woken. The
-// mechanism accepts every likely mistake and every one of them is fatal to it
-// — `Kernel` (the Go field name rather than the JSON one), `kernal`, `state`,
-// `status`.
-//
-// What makes it worth an error rather than a note is the SHAPE of the failure.
-// Nothing goes wrong at startup: the subscriber connects, the handshake
-// accepts it, the opening snapshot arrives, and the display paints once,
-// correctly. Snapshots are only ever sent on connect, on overflow and on
-// request, so from that moment nothing reaches it again. It logs nothing,
-// `doctor` reports it connected, and restarting it makes it look fixed. What a
-// person is left to chase is "it is right when I start it and stale an hour
-// later".
-//
-// **This check belongs to whoever is compiled against this record**, which is
-// the SDK and not the session-watcher — an integration built from this source
-// is looking at exactly the set of names available to the person writing the
-// code (D-70). The watcher could now refuse a bad name too, since nothing
-// promises it a record it was not compiled against (D-77); it does not yet, and
-// a subscriber that reached it with a typo intact is a subscriber whose own SDK
-// never checked.
-//
+// [Differs] matches by string, so a name that matches nothing matches nothing
+// forever: the display paints once, correctly, and is never woken again, with
+// nothing in any log. Every likely mistake is fatal that way — `Kernel`,
+// `kernal`, `state`, `status` — which is why this is an error and not a note.
 // It does not judge a name that is real and inert — see [settledFields].
 func ReasonTheseFieldsCannotBeWokenOn(fields []string) error {
 	var unknown []string
@@ -97,6 +71,34 @@ func ReasonTheseFieldsCannotBeWokenOn(fields []string) error {
 	}
 	return fmt.Errorf("wake-on names %s a record does not have: %s\na record's fields are: %s",
 		plural, strings.Join(said, ", "), strings.Join(recordFields, ", "))
+}
+
+// FieldsWorthWakingFor is every field a display may name, without the ones
+// that never move.
+func FieldsWorthWakingFor() []string {
+	var worth []string
+	for _, name := range recordFields {
+		if !settledFields[name] && !stampFields[name] {
+			worth = append(worth, name)
+		}
+	}
+	return worth
+}
+
+// FieldsRenderedButNotWokenFor is every field the render reads and wakeOn
+// does not name: the test every display runs (D-73). It moves one field of
+// base at a time and renders again; a render that came out different reads
+// that field. Empty means the declaration is complete.
+func FieldsRenderedButNotWokenFor(base Record, wakeOn []string, render func(Record) string) []string {
+	var missing []string
+	was := render(base)
+	for field, moved := range EachFieldMoved(base) {
+		if render(moved) != was && !slices.Contains(wakeOn, field) {
+			missing = append(missing, field)
+		}
+	}
+	slices.Sort(missing)
+	return missing
 }
 
 // EachFieldMoved is one copy of base per field, each differing from base in

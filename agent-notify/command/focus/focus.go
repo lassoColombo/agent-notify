@@ -18,7 +18,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/lassoColombo/agent-notify/command/internal/exit"
 	"github.com/lassoColombo/agent-notify/command/internal/find"
 	"github.com/lassoColombo/agent-notify/container"
 	"github.com/lassoColombo/agent-notify/internal/containers"
@@ -40,7 +39,9 @@ them; press TAB for the ones that are running.`,
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: find.TheSessionsThatAreRunning,
 		Run: func(command *cobra.Command, arguments []string) {
-			exit.TheProcessWith(focusSession(arguments[0], quiet))
+			if code := focusSession(arguments[0], quiet); code != 0 {
+				os.Exit(code)
+			}
 		},
 	}
 	command.Flags().BoolVar(&quiet, "quiet", false, "say nothing; the exit code is the answer")
@@ -62,7 +63,7 @@ func focusSession(wanted string, quiet bool) int {
 	}
 
 	steps, outcome := containers.FocusSession(openedCore.Settings,
-		sessionwatcher.MethodsByIntegration(openedCore.Layout, openedCore.Settings), record)
+		sessionwatcher.CapabilitiesByIntegration(openedCore.Layout, openedCore.Settings), record)
 	if !quiet {
 		for _, step := range steps {
 			switch {
@@ -118,7 +119,9 @@ at the thing it wants to tell them about.`,
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: find.TheSessionsThatAreRunning,
 		Run: func(command *cobra.Command, arguments []string) {
-			exit.TheProcessWith(focused(arguments[0]))
+			if code := focused(arguments[0]); code != 0 {
+				os.Exit(code)
+			}
 		},
 	}
 }
@@ -138,7 +141,7 @@ func focused(wanted string) int {
 	}
 
 	verdict := containers.IsFocused(openedCore.Settings,
-		sessionwatcher.MethodsByIntegration(openedCore.Layout, openedCore.Settings), record)
+		sessionwatcher.CapabilitiesByIntegration(openedCore.Layout, openedCore.Settings), record)
 	fmt.Println(verdict.Answer)
 	if verdict.Detail != "" {
 		fmt.Fprintln(os.Stderr, verdict.Detail)

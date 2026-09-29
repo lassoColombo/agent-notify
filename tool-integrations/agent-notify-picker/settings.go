@@ -179,7 +179,7 @@ var (
 	rebound bool
 )
 
-// Apply reads this integration's settings and applies them: the hues to the
+// Read reads this integration's settings and applies them: the hues to the
 // styles, the keys to what fzf is told. It never fails.
 //
 // What it answers with instead is a list of complaints, which the window then
@@ -195,7 +195,7 @@ var (
 // resolve that happened inside only one of them would draw the rows in your
 // palette and the pane under them in mine. One read of the file for both
 // tables, rather than one each.
-func Apply(given subscribe.Integration) []string {
+func Read(given subscribe.Integration) []string {
 	var settings Settings
 	if err := given.Settings(&settings); err != nil {
 		// A table that could not be decoded at all leaves every default

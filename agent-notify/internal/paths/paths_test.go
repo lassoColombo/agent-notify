@@ -175,11 +175,11 @@ func TestNamingTheRootAndLettingTheEnvironmentNameItAgree(t *testing.T) {
 	} {
 		t.Setenv(paths.TheVariableThatNamesTheRoot, root)
 
-		fromTheEnvironment, err := paths.FromEnvironmentOrUnder("")
+		fromTheEnvironment, err := paths.FromEnvironment()
 		if err != nil {
 			t.Fatalf("%s: %v", root, err)
 		}
-		passedThrough, err := paths.FromEnvironmentOrUnder(root)
+		passedThrough, err := paths.Under(root)
 		if err != nil {
 			t.Fatalf("%s: %v", root, err)
 		}

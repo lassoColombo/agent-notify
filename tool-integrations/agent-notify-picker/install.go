@@ -5,6 +5,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
 // The table is a heading: no `binary`, because core must never run a picker,
@@ -39,24 +41,17 @@ func install(arguments []string) int {
 }
 
 func printTable(out, problems io.Writer, arguments []string) int {
-	if len(arguments) > 0 {
-		fmt.Fprintf(problems,
-			"%s install takes no options: it prints what it needs and writes nothing.\n", Name)
-		return 2
-	}
-
 	program, err := os.Executable()
 	if err != nil {
 		fmt.Fprintf(problems, "%s install: cannot find my own path: %v\n", Name, err)
 		return 1
 	}
-
-	me.PrintTable(out, problems, table())
-	fmt.Fprintf(problems, "\nAnd this in zellij's config.kdl to open it with a key:\n\n%s\n"+
-		"\nThe path is in the keybinding and not in the table, because a table with a\n"+
-		"binary in it is one core may run, and nothing core runs has a terminal.\n",
-		indent(keybinding(program)))
-	return 0
+	return me.Install(subscribe.Install{
+		Table: func(string, string) string { return table() },
+		Advice: "\nAnd this in zellij's config.kdl to open it with a key:\n\n" + indent(keybinding(program)) +
+			"\nThe path is in the keybinding and not in the table, because a table with a\n" +
+			"binary in it is one core may run, and nothing core runs has a terminal.\n",
+	}, out, problems, arguments)
 }
 
 func indent(text string) string {

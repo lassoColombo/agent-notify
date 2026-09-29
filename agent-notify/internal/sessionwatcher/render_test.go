@@ -24,8 +24,7 @@ import (
 
 func shortRoot(t *testing.T) string {
 	t.Helper()
-	// Not t.TempDir(): its path on macOS is long enough on its own that adding
-	// a socket name exceeds what a unix socket may be.
+	// Short, so that the shell scripts written into it have short paths.
 	root, err := os.MkdirTemp("/tmp", "an-sup")
 	if err != nil {
 		t.Fatalf("MkdirTemp: %v", err)

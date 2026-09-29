@@ -10,7 +10,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"slices"
 	"strings"
 
 	"github.com/lassoColombo/agent-notify/hook"
@@ -38,21 +37,6 @@ import (
 // codex alone could answer — `model_context_window` and the account's
 // `rate_limits` — and both were read here until the record stopped having
 // anywhere to put them (D-76).
-const (
-	// oneReadWorthOfRollout is how much is read at a time, working backwards
-	// from the end. A token_usage_record is about 500 bytes and a token_count
-	// about 700, so one read covers far more than a hook needs.
-	oneReadWorthOfRollout = 64 << 10
-	// enoughResponses is where the search stops. A hook fires on every tool
-	// call, so one new response since the last read is the ordinary case.
-	enoughResponses = 8
-	// asFarBackAsARolloutIsWorthReading bounds a search that is finding
-	// nothing, on the path the agent is waiting on. A rollout holds the whole
-	// conversation, and a thread that has pasted a large file has a line in it
-	// larger than every accounting line put together.
-	asFarBackAsARolloutIsWorthReading = 4 << 20
-)
-
 // Spending is what to report about this thread's tokens, or nothing at all.
 //
 // Nothing at all is an ordinary answer: a rollout that has not been written
@@ -65,31 +49,9 @@ type Spending struct {
 	Responses []session.Spend
 }
 
-// WhatCodexHasSpent reads backwards from the end of the rollout until it has
-// enough responses or has looked far enough.
-//
-// Backwards, because the newest are the ones core has not counted, and because
-// a rollout only grows: reading it in full to find the last few hundred bytes
-// that changed is a cost that rises with every turn the thread takes.
+// WhatCodexHasSpent reads the newest responses off the end of the rollout.
 func WhatCodexHasSpent(rolloutPath string) Spending {
-	rolloutPath = strings.TrimSpace(rolloutPath)
-	if rolloutPath == "" {
-		return Spending{}
-	}
-	var spending Spending
-	_ = hook.ReadBackwards(rolloutPath, oneReadWorthOfRollout, asFarBackAsARolloutIsWorthReading,
-		func(line []byte) bool {
-			response, itCost := whatThisLineCost(line)
-			if itCost {
-				spending.Responses = append(spending.Responses, response)
-			}
-			return len(spending.Responses) < enoughResponses
-		})
-
-	// Oldest first, which is the order core walks them in and the order they
-	// were written in.
-	slices.Reverse(spending.Responses)
-	return spending
+	return Spending{Responses: hook.LastResponses(strings.TrimSpace(rolloutPath), whatThisLineCost)}
 }
 
 // tokenUsage is codex's per-response accounting, on both kinds of line.
@@ -134,13 +96,9 @@ type rolloutLine struct {
 }
 
 // usageRecord is the cheap test that decides whether a line is worth decoding.
-// Most of a rollout is the conversation itself, and one pasted file is a line
-// larger than every accounting line in the thread put together.
-//
 // It matches the value rather than the pair, because a filter that depends on
-// how the writer spaces its JSON is a filter that stops matching on a day
-// nobody is watching, and what it costs to be wrong here is silence. The decode
-// below is what actually decides.
+// how the writer spaces its JSON stops matching on a day nobody is watching.
+// The decode below is what actually decides.
 var usageRecord = []byte(`"token_usage_record"`)
 
 // whatThisLineCost reads one line of the rollout, and says whether it is a

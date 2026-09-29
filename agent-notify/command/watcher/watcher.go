@@ -12,7 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/lassoColombo/agent-notify/command/internal/exit"
+	"github.com/lassoColombo/agent-notify/internal/onewatcher"
 	"github.com/lassoColombo/agent-notify/internal/paths"
 	"github.com/lassoColombo/agent-notify/internal/sessionwatcher"
 )
@@ -27,31 +27,26 @@ whether it is running.`,
 	}
 
 	var foreground bool
-	var state, runtime, configFile string
 	run := &cobra.Command{
 		Use:   "run",
 		Short: "be the watcher, here, in this process",
-		Long: `Normally started for you. Run it yourself to watch what it does, or to point
-it at directories that are not the ones it would resolve.`,
-		Args: cobra.NoArgs,
+		Long:  `Normally started for you. Run it yourself to watch what it does.`,
+		Args:  cobra.NoArgs,
 		Run: func(command *cobra.Command, arguments []string) {
-			exit.TheProcessWith(watcherRun(foreground, state, runtime, configFile))
+			exitWith(watcherRun(foreground))
 		},
 	}
 	run.Flags().BoolVar(&foreground, "foreground", false, "stay attached and log to the terminal")
-	run.Flags().StringVar(&state, "state", "", "the state directory, when not resolved from the environment")
-	run.Flags().StringVar(&runtime, "runtime", "", "the runtime directory")
-	run.Flags().StringVar(&configFile, "config", "", "the configuration file")
 
 	command.AddCommand(
 		run,
 		&cobra.Command{
 			Use: "start", Short: "start it if it is not already running", Args: cobra.NoArgs,
-			Run: func(*cobra.Command, []string) { exit.TheProcessWith(watcherStart()) },
+			Run: func(*cobra.Command, []string) { exitWith(watcherStart()) },
 		},
 		&cobra.Command{
 			Use: "stop", Short: "ask it to stop, and never kill it", Args: cobra.NoArgs,
-			Run: func(*cobra.Command, []string) { exit.TheProcessWith(watcherStop()) },
+			Run: func(*cobra.Command, []string) { exitWith(watcherStop()) },
 		},
 		&cobra.Command{
 			Use: "restart", Short: "stop it, then start it", Args: cobra.NoArgs,
@@ -59,41 +54,35 @@ it at directories that are not the ones it would resolve.`,
 				// Exit 3 is "there was nothing running", which is fine to
 				// restart from.
 				if code := watcherStop(); code != 0 && code != 3 {
-					exit.TheProcessWith(code)
+					exitWith(code)
 					return
 				}
-				exit.TheProcessWith(watcherStart())
+				exitWith(watcherStart())
 			},
 		},
 		&cobra.Command{
 			Use: "reload", Short: "re-read the config without restarting", Args: cobra.NoArgs,
-			Run: func(*cobra.Command, []string) { exit.TheProcessWith(watcherReload()) },
+			Run: func(*cobra.Command, []string) { exitWith(watcherReload()) },
 		},
 	)
 	return command
 }
 
-func watcherRun(foreground bool, state, runtime, configFile string) int {
+func exitWith(code int) {
+	if code != 0 {
+		os.Exit(code)
+	}
+}
+
+func watcherRun(foreground bool) int {
 	layout, err := paths.FromEnvironment()
-	if err != nil && state == "" {
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "agent-notify watcher run: %v\n", err)
 		return 1
 	}
-	// The spawner passes these because it also sanitised the environment that
-	// path resolution reads (§A9.2).
-	if state != "" {
-		layout.State = state
-	}
-	if runtime != "" {
-		layout.Runtime = runtime
-	}
-	if configFile != "" {
-		layout.ConfigFile = configFile
-	}
-
 	running, err := sessionwatcher.Start(layout, foreground)
 	if err != nil {
-		if errors.Is(err, sessionwatcher.ErrAlreadyRunning) {
+		if errors.Is(err, onewatcher.ErrAlreadyRunning) {
 			// Losing the race is the ordinary outcome, not a failure.
 			if foreground {
 				fmt.Fprintf(os.Stderr, "agent-notify watcher run: %v\n", err)
@@ -121,18 +110,18 @@ func watcherStart() int {
 		fmt.Fprintf(os.Stderr, "agent-notify watcher: %v\n", err)
 		return 1
 	}
-	if sessionwatcher.Running(layout) {
+	if onewatcher.Running(layout) {
 		fmt.Println("already running")
 		return 0
 	}
-	if err := sessionwatcher.Spawn(layout, ""); err != nil {
+	if err := onewatcher.Spawn(layout, ""); err != nil {
 		fmt.Fprintf(os.Stderr, "agent-notify watcher: %v\n", err)
 		return 1
 	}
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		if sessionwatcher.Running(layout) {
-			if held, err := sessionwatcher.WhoHolds(layout); err == nil {
+		if onewatcher.Running(layout) {
+			if held, err := onewatcher.WhoHolds(layout); err == nil {
 				fmt.Printf("started: pid %d\n", held.PID)
 			}
 			return 0
@@ -149,11 +138,11 @@ func watcherStop() int {
 		fmt.Fprintf(os.Stderr, "agent-notify watcher: %v\n", err)
 		return 1
 	}
-	if !sessionwatcher.Running(layout) {
+	if !onewatcher.Running(layout) {
 		fmt.Println("not running")
 		return 3
 	}
-	if err := sessionwatcher.Stop(layout, 5*time.Second); err != nil {
+	if err := onewatcher.Stop(layout, 5*time.Second); err != nil {
 		fmt.Fprintf(os.Stderr, "agent-notify watcher: %v\n", err)
 		return 1
 	}
@@ -170,8 +159,8 @@ func watcherReload() int {
 		fmt.Fprintf(os.Stderr, "agent-notify watcher: %v\n", err)
 		return 1
 	}
-	held, err := sessionwatcher.WhoHolds(layout)
-	if err != nil || held.PID == 0 || !sessionwatcher.Running(layout) {
+	held, err := onewatcher.WhoHolds(layout)
+	if err != nil || held.PID == 0 || !onewatcher.Running(layout) {
 		fmt.Println("not running")
 		return 3
 	}

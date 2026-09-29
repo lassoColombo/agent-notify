@@ -14,13 +14,12 @@ import (
 
 // core is everything a command needs before it can do anything: where things
 // live, what the user configured, somewhere to complain, and the store.
-//
-// It is assembled in one place because the order matters and is easy to get
-// subtly wrong. The log is opened before the configuration is read, so that
-// complaints about the configuration have somewhere to go.
 type Core struct {
 	Layout   paths.Layout
 	Settings config.Config
+	// Problems is what the configuration loader complained about, already
+	// logged, for a caller that has to say it again.
+	Problems []error
 	Logger   *slog.Logger
 	Store    *sessionstore.SessionStore
 	closeLog io.Closer
@@ -37,34 +36,20 @@ func OpenEverythingACommandNeeds(component string) (*Core, error) {
 	return OpenAt(layout, component)
 }
 
-// OpenAt is OpenEverythingACommandNeeds for a caller that already knows where
-// everything is — the session-watcher, which is handed its layout explicitly
-// rather than resolving it again.
-//
-// That is not redundancy. The session-watcher is spawned with a sanitised
-// environment, and path resolution reads the environment: strip TMPDIR on
-// darwin, or the XDG variables on Linux, and the daemon would resolve a
-// *different* runtime directory than the clients poking it. Nothing would
-// error — the hook would write its record, the daemon would watch an empty
-// directory, and the bar would stay blank.
+// OpenAt is OpenEverythingACommandNeeds for a caller that already has a
+// layout. The store creates the directories; the log lives in one of them.
 func OpenAt(layout paths.Layout, component string) (*Core, error) {
-	if err := layout.Create(); err != nil {
+	settings, problems := config.Load(layout.ConfigFile)
+	opened, err := sessionstore.Open(layout, settings)
+	if err != nil {
 		return nil, err
 	}
-
 	logger, closer := logs.OpenFile(layout.LogFile(), component)
-	settings, problems := config.Load(layout.ConfigFile)
 	for _, problem := range problems {
 		logger.Warn("configuration", "problem", problem.Error())
 	}
-
-	opened, err := sessionstore.Open(layout, settings)
-	if err != nil {
-		closer.Close()
-		return nil, err
-	}
 	return &Core{
-		Layout: layout, Settings: settings,
+		Layout: layout, Settings: settings, Problems: problems,
 		Logger: logger, Store: opened, closeLog: closer,
 	}, nil
 }

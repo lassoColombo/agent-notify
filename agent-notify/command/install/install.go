@@ -21,7 +21,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/lassoColombo/agent-notify/command/internal/exit"
 	"github.com/lassoColombo/agent-notify/command/internal/onpath"
 )
 
@@ -62,7 +61,9 @@ Press TAB for the integrations that are on your PATH.`,
 			if arguments[0] == "--help" || arguments[0] == "-h" {
 				return command.Help()
 			}
-			exit.TheProcessWith(install(arguments))
+			if code := install(arguments); code != 0 {
+				os.Exit(code)
+			}
 			return nil
 		},
 	}

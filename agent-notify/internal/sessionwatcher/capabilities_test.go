@@ -44,8 +44,8 @@ func TestAnIntegrationIsAskedWhatItAnswers(t *testing.T) {
 	if one.Answers.Version != "0.0.0-dev" {
 		t.Errorf("built against %q", one.Answers.Version)
 	}
-	if one.Answers.Problem != "" {
-		t.Errorf("answered and the report still carries a problem: %s", one.Answers.Problem)
+	if one.Problem != "" {
+		t.Errorf("answered and the report still carries a problem: %s", one.Problem)
 	}
 }
 
@@ -65,15 +65,15 @@ func TestAnIntegrationThatCannotBeAskedSaysSoInTheReport(t *testing.T) {
 	layout := running(t, root)
 	waitFor(t, "the missing integration to be reported", func() bool {
 		one, found := reported(t, layout, "ghost")
-		return found && one.Answers.Problem != ""
+		return found && one.Problem != ""
 	})
 
 	one, _ := reported(t, layout, "ghost")
 	if len(one.Answers.Methods) != 0 {
 		t.Errorf("a program that is not there answers %v", one.Answers.Methods)
 	}
-	if !strings.Contains(one.Answers.Problem, missing) {
-		t.Errorf("the problem does not name the path that is wrong: %s", one.Answers.Problem)
+	if !strings.Contains(one.Problem, missing) {
+		t.Errorf("the problem does not name the path that is wrong: %s", one.Problem)
 	}
 }
 
@@ -103,10 +103,10 @@ func TestWithNoReportItAsksRatherThanSayingThereIsNoContainer(t *testing.T) {
 	}
 
 	// No session-watcher has ever run here, so there is no report at all.
-	methods := sessionwatcher.MethodsByIntegration(layout, settings)
-	if !slices.Contains(methods["placer"], session.MethodFocus) {
+	methods := sessionwatcher.CapabilitiesByIntegration(layout, settings)
+	if !slices.Contains(methods["placer"].Methods, session.MethodFocus) {
 		t.Errorf("with no report it found %v, and the program on disk answers focus",
-			methods["placer"])
+			methods["placer"].Methods)
 	}
 }
 

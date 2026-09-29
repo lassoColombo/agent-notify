@@ -50,15 +50,15 @@ func answers(t *testing.T, name string, byCommand map[string]string) string {
 // rather than the handshake. A test that cares hands over its own map.
 func settingsWith(
 	order []string, integrations map[string]config.Integration,
-) (config.Config, map[string][]string) {
+) (config.Config, map[string]session.Capabilities) {
 	settings := config.Defaults()
 	settings.Container.Order = order
 	settings.Integration = integrations
 
-	methods := make(map[string][]string, len(integrations))
+	methods := make(map[string]session.Capabilities, len(integrations))
 	for name := range integrations {
-		methods[name] = []string{
-			session.MethodInterpret, session.MethodFocus, session.MethodFocused}
+		methods[name] = session.Capabilities{Methods: []string{
+			session.MethodInterpret, session.MethodFocus, session.MethodFocused}}
 	}
 	return settings, methods
 }

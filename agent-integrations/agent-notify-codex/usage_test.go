@@ -152,8 +152,9 @@ func TestTheWindowStopsAtEnoughResponses(t *testing.T) {
 	}
 	spending := WhatCodexHasSpent(rollout(t, lines...))
 
-	if len(spending.Responses) != enoughResponses {
-		t.Fatalf("reported %d responses, want %d", len(spending.Responses), enoughResponses)
+	// Bounded by core at eight (hook.LastResponses).
+	if len(spending.Responses) != 8 {
+		t.Fatalf("reported %d responses, want 8", len(spending.Responses))
 	}
 	if last := spending.Responses[len(spending.Responses)-1].Response; last != "resp-39" {
 		t.Errorf("the newest reported is %q, want resp-39", last)

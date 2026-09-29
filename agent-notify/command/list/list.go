@@ -1,5 +1,5 @@
 // Package list is the cold read path: what is running, with no session-watcher
-// and no socket anywhere (§A7.6).
+// (§A7.6).
 //
 // It applies the liveness decision as it reads, because a session whose process
 // was killed must not be shown as working merely because nothing has got round
@@ -20,7 +20,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/lassoColombo/agent-notify/command/internal/exit"
 	"github.com/lassoColombo/agent-notify/command/internal/rows"
 	"github.com/lassoColombo/agent-notify/internal/core"
 )
@@ -32,13 +31,14 @@ func Command() *cobra.Command {
 		Use:     "list",
 		Aliases: []string{"ls"},
 		Short:   "what is running, most urgent first",
-		Long: `Reads the store directly: no session-watcher, no socket, nothing to be
-connected to. A session whose process is gone is shown as ended even if nothing
+		Long: `Reads the store directly, with no session-watcher running. A session whose process is gone is shown as ended even if nothing
 has got round to filing it, and nothing is written — a command a statusline
 polls three times a second has no business writing.`,
 		Args: cobra.NoArgs,
 		Run: func(command *cobra.Command, arguments []string) {
-			exit.TheProcessWith(list(asJSON, all))
+			if code := list(asJSON, all); code != 0 {
+				os.Exit(code)
+			}
 		},
 	}
 	command.Flags().BoolVar(&asJSON, "json", false,

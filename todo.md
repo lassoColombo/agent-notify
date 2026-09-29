@@ -100,6 +100,16 @@ before it can be closed.
 
 ## Closed 2026-09-28
 
+- **Simplification** (D-84): the eighteen findings of the same day's review
+  under "simpler logic" and "easier to maintain". One world for every reader,
+  one shape for capabilities, an empty capture stored, `Core` opened once and
+  kept, the daemon split from its lock and its store watch, the floor table
+  gone, the socket-era prose gone, and `Install`, `InstallBundle`, `hook.Main`,
+  `hook.LastResponses` and `FieldsRenderedButNotWokenFor` in core with the
+  seven copies deleted. [simplification-plan.md](simplification-plan.md) is
+  the working plan. Two core tests, the handshake report and the tool refusal,
+  time out under a full parallel `go test ./...` on a loaded machine and pass
+  alone; they did before this too.
 - **The store is the bus** (D-83): both sockets, the `internal/subscriber`
   client, `session/protocol.go`, `record`/`replay` and `watcher status` are
   gone; the session-watcher and the resident displays wake on a kqueue over

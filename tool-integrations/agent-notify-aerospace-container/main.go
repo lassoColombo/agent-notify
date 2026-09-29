@@ -14,8 +14,8 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/lassoColombo/agent-notify/container"
@@ -58,51 +58,58 @@ const defaultTitle = "{ZELLIJ_SESSION_NAME} | "
 const aerospaceTimeout = 2 * time.Second
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "install" {
-		os.Exit(install(os.Args[2:]))
+	// Read on first use, so that `install` still runs against a broken file
+	// and `capture-environment`, on the path the agent waits on, reads the
+	// file only when it must.
+	settings := sync.OnceValues(func() (Settings, error) { return Read(me) })
+	me.Reads = func() (any, error) {
+		resolved, err := settings()
+		if err != nil {
+			return nil, err
+		}
+		return Capture(resolved.Title)
 	}
-	settings, err := resolve()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s: %v\n", Name, err)
-		os.Exit(1)
-	}
-
-	me.Reads = func() (any, error) { return Capture(settings.Title) }
 	os.Exit(subscribe.Main(me, subscribe.Commands{
-		Named:     map[string]func([]string) int{"install": install},
-		Interpret: func(captured json.RawMessage) (any, error) { return Interpret(settings.Title, captured) },
-
-		// The binary is looked up HERE and not before dispatch, which is the
-		// one place this differs from zellij's container on purpose. Capture
-		// and interpret do not touch aerospace, and capture runs on the hook
-		// path: a window manager that is not installed must not be able to
-		// fail an agent's hook. Where it does matter, not finding it is a
-		// typed outcome rather than a crash.
-		Focus: func(coordinates json.RawMessage) (container.Outcome, error) {
-			aerospace, err := settings.aerospace()
+		Named: map[string]func([]string) int{"install": install},
+		Interpret: func(captured json.RawMessage) (any, error) {
+			resolved, err := settings()
 			if err != nil {
-				return container.Failed(container.NotRunning, err.Error()), nil
+				return nil, err
 			}
-			return Focus(aerospace, coordinates)
+			return Interpret(resolved.Title, captured)
+		},
+		// The binary is looked up here and not before dispatch: capture and
+		// interpret do not touch aerospace, and a window manager that is not
+		// installed must not be able to fail an agent's hook. Where it does
+		// matter, not finding it is a typed outcome rather than a crash.
+		Focus: func(coordinates json.RawMessage) (container.Outcome, error) {
+			resolved, err := settings()
+			if err == nil {
+				var aerospace Aerospace
+				if aerospace, err = resolved.aerospace(); err == nil {
+					return Focus(aerospace, coordinates)
+				}
+			}
+			return container.Failed(container.NotRunning, err.Error()), nil
 		},
 		Focused: func(coordinates json.RawMessage) (container.Verdict, error) {
-			aerospace, err := settings.aerospace()
-			if err != nil {
-				return cannotTell(err.Error()), nil
+			resolved, err := settings()
+			if err == nil {
+				var aerospace Aerospace
+				if aerospace, err = resolved.aerospace(); err == nil {
+					return Focused(aerospace, coordinates)
+				}
 			}
-			return Focused(aerospace, coordinates)
+			return cannotTell(err.Error()), nil
 		},
 	}, os.Args[1:]))
 }
 
-// resolve reads this integration's own section of agent-notify's config.
-//
-// Its defaults are the whole configuration for the setup this was built
-// against, so the table in the config file is one line — the binary — and even
-// that is only there because a hook's PATH is not your shell's PATH.
-func resolve() (Settings, error) {
+// Read is this integration's own section of agent-notify's config. Its
+// defaults are the whole configuration for the setup this was built against.
+func Read(given subscribe.Integration) (Settings, error) {
 	settings := Settings{Title: defaultTitle}
-	if err := me.Settings(&settings); err != nil {
+	if err := given.Settings(&settings); err != nil {
 		return Settings{}, err
 	}
 	return settings, nil

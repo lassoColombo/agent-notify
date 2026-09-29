@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/lassoColombo/agent-notify/internal/core"
-	"github.com/lassoColombo/agent-notify/internal/sessionwatcher"
+	"github.com/lassoColombo/agent-notify/internal/onewatcher"
+	"github.com/lassoColombo/agent-notify/internal/storewatch"
 	"github.com/lassoColombo/agent-notify/session"
 	"github.com/lassoColombo/agent-notify/tool"
 )
@@ -29,20 +29,14 @@ func Run(ctx context.Context, i Integration, onChange func(session.View) error) 
 		return fmt.Errorf("%s: %w", i.Name, err)
 	}
 
-	layout, err := i.layout()
+	opened, err := i.core()
 	if err != nil {
 		return err
 	}
-	opened, err := core.OpenAt(layout, i.Name)
-	if err != nil {
-		return err
-	}
-	defer opened.Close()
-
-	if err := sessionwatcher.StartIfNobodyIs(layout, opened.Settings.AgentNotifyBinary); err != nil {
+	if err := onewatcher.StartIfNobodyIs(opened.Layout, opened.Settings.AgentNotifyBinary); err != nil {
 		opened.Logger.Warn("cannot start a session-watcher", "problem", err.Error())
 	}
-	watch, err := sessionwatcher.WatchDirectories(layout.Sessions(), layout.Ended())
+	watch, err := storewatch.Directories(opened.Layout.Sessions(), opened.Layout.Ended())
 	if err != nil {
 		return err
 	}

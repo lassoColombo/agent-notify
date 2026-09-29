@@ -77,15 +77,6 @@ func Under(root string) (Layout, error) {
 	}, nil
 }
 
-// FromEnvironmentOrUnder is the root this process's environment names, or the
-// one it is handed.
-func FromEnvironmentOrUnder(root string) (Layout, error) {
-	if root == "" {
-		return FromEnvironment()
-	}
-	return Under(root)
-}
-
 func defaultStateDir() (string, error) {
 	if runtime.GOOS == "darwin" {
 		home, err := os.UserHomeDir()

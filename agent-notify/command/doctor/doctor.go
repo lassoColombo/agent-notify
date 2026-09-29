@@ -14,9 +14,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/lassoColombo/agent-notify/command/internal/exit"
 	"github.com/lassoColombo/agent-notify/command/internal/onpath"
 	"github.com/lassoColombo/agent-notify/internal/config"
+	"github.com/lassoColombo/agent-notify/internal/onewatcher"
 	"github.com/lassoColombo/agent-notify/internal/paths"
 	"github.com/lassoColombo/agent-notify/internal/process"
 	"github.com/lassoColombo/agent-notify/internal/sessionstore"
@@ -35,7 +35,9 @@ func Command() *cobra.Command {
 never reads as a clean bill of health for something still being built.`,
 		Args: cobra.NoArgs,
 		Run: func(command *cobra.Command, arguments []string) {
-			exit.TheProcessWith(doctor())
+			if code := doctor(); code != 0 {
+				os.Exit(code)
+			}
 		},
 	}
 }
@@ -193,11 +195,11 @@ func reportLiveness(live []session.Record, healthy *bool) {
 
 // reportWatcher never kills and never starts anything (§A9.2).
 func reportWatcher(layout paths.Layout, healthy *bool) {
-	if !sessionwatcher.Running(layout) {
+	if !onewatcher.Running(layout) {
 		report("watcher", true, "not running — the next hook will start one")
 		return
 	}
-	held, err := sessionwatcher.WhoHolds(layout)
+	held, err := onewatcher.WhoHolds(layout)
 	if err != nil {
 		report("watcher", false, "something holds the lock but did not say who: "+err.Error())
 		*healthy = false
@@ -236,7 +238,7 @@ func reportIntegrations(
 
 	worst := "ok"
 	for _, one := range report.Integrations {
-		if one.Answers.Problem != "" {
+		if one.Problem != "" {
 			worst = "fail"
 			*healthy = false
 		}
@@ -247,24 +249,24 @@ func reportIntegrations(
 	for _, one := range report.Integrations {
 		fmt.Printf("             %-22s %s\n", one.Name, one.State)
 		if one.Binary != "" {
-			fmt.Printf("             %-22s %s\n", "", whatItAnswers(one.Answers))
+			fmt.Printf("             %-22s %s\n", "", whatItAnswers(one))
 		}
-		if one.Answers.Problem != "" {
+		if one.Problem != "" {
 			fmt.Printf("             %-22s %s\n", "",
 				"rebuild and reinstall it, then run `agent-notify watcher reload`")
 		}
 	}
 }
 
-func whatItAnswers(answers sessionwatcher.WhatAnIntegrationAnswers) string {
+func whatItAnswers(one sessionwatcher.Integration) string {
 	switch {
-	case answers.Problem != "":
-		return "did not say what it answers: " + answers.Problem
-	case len(answers.Methods) == 0:
+	case one.Problem != "":
+		return "did not say what it answers: " + one.Problem
+	case len(one.Answers.Methods) == 0:
 		return "answers nothing, so core will never run it"
 	default:
 		return fmt.Sprintf("answers %s — built against %s",
-			strings.Join(answers.Methods, ", "), answers.Version)
+			strings.Join(one.Answers.Methods, ", "), one.Answers.Version)
 	}
 }
 

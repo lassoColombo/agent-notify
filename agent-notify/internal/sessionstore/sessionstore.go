@@ -1,10 +1,8 @@
-// Package store is the only thing that writes a record.
+// Package sessionstore is the only thing that writes a record.
 //
-// It is the truth of the system (R4). Everything that crosses a socket is a
-// hint that may be lost without consequence, and a subscriber that missed one
-// re-reads from here and is correct. That is what lets the sockets have no
-// delivery guarantee, overflow be handled by dropping, and a session-watcher
-// restart cost nothing.
+// It is the truth of the system (R4). A wake-up is a hint that may be lost
+// without consequence: whoever missed one re-reads from here and is correct,
+// which is what lets a session-watcher restart cost nothing.
 package sessionstore
 
 import (
@@ -38,7 +36,8 @@ type SessionStore struct {
 // and no user can — this package is internal.
 var LockPatience = 2 * time.Second
 
-// Open prepares the store, creating the directories if they are not there.
+// Open prepares the store, creating every directory agent-notify owns if it
+// is not there.
 func Open(layout paths.Layout, settings config.Config) (*SessionStore, error) {
 	if err := layout.Create(); err != nil {
 		return nil, err

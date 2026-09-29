@@ -8,7 +8,6 @@ import (
 	"os"
 	"slices"
 
-	"github.com/lassoColombo/agent-notify/capture"
 	"github.com/lassoColombo/agent-notify/container"
 	"github.com/lassoColombo/agent-notify/session"
 )
@@ -53,10 +52,22 @@ func (c Commands) capabilities(i Integration) session.Capabilities {
 	return answer
 }
 
+// theVerbsCoreRuns is what a Named subcommand may not be called.
+var theVerbsCoreRuns = []string{
+	session.CapabilitiesCommand, session.CaptureCommand,
+	session.MethodInterpret, session.MethodFocus, session.MethodFocused, session.MethodRender,
+}
+
 // Main dispatches one invocation and returns the exit code. The contract with
 // core: one JSON object on stdout and exit 0, anything else meaning "I could
 // not answer".
 func Main(i Integration, commands Commands, arguments []string) int {
+	for name := range commands.Named {
+		if slices.Contains(theVerbsCoreRuns, name) {
+			fmt.Fprintf(os.Stderr, "%s: a subcommand called %q would shadow the one core runs\n", i.Name, name)
+			return 1
+		}
+	}
 	if len(arguments) > 0 {
 		if run, known := commands.Named[arguments[0]]; known {
 			return run(arguments[1:])
@@ -79,7 +90,7 @@ func Main(i Integration, commands Commands, arguments []string) int {
 	if commands.Default != nil {
 		return commands.Default(arguments)
 	}
-	known := []string{session.CapabilitiesCommand, capture.Command}
+	known := []string{session.CapabilitiesCommand, session.CaptureCommand}
 	known = append(known, commands.capabilities(i).Methods...)
 	for name := range commands.Named {
 		known = append(known, name)
@@ -94,13 +105,16 @@ func Main(i Integration, commands Commands, arguments []string) int {
 func (c Commands) answer(i Integration, command string, stdin io.Reader) (any, error) {
 	switch command {
 	case session.CapabilitiesCommand:
+		if err := session.ReasonTheseFieldsCannotBeWokenOn(i.WakeOn); err != nil {
+			return nil, err
+		}
 		answer := c.capabilities(i)
 		answer.Version = session.Version
 		if answer.Methods == nil {
 			answer.Methods = []string{}
 		}
 		return answer, nil
-	case capture.Command:
+	case session.CaptureCommand:
 		if i.Reads == nil {
 			return map[string]any{}, nil
 		}

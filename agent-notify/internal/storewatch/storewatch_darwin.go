@@ -1,6 +1,6 @@
 //go:build darwin
 
-package sessionwatcher
+package storewatch
 
 import (
 	"fmt"
@@ -10,20 +10,20 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// DirWatch reports when an entry in any of its directories is added, replaced
+// Watch reports when an entry in any of its directories is added, replaced
 // or removed. Every record write is a rename into sessions/ or ended/, so this
 // is the whole of how a change in the store is noticed.
-type DirWatch struct {
+type Watch struct {
 	queue int
 	fds   []int
 }
 
-func WatchDirectories(dirs ...string) (*DirWatch, error) {
+func Directories(dirs ...string) (*Watch, error) {
 	queue, err := unix.Kqueue()
 	if err != nil {
 		return nil, fmt.Errorf("cannot open a kqueue: %w", err)
 	}
-	watch := &DirWatch{queue: queue}
+	watch := &Watch{queue: queue}
 	for _, dir := range dirs {
 		fd, err := unix.Open(dir, unix.O_EVTONLY|unix.O_DIRECTORY, 0)
 		if err != nil {
@@ -46,7 +46,7 @@ func WatchDirectories(dirs ...string) (*DirWatch, error) {
 }
 
 // Changed blocks until something moves or the deadline passes.
-func (d *DirWatch) Changed(within time.Duration) bool {
+func (d *Watch) Changed(within time.Duration) bool {
 	events := make([]unix.Kevent_t, 16)
 	timeout := unix.NsecToTimespec(int64(within))
 	count, err := unix.Kevent(d.queue, nil, events, &timeout)
@@ -56,7 +56,7 @@ func (d *DirWatch) Changed(within time.Duration) bool {
 	return count > 0
 }
 
-func (d *DirWatch) Close() error {
+func (d *Watch) Close() error {
 	for _, fd := range d.fds {
 		_ = unix.Close(fd)
 	}

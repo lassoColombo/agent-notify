@@ -25,7 +25,7 @@ type Key struct {
 }
 
 // String renders the key as one filesystem-safe, reversible token — the
-// session's name on disk and the only thing the datagram poke carries.
+// session's name on disk.
 //
 // Everything outside the unreserved set is percent-encoded, which includes the
 // separator, so the encoding cannot be ambiguous however strange an agent's
@@ -238,7 +238,7 @@ func (u Usage) Adding(responses []Spend) Usage {
 	return u
 }
 
-// Record is one session, as stored and as delivered to every subscriber.
+// Record is one session, as stored and as handed to every display.
 //
 // Every field traces to a display that demanded it (§A7.4). Nothing is here
 // because it seemed useful.
@@ -307,7 +307,7 @@ type Record struct {
 	Annotations map[string]json.RawMessage `json:"annotations,omitempty"`
 }
 
-// recordFields is every field a record has, and it is what a subscriber's
+// recordFields is every field a record has, and it is what a display's
 // wake-on list is checked against (wakeon.go). A test checks it against the
 // struct, so the two cannot drift.
 var recordFields = []string{

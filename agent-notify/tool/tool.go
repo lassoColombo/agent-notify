@@ -45,6 +45,7 @@ package tool
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -216,4 +217,19 @@ func Summarise(output []byte) string {
 		}
 	}
 	return "nothing"
+}
+
+// Ask runs one of an integration's subcommands and returns the JSON object it
+// printed. Every way it can fail arrives as one error: not there, crashed,
+// hung, or printed something that is not JSON (D-38).
+func Ask(binary, command string, input []byte, timeout time.Duration) ([]byte, error) {
+	out, err := RunWithInput(binary, timeout, input, command)
+	if err != nil {
+		return nil, err
+	}
+	answer := bytes.TrimSpace(out.Stdout)
+	if !json.Valid(answer) {
+		return nil, fmt.Errorf("%s %s answered %s, which is not JSON", binary, command, Summarise(answer))
+	}
+	return answer, nil
 }

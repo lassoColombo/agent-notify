@@ -256,7 +256,7 @@ func moreRecent(a, b Record) int {
 var stampFields = map[string]bool{"sequence": true, "updated_at": true}
 
 // optInFields mean something, but they move as often as the agent thinks, so a
-// subscriber is woken for them only if it named them. `usage` is the whole of
+// display is woken for them only if it named them. `usage` is the whole of
 // it: tokens move on every response, and broadcasting them would turn a
 // fifty-tool-call turn into fifty renders on every display (§A7.4.3, R23).
 //
@@ -267,7 +267,7 @@ var stampFields = map[string]bool{"sequence": true, "updated_at": true}
 // one: a display's own `wake_on` disappears behind a default it never chose.
 var optInFields = map[string]bool{"usage": true}
 
-// Differs reports whether a subscriber that cares about `fields` should be told
+// Differs reports whether a display that cares about `fields` should be told
 // about this change.
 //
 // With no fields named it means "anything but the stamps", which is what stops
@@ -299,17 +299,6 @@ func Differs(previous, next Record, fields []string) bool {
 	}
 	return false
 }
-
-// There was a WorthOfferingAround here: a generous gate the session-watcher
-// asked once — "could ANYBODY want this?" — before asking each subscriber the
-// narrow one Differs answers. It ignored the stamps and nothing else, so that a
-// write moving only `usage` survived to reach the one display that named it.
-//
-// There is one gate now. Every display, whether core runs it or it connected,
-// compares the world it is offered against the world it last took, on the
-// fields it named. That is the narrow question, asked in the only place the
-// answer was ever knowable, and a generous one in front of it can no longer
-// answer on a display's behalf because there is no longer anywhere to put it.
 
 // moved compares two records while ignoring whole classes of field.
 func moved(previous, next Record, ignoring ...map[string]bool) bool {
@@ -353,7 +342,7 @@ func fieldsOf(record Record) (map[string]json.RawMessage, error) {
 
 // Elapsed is how long this session has been in the state it is in.
 //
-// It is computed and never stored, which is R26: a fact every subscriber can
+// It is computed and never stored, which is R26: a fact every display can
 // derive identically from the record it already holds is rendering, not state.
 // Storing it would mean a write per second per session to keep it true, and
 // every one of those writes would wake every display to say nothing.
@@ -370,7 +359,7 @@ func (r Record) Elapsed(now time.Time) time.Duration {
 // Total is everything this session has been charged for.
 //
 // It is computed rather than stored, which is R26: four numbers every
-// subscriber would add up the same way are not a fifth number the record has to
+// display would add up the same way are not a fifth number the record has to
 // carry and keep consistent. Reasoning is not in it — it is the share of Output
 // that was thinking, and adding it would count those tokens twice.
 func (u Usage) Total() uint64 {

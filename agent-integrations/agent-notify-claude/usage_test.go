@@ -147,8 +147,9 @@ func TestTheWindowStopsAtEnoughResponses(t *testing.T) {
 	}
 	said := WhatTheTranscriptSays(transcript(t, lines...))
 
-	if len(said.Responses) != enoughResponses {
-		t.Fatalf("reported %d responses, want %d", len(said.Responses), enoughResponses)
+	// Bounded by core at eight (hook.LastResponses).
+	if len(said.Responses) != 8 {
+		t.Fatalf("reported %d responses, want 8", len(said.Responses))
 	}
 	// And they are the newest ones, because those are the ones core has not
 	// counted.

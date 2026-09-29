@@ -11,7 +11,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/lassoColombo/agent-notify/command/internal/exit"
 	"github.com/lassoColombo/agent-notify/command/internal/rows"
 	"github.com/lassoColombo/agent-notify/session"
 	"github.com/lassoColombo/agent-notify/subscribe"
@@ -28,7 +27,9 @@ which is the way to find out what a display is being told before blaming the
 display. With --json it prints the whole view as one object per line.`,
 		Args: cobra.NoArgs,
 		Run: func(command *cobra.Command, arguments []string) {
-			exit.TheProcessWith(tail(asJSON, wakeOn, wantEnded))
+			if code := tail(asJSON, wakeOn, wantEnded); code != 0 {
+				os.Exit(code)
+			}
 		},
 	}
 	command.Flags().BoolVar(&asJSON, "json", false,
@@ -74,16 +75,8 @@ func print(view session.View, asJSON bool) error {
 	return nil
 }
 
-// completeTheRecordFieldsWorthWakingFor is curated: `sequence` and
-// `updated_at` move on every write, `key` and `created_at` never move, and
-// `usage` is a stamp that has to be named to be woken for (§A7.4.3).
 func completeTheRecordFieldsWorthWakingFor(
 	command *cobra.Command, arguments []string, whatHasBeenTypedSoFar string,
 ) ([]string, cobra.ShellCompDirective) {
-	return []string{
-		"kernel", "detail", "rank", "name", "cwd", "branch", "model",
-		"state_since", "message", "usage",
-		"ended_at", "process", "captured_context", "derived_context",
-		"annotations",
-	}, cobra.ShellCompDirectiveNoFileComp
+	return session.FieldsWorthWakingFor(), cobra.ShellCompDirectiveNoFileComp
 }

@@ -6,11 +6,11 @@ import (
 )
 
 // The bounds on stored text. These are not configurable: they are the reason
-// the record stays about a kilobyte, and a record rides in every delta to every
-// subscriber (plan.md §A13.1).
+// the record stays about a kilobyte, and every display is handed every record
+// (plan.md §A13.1).
 const (
 	// MaxMessageBytes bounds what an agent last said. Generous enough for a
-	// preview pane, small enough that a subscriber receiving one per session
+	// preview pane, small enough that a display handed one per session
 	// notices nothing.
 	MaxMessageBytes = 4096
 	// MaxLineBytes bounds a name, a detail or a working directory — anything
