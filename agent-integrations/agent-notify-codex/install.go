@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/lassoColombo/agent-notify/hook"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -48,6 +49,7 @@ func install(arguments []string) int {
 
 	if *print {
 		fmt.Print(block)
+		fmt.Print(agentTable)
 		return 0
 	}
 
@@ -72,7 +74,7 @@ func install(arguments []string) int {
 		}
 		if strings.Contains(string(existing), filepath.Base(program)) {
 			fmt.Printf("%s already runs %s; nothing changed.\n", *path, filepath.Base(program))
-			return 0
+			return fileTheAgentTable()
 		}
 	}
 
@@ -92,11 +94,75 @@ func install(arguments []string) int {
 		return 1
 	}
 
-	fmt.Printf("added %d hook(s) to %s.\n\n", len(SubscribedHooks), *path)
-	fmt.Println("Codex will ask you to trust these the first time it runs one, and will")
-	fmt.Println("record the answer in that same file. That step is yours: the trust hash is")
-	fmt.Println("codex's own and writing one here would be forging your consent to run a")
-	fmt.Println("program on every hook.")
+	fmt.Printf("added %d hook(s) to %s.\n", len(SubscribedHooks), *path)
+	fmt.Fprintln(os.Stderr, "\nCodex will ask you to trust these the first time it runs one, and will")
+	fmt.Fprintln(os.Stderr, "record the answer in that same file. That step is yours: the trust hash is")
+	fmt.Fprintln(os.Stderr, "codex's own and writing one here would be forging your consent to run a")
+	fmt.Fprintln(os.Stderr, "program on every hook.")
+	return fileTheAgentTable()
+}
+
+// agentTable is what core needs to recognise codex's process in a hook's
+// ancestry (§A8.4). The name is codex's, so it is this program's to file.
+const agentTable = "# Written by `agent-notify-codex install`.\n[agent." + AgentName + "]\nbinary = \"codex\"\n"
+
+func fileTheAgentTable() int {
+	written, err := hook.WriteDropIn(AgentName, agentTable)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "agent-notify-codex install: %v\n", err)
+		return 1
+	}
+	fmt.Printf("wrote %s\n", written)
+	return 0
+}
+
+// uninstall takes the block install appended out again, verbatim, and the
+// table away. A block somebody has edited is not recognised and is left, with
+// a word about it: rearranging a hooks table under a person is worse than
+// asking them to.
+func uninstall(arguments []string) int {
+	flags := flag.NewFlagSet("uninstall", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	path := flags.String("config", defaultConfig(), "codex's config file")
+	if err := flags.Parse(arguments); err != nil {
+		fmt.Fprintf(os.Stderr, "agent-notify-codex uninstall: %v\n", err)
+		return 2
+	}
+	program, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "agent-notify-codex uninstall: cannot find my own path: %v\n", err)
+		return 1
+	}
+
+	existing, err := os.ReadFile(*path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		fmt.Printf("%s does not exist; nothing to remove.\n", *path)
+	case err != nil:
+		fmt.Fprintf(os.Stderr, "agent-notify-codex uninstall: cannot read %s: %v\n", *path, err)
+		return 1
+	case !strings.Contains(string(existing), hookBlock(program)):
+		if strings.Contains(string(existing), filepath.Base(program)) {
+			fmt.Fprintf(os.Stderr, "%s names %s in a block this program did not write as it is, so\n"+
+				"nothing there was changed: take the [[hooks.*]] entries naming it out yourself.\n",
+				*path, filepath.Base(program))
+		} else {
+			fmt.Printf("%s does not run %s; nothing to remove.\n", *path, filepath.Base(program))
+		}
+	default:
+		cleaned := strings.Replace(string(existing), hookBlock(program), "", 1)
+		cleaned = strings.TrimRight(cleaned, "\n") + "\n"
+		if err := os.WriteFile(*path, []byte(cleaned), 0o600); err != nil {
+			fmt.Fprintf(os.Stderr, "agent-notify-codex uninstall: cannot write %s: %v\n", *path, err)
+			return 1
+		}
+		fmt.Printf("removed %d hook(s) from %s.\n", len(SubscribedHooks), *path)
+	}
+	if err := hook.RemoveDropIn(AgentName); err != nil {
+		fmt.Fprintf(os.Stderr, "agent-notify-codex uninstall: %v\n", err)
+		return 1
+	}
+	fmt.Println("removed the [agent." + AgentName + "] table")
 	return 0
 }
 

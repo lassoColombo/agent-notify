@@ -34,9 +34,10 @@ func main() {
 	help := func([]string) int { usage(os.Stdout); return 0 }
 	os.Exit(subscribe.Main(me, subscribe.Commands{
 		Named: map[string]func([]string) int{
-			"install": install,
-			"check":   check,
-			"help":    help, "-h": help, "--help": help,
+			"install":   install,
+			"uninstall": uninstall,
+			"check":     check,
+			"help":      help, "-h": help, "--help": help,
 		},
 		Default: func(arguments []string) int {
 			if len(arguments) > 0 {
@@ -56,12 +57,13 @@ func usage(to *os.File) {
   %s check      say whether macOS will deliver them, and post a test banner
   %s check --sound NAME   post it with that sound, to hear one before
                           writing it into the config
-  %s install    build the .app bundle and print the [integration.%s] table to add
+  %s install    build the .app bundle, file the [integration.%s] table, load the launch agent
+  %s uninstall  stop the launch agent and remove it, the bundle and the table
 
 This is one of two macOS displays and it does the interrupting. The other puts
 the semaphore on your menu bar: agent-notify-macos-bar, its own program with its
 own table in the config, installed separately or not at all.
-`, program, program, program, program, program, Name)
+`, program, program, program, program, program, Name, program)
 }
 
 // check says whether this can actually interrupt anybody on this machine.

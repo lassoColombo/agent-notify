@@ -30,10 +30,11 @@ func main() {
 	help := func([]string) int { usage(os.Stdout); return 0 }
 	os.Exit(subscribe.Main(me, subscribe.Commands{
 		Named: map[string]func([]string) int{
-			"install": install,
-			"dump":    func([]string) int { return dump() },
-			"check":   func([]string) int { return check() },
-			"help":    help, "-h": help, "--help": help,
+			"install":   install,
+			"uninstall": uninstall,
+			"dump":      func([]string) int { return dump() },
+			"check":     func([]string) int { return check() },
+			"help":      help, "-h": help, "--help": help,
 		},
 		Default: func(arguments []string) int {
 			if len(arguments) > 0 {
@@ -52,7 +53,8 @@ func usage(to *os.File) {
   agent-notify-macos-bar            watch the store and paint
   agent-notify-macos-bar check      say what it can and cannot do on this machine
   agent-notify-macos-bar dump       print what it would put on the bar, and stop
-  agent-notify-macos-bar install    build the .app bundle and print the [integration.macos-bar] table to add
+  agent-notify-macos-bar install    build the .app bundle, file the [integration.macos-bar] table, load the launch agent
+  agent-notify-macos-bar uninstall  stop the launch agent and remove it, the bundle and the table
 
 This is one of two macOS displays and it draws the menu bar. The other posts a
 notification when an agent wants you: agent-notify-macos-notifications, its own

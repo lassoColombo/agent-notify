@@ -26,7 +26,7 @@ func aStore(t *testing.T) (string, *sessionstore.SessionStore) {
 	if err := layout.Create(); err != nil {
 		t.Fatal(err)
 	}
-	settings, _ := config.Load(layout.ConfigFile)
+	settings, _ := config.Load(layout)
 	store, err := sessionstore.Open(layout, settings)
 	if err != nil {
 		t.Fatal(err)

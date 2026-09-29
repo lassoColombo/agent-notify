@@ -9,10 +9,13 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/lassoColombo/agent-notify/hook"
 )
 
 // install writes this program into Claude's own settings.json, which is how a
-// hook comes to exist at all.
+// hook comes to exist at all, and files the `[agent.claude]` table core needs
+// to recognise Claude's process, in a drop-in of its own (D-85).
 //
 // It is idempotent and it is conservative: it adds what is missing, updates a
 // stale path to this program, and touches nothing else. A person's settings
@@ -51,21 +54,130 @@ func install(arguments []string) int {
 
 	if *print {
 		fmt.Println(string(rendered))
+		fmt.Print(agentTable)
 		return 0
 	}
 	if len(changes) == 0 {
 		fmt.Printf("already installed in %s\n", *settingsPath)
-		return 0
+	} else {
+		if err := writeSettings(*settingsPath, rendered); err != nil {
+			fmt.Fprintf(os.Stderr, "agent-notify-claude install: %v\n", err)
+			return 1
+		}
+		for _, change := range changes {
+			fmt.Println(change)
+		}
+		fmt.Printf("wrote %s\n", *settingsPath)
 	}
-	if err := writeSettings(*settingsPath, rendered); err != nil {
+	written, err := hook.WriteDropIn(AgentName, agentTable)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "agent-notify-claude install: %v\n", err)
 		return 1
 	}
-	for _, change := range changes {
-		fmt.Println(change)
-	}
-	fmt.Printf("wrote %s\n", *settingsPath)
+	fmt.Printf("wrote %s\n", written)
 	return 0
+}
+
+// agentTable is what core needs to recognise Claude's process in a hook's
+// ancestry (§A8.4). The name is Claude's, so it is this program's to file.
+const agentTable = "# Written by `agent-notify-claude install`.\n[agent." + AgentName + "]\nbinary = \"claude\"\n"
+
+// uninstall takes this program out of every hook it was in, and the table
+// away. Everything else in the settings file is kept exactly as it was.
+func uninstall(arguments []string) int {
+	flags := flag.NewFlagSet("uninstall", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	settingsPath := flags.String("settings", defaultSettings(), "Claude's settings file")
+	if err := flags.Parse(arguments); err != nil {
+		fmt.Fprintf(os.Stderr, "agent-notify-claude uninstall: %v\n", err)
+		return 2
+	}
+	program, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "agent-notify-claude uninstall: cannot find my own path: %v\n", err)
+		return 1
+	}
+	settings, err := readSettings(*settingsPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "agent-notify-claude uninstall: %v\n", err)
+		return 1
+	}
+	if updated, removed := unmerge(settings, program); removed > 0 {
+		rendered, err := json.MarshalIndent(updated, "", "  ")
+		if err == nil {
+			err = writeSettings(*settingsPath, rendered)
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "agent-notify-claude uninstall: %v\n", err)
+			return 1
+		}
+		fmt.Printf("removed %d hook(s) from %s\n", removed, *settingsPath)
+	} else {
+		fmt.Printf("not in %s\n", *settingsPath)
+	}
+	if err := hook.RemoveDropIn(AgentName); err != nil {
+		fmt.Fprintf(os.Stderr, "agent-notify-claude uninstall: %v\n", err)
+		return 1
+	}
+	fmt.Println("removed the [agent." + AgentName + "] table")
+	return 0
+}
+
+// unmerge is merge's opposite: every command naming this program goes, a
+// group left empty goes with it, and everybody else's stays byte for byte.
+func unmerge(settings map[string]json.RawMessage, program string) (map[string]json.RawMessage, int) {
+	hooks := map[string][]json.RawMessage{}
+	if raw, present := settings["hooks"]; present {
+		_ = json.Unmarshal(raw, &hooks)
+	}
+	name := filepath.Base(program)
+	removed := 0
+	for event, groups := range hooks {
+		var kept []json.RawMessage
+		for _, raw := range groups {
+			var parsed group
+			if err := json.Unmarshal(raw, &parsed); err != nil {
+				kept = append(kept, raw)
+				continue
+			}
+			var ours []int
+			for j, rawCommand := range parsed.Hooks {
+				var existing command
+				if err := json.Unmarshal(rawCommand, &existing); err == nil && namesUs(existing.Command, name) {
+					ours = append(ours, j)
+				}
+			}
+			if len(ours) == 0 {
+				kept = append(kept, raw)
+				continue
+			}
+			removed += len(ours)
+			parsed.Hooks = slices.DeleteFunc(parsed.Hooks, func(rawCommand json.RawMessage) bool {
+				var existing command
+				return json.Unmarshal(rawCommand, &existing) == nil && namesUs(existing.Command, name)
+			})
+			if len(parsed.Hooks) == 0 {
+				continue
+			}
+			if regrouped, err := json.Marshal(parsed); err == nil {
+				kept = append(kept, regrouped)
+			}
+		}
+		if len(kept) == 0 {
+			delete(hooks, event)
+		} else {
+			hooks[event] = kept
+		}
+	}
+	if removed == 0 {
+		return settings, 0
+	}
+	if len(hooks) == 0 {
+		delete(settings, "hooks")
+	} else if encoded, err := json.Marshal(hooks); err == nil {
+		settings["hooks"] = encoded
+	}
+	return settings, removed
 }
 
 // defaultSettings is ~/.claude/settings.json, or wherever the user moved the

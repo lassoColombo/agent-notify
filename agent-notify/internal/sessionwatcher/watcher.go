@@ -365,7 +365,7 @@ func (w *Watcher) prune() {
 // reloadConfiguration re-reads the file on SIGHUP, asks every integration
 // again, and retries anything that had failed.
 func (w *Watcher) reloadConfiguration(ctx context.Context) {
-	settings, problems := config.Load(w.opened.Layout.ConfigFile)
+	settings, problems := config.Load(w.opened.Layout)
 	for _, problem := range problems {
 		w.logger.Warn("configuration", "problem", problem.Error())
 	}

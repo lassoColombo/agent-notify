@@ -354,7 +354,7 @@ func somethingWasSaid(t *testing.T, layout paths.Layout, id, said string) {
 
 func applyToTheStore(t *testing.T, layout paths.Layout, report session.Report) {
 	t.Helper()
-	settings, _ := config.Load(layout.ConfigFile)
+	settings, _ := config.Load(layout)
 	store, err := sessionstore.Open(layout, settings)
 	if err != nil {
 		t.Fatalf("opening the store: %v", err)

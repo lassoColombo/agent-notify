@@ -70,7 +70,7 @@ func main() {
 		return Capture(resolved.Title)
 	}
 	os.Exit(subscribe.Main(me, subscribe.Commands{
-		Named: map[string]func([]string) int{"install": install},
+		Named: map[string]func([]string) int{"install": install, "uninstall": uninstall},
 		Interpret: func(captured json.RawMessage) (any, error) {
 			resolved, err := settings()
 			if err != nil {

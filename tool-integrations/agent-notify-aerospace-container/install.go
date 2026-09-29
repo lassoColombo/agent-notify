@@ -18,9 +18,9 @@ func table(program, aerospace string) string {
 	return written + fmt.Sprintf("aerospace = %q\n", aerospace)
 }
 
-// install prints the table and the order and changes nothing (D-66). Which
-// shell is outside which is something only the person running them knows
-// (§A11.2), so the order is offered, never written.
+// install files the table, with an order that is right only when this is the
+// only container (D-85). Which shell is outside which is something only the
+// person running them knows (§A11.2), so the rest is advice.
 func install(arguments []string) int {
 	return me.Install(subscribe.Install{
 		Tool: "aerospace",
@@ -31,4 +31,10 @@ func install(arguments []string) int {
 			"rather than adding a second table: two of them is a TOML error. Put it FIRST: a\n" +
 			"window manager is outside whatever multiplexer is running inside it.\n",
 	}, os.Stdout, os.Stderr, arguments)
+}
+
+// uninstall removes the drop-in. The [container] order is yours, so a line
+// naming this program there is yours to take out.
+func uninstall(arguments []string) int {
+	return me.Uninstall(os.Stdout, os.Stderr, arguments)
 }

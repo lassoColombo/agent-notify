@@ -152,57 +152,39 @@ section does all four.
 
 ### 1. Clone the monorepo and build
 
-Core and every integration live in one repository. `go.mod` here has a
-`replace` pointing at `../../agent-notify`, so this module is built from inside
-a checkout of the whole thing and not from a clone of its own directory.
+Core and every integration live in one repository, and `make install` at the
+root builds every module into `$(go env GOPATH)/bin`. That directory has to be
+on `PATH`: `agent-notify install picker` finds this program there by name, and
+the keybinding it prints names the absolute path.
 
 ```sh
 git clone git@github.com:lassoColombo/agent-notify.git ~/projects/agent-notify
-cd ~/projects/agent-notify/tool-integrations/agent-notify-picker
-
-env -u GOROOT go build -o agent-notify-picker .
+cd ~/projects/agent-notify
+make install
 ```
 
-`env -u GOROOT` is there because a `GOROOT` exported by an outer context
-overrides the toolchain `.tool-versions` pins. Drop it if your shell does not
-export one.
+`go install` replaces the binary rather than writing over it, which matters on
+macOS: `cp` over a running path reuses the inode, and the signature macOS
+cached no longer matches, so the next exec is killed with SIGKILL and no
+message. The symptom is a keybinding that opens a pane which closes instantly.
 
-### 2. Put the binary somewhere, by replacing it
-
-**Replace it, never overwrite it.** `cp` over a running path reuses the inode,
-and macOS then kills the new binary on exec with SIGKILL — exit 137, no output,
-no message — because the signature it cached no longer matches what is there.
-The symptom is a keybinding that opens a pane which closes instantly, which
-looks exactly like a program that crashed on startup.
+### 2. Register it with agent-notify
 
 ```sh
-rm -f /opt/homebrew/bin/agent-notify-picker
-install -m 755 agent-notify-picker /opt/homebrew/bin/
+agent-notify install picker
 ```
 
-Any directory on `PATH` will do; `agent-notify install picker` finds it by
-asking the binary where it is, and what it writes is an absolute path, so the
-choice only has to survive your own memory.
-
-### 3. Register it with agent-notify
-
-`agent-notify install <integration>` is a dispatcher and nothing else: it execs
-`agent-notify-picker install` and hands it the terminal. What that prints is the
-table to add, on stdout, and an explanation on stderr — **it writes nothing**
-(D-66). Everything in agent-notify's config file is yours to write, and whether
-a picker should be set up at all is one of the things only you can answer.
+`install` writes `conf.d/picker.toml` beside your `config.toml` and prints the
+keybinding, which is KDL and belongs in a different file of yours:
 
 ```
 $ agent-notify install picker
-# Run when you press a key, and never by core: it has no binary here, which is
-# what says so. The path lives in the keybinding, which is the thing that runs it.
-[integration.picker]
+wrote /Users/you/.config/agent-notify/conf.d/picker.toml
 
-Nothing was written. Put that in /Users/you/.config/agent-notify/config.toml, and this in
-zellij's config.kdl to open it with a key:
+And this in zellij's config.kdl to open it with a key:
 
     bind "Alt a" {
-        Run "/opt/homebrew/bin/agent-notify-picker" {
+        Run "/Users/you/go/bin/agent-notify-picker" {
             name "agents"
             floating true
             close_on_exit true
@@ -214,18 +196,11 @@ zellij's config.kdl to open it with a key:
     }
 ```
 
-The split between the two streams is the whole ergonomics of it: the table alone
-on stdout, so somebody who has already decided can redirect it, and the KDL
-where it cannot possibly end up inside a TOML file.
+The table has no `binary`, and that is what says core must never run this: a
+picker needs a terminal, and nothing core runs has one. `install` takes no
+options. `agent-notify uninstall picker` removes the drop-in.
 
-```sh
-agent-notify install picker >> ~/.config/agent-notify/config.toml
-```
-
-`install` takes no options. It printed what it needs, it changed nothing, and
-there is no flag that makes it do otherwise.
-
-### 4. Bind it to a key
+### 3. Bind it to a key
 
 The keybinding is printed rather than written, and for the same reason the table
 is: a zellij config is KDL, full of your own comments and your own key choices,
@@ -275,7 +250,7 @@ $env.config.keybindings ++= [{
 }]
 ```
 
-### 5. Check it worked
+### 4. Check it worked
 
 ```sh
 agent-notify list              # there are sessions to pick from at all
@@ -291,8 +266,8 @@ integration cannot be mistaken for a broken picker.
 If the window opens with a gold line across the top, that is a complaint about
 your configuration; see [What a bad configuration
 does](#what-a-bad-configuration-does). If a keypress opens a pane that vanishes
-instantly, it is almost always step 2 — copy over the inode rather than
-replacing the file, and macOS kills it on exec.
+instantly, it is almost always a binary copied over the inode rather than
+replaced, which macOS kills on exec; `make install` replaces it.
 
 ## Configuration
 
@@ -789,8 +764,8 @@ somebody makes.
   a session that changes state while you are reading its preview keeps the row
   it had. The preview under the cursor is re-read per row, so it is current; the
   row above it may not be.
-- **`install` writes nothing, on purpose** (D-66) — but that does mean two
-  manual paste steps, into two different files in two different languages.
+- **`install` files its table and prints the keybinding** (D-85), so one
+  manual paste stays, into a KDL file in a language a TOML writer cannot edit.
 - **zellij is the only multiplexer with a printed keybinding.** The tmux and
   shell-widget snippets above work, and they are not generated by `install`.
 - **The glyphs assume a Nerd Font**, and there is no ASCII fallback. A terminal

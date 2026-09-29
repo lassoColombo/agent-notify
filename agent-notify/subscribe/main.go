@@ -195,16 +195,3 @@ func (i Integration) viewOnStdinOrTheStore(stdin io.Reader) (session.View, error
 	}
 	return session.View{Sessions: sessions}, nil
 }
-
-// PrintTable prints a config table to out and, to problems, what to do with
-// it: nothing was written, because everything in that file is the user's
-// (D-66).
-func (i Integration) PrintTable(out, problems io.Writer, table string) {
-	fmt.Fprint(out, table)
-	where, err := i.ConfigFile()
-	if err != nil {
-		where = "agent-notify's config file"
-	}
-	fmt.Fprintf(problems, "\nNothing was written. Put that in %s when you want this\n"+
-		"running: the table being there is what turns it on.\n", where)
-}

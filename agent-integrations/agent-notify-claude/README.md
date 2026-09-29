@@ -152,35 +152,21 @@ is absent for a reason rather than because nobody got to it.
 
 agent-notify is one repository with three directories — `agent-notify/` (core),
 `agent-integrations/` and `tool-integrations/` — and nothing is published
-anywhere yet. This module's `go.mod` carries a `replace` pointing at core's path
-inside that tree, so one clone is what you need and a clone of this directory
-alone does not compile:
+anywhere yet. `make install` at the root builds every module into
+`$(go env GOPATH)/bin`, which needs to be on your `PATH`: `agent-notify install
+claude` finds this program there by name, and so does `agent-notify doctor`.
 
 ```sh
 git clone git@github.com:lassoColombo/agent-notify.git ~/projects/agent-notify
-
-# core first: the CLI is what you will check things with
-cd ~/projects/agent-notify/agent-notify
-env -u GOROOT go install .
-
-# then this
-cd ~/projects/agent-notify/agent-integrations/agent-notify-claude
-env -u GOROOT go install .
+cd ~/projects/agent-notify
+make install
 ```
-
-`go install` puts both binaries in `$(go env GOPATH)/bin`, which needs to be on
-your `PATH` — `agent-notify install <name>` finds an integration by looking for
-`agent-notify-<name>` there, and so does `agent-notify doctor`.
-
-The `env -u GOROOT` is the fix for a shell that exported `GOROOT` from an outer
-context, where it overrides the toolchain pinned in `.tool-versions`
-(`golang 1.26.2`). Without such a shell, plain `go install .` is fine.
 
 ### 2. Register it with Claude Code
 
 Claude runs a hook because `settings.json` names it, and `install` is what
-writes that block. Either spelling does the same thing — core's is a dispatcher
-that `exec`s this program and hands it every option after the name:
+writes that block. Either spelling does the same thing — core's runs this
+program and hands it every option after the name:
 
 ```sh
 agent-notify install claude          # core's front door
@@ -227,6 +213,7 @@ added StopFailure
 added Notification
 added SessionEnd
 wrote /Users/you/.claude/settings.json
+wrote /Users/you/.config/agent-notify/conf.d/claude.toml
 ```
 
 ```
@@ -256,23 +243,23 @@ to an installer would be unforgivable:
 Claude reads `settings.json` at startup, so **restart Claude Code**, or start a
 new session, before expecting anything.
 
-### 3. Tell core what a Claude process looks like
+### 3. Core is told what a Claude process looks like
 
-This is the one thing `install` does not do for you, because it is not this
-program's knowledge — it is yours. Core walks the hook's ancestry to find which
-process the session *is*, and without a binary to match it has nothing to judge
-liveness by: a session whose Claude has died will sit on your bar forever.
+Core walks the hook's ancestry to find which process the session *is*, and
+without a binary to match it has nothing to judge liveness by: a session whose
+Claude has died would sit on your bar forever. The name of that process is
+Claude's, so `install` files it, in `conf.d/claude.toml` beside your
+`config.toml`:
 
 ```toml
-# ~/.config/agent-notify/config.toml
-
 [agent.claude]
 binary = "claude"
 ```
 
 The value is matched against three spellings of each ancestor — the short name
-the kernel reports, the full path, and that path's basename — so
-`binary = "/opt/homebrew/bin/claude"` is how you disambiguate two claudes.
+the kernel reports, the full path, and that path's basename. With two claudes
+to tell apart, write `binary = "/opt/homebrew/bin/claude"` under
+`[agent.claude]` in your own `config.toml`, which wins over the drop-in.
 
 ### 4. Check it worked
 
@@ -287,9 +274,9 @@ liveness     ok    boot 027BA0B8-… — 3 running, 0 gone but not yet ended, 0 
 watcher      ok    pid 86777, version 0.0.0-dev, since 2026-09-22T22:15:40Z
 ```
 
-`doctor` is explicit that it does **not** check whether Claude's hooks are
-installed — each agent-integration answers that with its own `install`, and
-`install --print` is the check.
+`doctor` does **not** check whether Claude still runs the hooks; `install` is
+safe to run again and says whether they are there. What it does check is that
+every agent with sessions in the store has its `[agent.<name>]` table.
 
 Then start a Claude session, type something, and watch:
 
@@ -310,11 +297,11 @@ again: it recognises an entry that names `agent-notify-claude` at any path and
 rewrites that path in place, so you get `updated the path for SessionStart`
 rather than a second entry firing a binary that no longer exists.
 
-There is no `uninstall`. Delete the nine entries from `settings.json` by hand,
-or restore `settings.json.before-agent-notify` if the install was the last thing
-that touched it — and note that that copy is rewritten by every install that
-changes something, so it is the state before the *most recent* install and not
-the state before the first one.
+`agent-notify uninstall claude` takes every entry naming this program out of
+`settings.json`, a group left empty with it, and leaves everybody else's hooks
+byte for byte; then it removes `conf.d/claude.toml`. The copy at
+`settings.json.before-agent-notify` is rewritten by every install or uninstall
+that changes something, so it is the state before the *most recent* one.
 
 ## Configuration
 
@@ -351,9 +338,9 @@ There is no file by default and running without one is supported — but the
 
 | Key | Type | Default | What it changes |
 | --- | --- | --- | --- |
-| `agent.claude.binary` | string | none | What core matches against the hook's process ancestry to decide which process the session is. Without it, nothing records the pid, liveness has nothing to judge, and a dead session is never noticed as dead. Accepts the kernel's short name (`claude`), a full path, or that path's basename. |
-| `agent-notify-binary` | path | worked out | Where the `agent-notify` binary lives, for the one job that needs it: a hook whose poke found no session-watcher has to start one. It exists because a hook's `PATH` is not your shell's, and because inside `agent-notify-claude` "this executable" is the wrong answer. Empty succeeds on most machines. |
-| `keep-ended-sessions` | duration, in nanoseconds | `604800000000000` (7 days) | How long an ended session's record survives, so that resuming it is recognised as a return rather than a birth. Core's, not this program's, but it is what decides whether your resumed Claude session keeps its history. |
+| `agent.claude.binary` | string | `"claude"`, filed by `install` in `conf.d/claude.toml` | What core matches against the hook's process ancestry to decide which process the session is. Without it, nothing records the pid, liveness has nothing to judge, and a dead session is never noticed as dead. Accepts the kernel's short name, a full path, or that path's basename; a value in your `config.toml` wins. |
+| `agent-notify-binary` | path | filed by `agent-notify install` in `conf.d/agent-notify.toml` | Where the `agent-notify` binary lives, for the one job that needs it: a hook that finds no session-watcher has to start one. It exists because a hook's `PATH` is not your shell's, and because inside `agent-notify-claude` "this executable" is the wrong answer. |
+| `keep-ended-sessions` | duration, `"168h"` spelling | `"168h"` (7 days) | How long an ended session's record survives, so that resuming it is recognised as a return rather than a birth. Core's, not this program's, but it is what decides whether your resumed Claude session keeps its history. |
 
 **There is no `[integration.claude]` table, and there is not meant to be.** That
 table is for the programs core runs — displays and containers — and for

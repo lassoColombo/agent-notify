@@ -5,25 +5,28 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/lassoColombo/agent-notify/internal/config"
+	"github.com/lassoColombo/agent-notify/internal/paths"
 	"github.com/lassoColombo/agent-notify/session"
 )
 
-// Main is an agent-integration's main. `install` is run by a person, so it
-// may speak and it may fail; any other word on the command line is refused
-// with the usage. Otherwise this is a hook: the payload on stdin is decoded
-// into `payload`, handed to translate, and what comes back is recorded.
+// Main is an agent-integration's main. `named` are the program's own
+// subcommands, `install` and `uninstall`, which a person runs and which may
+// speak and fail; any other word on the command line is refused with the
+// usage. Otherwise this is a hook: the payload on stdin is decoded into
+// `payload`, handed to translate, and what comes back is recorded.
 //
 // A hook never exits non-zero and never writes to stdout. Claude and codex
 // both read exit code 2 as "block this" and stdout as a verdict, and a
 // notifier that stops an agent working is far worse than one that does not
 // notify (R2). A payload that does not parse is not an error either: an
 // agent sends a different shape per hook and adds fields between releases.
-func Main(arguments []string, usage string, install func([]string) int,
+func Main(arguments []string, usage string, named map[string]func([]string) int,
 	payload any, translate func() (session.Report, bool)) int {
-	if len(arguments) > 0 && arguments[0] == "install" {
-		return install(arguments[1:])
-	}
 	if len(arguments) > 0 {
+		if run, known := named[arguments[0]]; known {
+			return run(arguments[1:])
+		}
 		fmt.Fprint(os.Stderr, usage)
 		return 1
 	}
@@ -32,6 +35,26 @@ func Main(arguments []string, usage string, install func([]string) int,
 		Record(report)
 	}
 	return 0
+}
+
+// WriteDropIn files an agent-integration's table in `conf.d`, which is where
+// its `[agent.<name>]` table goes: the process name is the agent's, and the
+// integration is what knows it (D-85). It says where it wrote.
+func WriteDropIn(name, table string) (string, error) {
+	layout, err := paths.FromEnvironment()
+	if err != nil {
+		return "", err
+	}
+	return config.WriteDropIn(layout, name, table)
+}
+
+// RemoveDropIn takes it away again.
+func RemoveDropIn(name string) error {
+	layout, err := paths.FromEnvironment()
+	if err != nil {
+		return err
+	}
+	return config.RemoveDropIn(layout, name)
 }
 
 // LastResponses reads a transcript backwards for the newest responses that

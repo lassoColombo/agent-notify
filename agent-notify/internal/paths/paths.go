@@ -123,6 +123,13 @@ func defaultConfigFile() (string, error) {
 	return filepath.Join(home, ".config", "agent-notify", "config.toml"), nil
 }
 
+// DropIns holds one table per integration, written by that integration's
+// install and read before ConfigFile, which wins (D-85).
+func (l Layout) DropIns() string { return filepath.Join(filepath.Dir(l.ConfigFile), "conf.d") }
+
+// DropIn is one integration's table.
+func (l Layout) DropIn(name string) string { return filepath.Join(l.DropIns(), name+".toml") }
+
 // Sessions holds the record of every session that has not ended.
 func (l Layout) Sessions() string { return filepath.Join(l.State, "sessions") }
 

@@ -42,6 +42,8 @@ func build(t *testing.T) string {
 func run(t *testing.T, binary string, arguments ...string) (string, string, int) {
 	t.Helper()
 	command := exec.Command(binary, arguments...)
+	// The drop-in goes under a root of the test's own, never the real one.
+	command.Env = append(os.Environ(), "AGENT_NOTIFY_ROOT="+t.TempDir())
 	var out, errs strings.Builder
 	command.Stdout, command.Stderr = &out, &errs
 	code := 0
@@ -269,5 +271,39 @@ func TestTheHookNeverBlocks(t *testing.T) {
 		if errs.String() != "" {
 			t.Errorf("%s wrote to stderr: %q", attempt.hook, errs.String())
 		}
+	}
+}
+
+// TestUninstallTakesOnlyItselfOut: every hook naming this program goes, a
+// group left empty goes with it, and everybody else's entries stay.
+func TestUninstallTakesOnlyItselfOut(t *testing.T) {
+	binary := build(t)
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(path, []byte(theirSettings), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, errs, code := run(t, binary, "install", "--settings", path); code != 0 {
+		t.Fatalf("install exited %d: %s", code, errs)
+	}
+	out, errs, code := run(t, binary, "uninstall", "--settings", path)
+	if code != 0 {
+		t.Fatalf("uninstall exited %d: %s", code, errs)
+	}
+	if !strings.Contains(out, "removed") {
+		t.Errorf("uninstall did not say what it removed:\n%s", out)
+	}
+	settings := settingsAt(t, path)
+	for _, event := range SubscribedHooks {
+		for _, command := range commandsFor(t, settings, event) {
+			if strings.Contains(command, "agent-notify-claude") {
+				t.Errorf("%s still runs this program: %q", event, command)
+			}
+		}
+	}
+	if got := commandsFor(t, settings, "PreToolUse"); len(got) != 1 || !strings.Contains(got[0], "audit.sh") {
+		t.Errorf("somebody else's PreToolUse hook was lost: %v", got)
+	}
+	if got := commandsFor(t, settings, "SessionStart"); len(got) != 1 || !strings.Contains(got[0], "log-events.sh") {
+		t.Errorf("somebody else's SessionStart hook was lost: %v", got)
 	}
 }

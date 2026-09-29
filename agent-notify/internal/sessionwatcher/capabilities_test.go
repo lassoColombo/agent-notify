@@ -97,7 +97,7 @@ func TestWithNoReportItAsksRatherThanSayingThereIsNoContainer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FromEnvironment: %v", err)
 	}
-	settings, problems := config.Load(layout.ConfigFile)
+	settings, problems := config.Load(layout)
 	if len(problems) > 0 {
 		t.Fatalf("reading the config: %v", problems)
 	}

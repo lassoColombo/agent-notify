@@ -202,46 +202,28 @@ speak anyway.
 - **agent-notify core**, built and on your PATH. It lives in this same
   repository, one directory over.
 
-### Build it
+### Build and register it
 
 This is a monorepo: core, the agent-integrations and the tool-integrations are
-one clone, not ten. `go.mod` has a `replace` pointing at core's path beside it,
-so this module is built where it sits and a clone of this directory alone would
-not compile.
+one clone. `make install` at the root builds every module into
+`$(go env GOPATH)/bin`, which has to be on your PATH: being there is what lets
+`agent-notify install` find this program by name.
 
 ```sh
-git clone git@github.com:lassoColombo/agent-notify.git
-cd agent-notify/tool-integrations/agent-notify-aerospace-container
-
-go build -o agent-notify-aerospace-container .
-```
-
-If your shell exported `GOROOT` from an outer context it overrides the toolchain
-pinned in `.tool-versions`, and `env -u GOROOT go build .` is the fix. It is
-worth knowing before the error rather than after it.
-
-Then put the binary somewhere stable and on your PATH — being on PATH is what
-lets `agent-notify install aerospace-container` find it, and stable is what the
-absolute path in the config file is going to name:
-
-```sh
-install -m 755 agent-notify-aerospace-container /opt/homebrew/bin/
-```
-
-### Register it with core
-
-`install` prints the tables it needs and **writes nothing**. Everything in
-agent-notify's config file is yours to write; what this program supplies is the
-part only it can know — where its own binary ended up, and that it answers
-`capture-environment`.
-
-```sh
+git clone git@github.com:lassoColombo/agent-notify.git ~/projects/agent-notify
+cd ~/projects/agent-notify
+make install
 agent-notify install aerospace-container
 ```
 
-```
+`install` writes `conf.d/aerospace-container.toml` beside your `config.toml`,
+with what only this program can know: where its own binary ended up, and where
+aerospace is, looked up now because install runs in your shell and nothing
+that runs later has your PATH.
+
+```toml
 [integration.aerospace-container]
-binary = "/opt/homebrew/bin/agent-notify-aerospace-container"
+binary = "/Users/you/go/bin/agent-notify-aerospace-container"
 
 [integration.aerospace-container.settings]
 aerospace = "/opt/homebrew/bin/aerospace"
@@ -250,30 +232,21 @@ aerospace = "/opt/homebrew/bin/aerospace"
 order = ["aerospace-container"]
 ```
 
-The tables go to stdout and every word of explanation goes to stderr, so if you
-have already decided you can redirect it straight in:
-
-```sh
-agent-notify install aerospace-container >> ~/.config/agent-notify/config.toml
-```
-
-Two things to do by hand after that. If you already have a `[container]` table,
-add `"aerospace-container"` to its `order` instead of pasting a second one — two
-`[container]` tables is a TOML error — and put it **first**, because a window
-manager is outside whatever multiplexer is running inside it:
+One thing is yours. The `[container] order` in that file is the whole order
+only when this is your only container; a window manager is outside whatever
+multiplexer runs inside it, so with zellij too the order goes in `config.toml`,
+which wins, and this program **first**:
 
 ```toml
 [container]
 order = ["aerospace-container", "zellij"]
 ```
 
-And if `aerospace` was not on PATH when you ran install, the line comes out
-empty with a comment where the answer should be, and install exits 1 saying so.
-Fill it in: no window can be focused without it. The lookup is done at install
-time on purpose — install runs in your shell, where aerospace is simply on PATH,
-and everything that runs later does not have your PATH.
-
-`install` takes no options at all and exits 2 if you give it one.
+If `aerospace` was not on PATH when you ran install, the line comes out empty
+with a comment where the answer should be, and install exits 1 saying so. Fill
+it in: no window can be focused without it. `install` takes no options and
+exits 2 if you give it one. `agent-notify uninstall aerospace-container`
+removes the drop-in.
 
 ### Check it
 
@@ -304,8 +277,8 @@ agent-notify focused <session>                                # yes / no / canno
 ```
 
 A name in `[container] order` with no table behind it, or a table with no
-`binary`, is skipped and reported when a focus is attempted — it is almost
-always a typo in the one place that cannot be typo-checked.
+`binary`, is what `doctor`'s `containers` line reports, and what a focus
+skips: it is almost always a typo in the one place that cannot be typo-checked.
 
 ### Prove it moved something
 

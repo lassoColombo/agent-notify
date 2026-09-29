@@ -1,0 +1,12 @@
+go 1.26.0
+
+use (
+	./agent-notify
+	./agent-integrations/agent-notify-claude
+	./agent-integrations/agent-notify-codex
+	./tool-integrations/agent-notify-aerospace-container
+	./tool-integrations/agent-notify-macos-bar
+	./tool-integrations/agent-notify-macos-notifications
+	./tool-integrations/agent-notify-picker
+	./tool-integrations/agent-notify-zellij
+)

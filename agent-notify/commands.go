@@ -76,7 +76,7 @@ never a second implementation of anything.`,
 	fileUnder(command, groupForDoingSomethingAboutIt,
 		focus.FocusSession(), annotate.Command())
 	fileUnder(command, groupForSettingItUp,
-		install.Command(), watcher.Command())
+		install.Command(), install.Uninstall(), watcher.Command())
 	fileUnder(command, groupForWhatAnAgentCalls,
 		reportevent.Command())
 

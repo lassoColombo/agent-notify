@@ -138,7 +138,7 @@ care where a session lives, only what it is doing.
 
 `agent-notify-macos-notifications` and [`agent-notify-macos-bar`](../agent-notify-macos-bar)
 are **two displays**, not two halves of one thing. Each is its own binary, in its own `.app`
-bundle with its own identifier; each is installed by its own `install`, which prints its own
+bundle with its own identifier; each is installed by its own `install`, which files its own
 table — `[integration.macos-notifications]` here, `[integration.macos-bar]` there; each is
 configured in its own `[…settings]` section and refuses a key it did not declare, the
 other's included; and each is started by its own launch agent, neither knowing the
@@ -174,25 +174,17 @@ does not notice.
 
 ### 1. Clone the monorepo and build
 
-Everything lives in one repository: core under `agent-notify/`, the agent-integrations and
-the tool-integrations beside it. This module's `go.mod` carries a `replace` pointing at
-core's path in the tree, so it is built **in place**, beside the core it links.
+Everything lives in one repository: core under `agent-notify/`, the
+agent-integrations and the tool-integrations beside it. `make install` at the
+root builds every module into `$(go env GOPATH)/bin`, which has to be on your
+PATH: `agent-notify install macos-notifications` finds this program there by
+name. What ends up running is a signed copy inside the bundle.
 
 ```sh
 git clone <the agent-notify monorepo> ~/projects/agent-notify
-cd ~/projects/agent-notify/tool-integrations/agent-notify-macos-notifications
-
-go build ./...                      # the binary, here in the module directory
-go install ./...                    # or straight into $GOBIN, which is what puts it on PATH
+cd ~/projects/agent-notify
+make install
 ```
-
-`agent-notify install <name>` finds an integration by looking for `agent-notify-<name>` on
-your PATH, so `go install` is the form that makes `agent-notify install macos-notifications`
-work. Either way, what ends up in the config is a path *inside the bundle* rather than this
-binary, so the binary itself does not have to stay anywhere in particular.
-
-Nothing is published to a remote yet. A clone of this directory alone does not compile —
-the `replace` line comes out when core is published.
 
 ### 2. Make a code-signing identity
 
@@ -241,30 +233,36 @@ agent-notify install macos-notifications --sign "agent-notify self-signed"
 agent-notify-macos-notifications install --sign "agent-notify self-signed"
 ```
 
-Two things happen, and only one of them touches your disk.
+Three things happen, and `install` says each as it goes.
 
 A signed `.app` bundle is written to `~/Applications/agent-notify-macos-notifications.app`,
 holding a **copy** of the binary, an `Info.plist` with the bundle identifier
 `io.github.lassocolombo.agent-notify-notifications` and `LSUIElement` so that it never
 appears in the Dock or the app switcher, and an icon drawn at install time. Then the whole
 bundle is signed. Writing it is idempotent: re-running `install` repairs it, and the copy
-goes in through a temporary file and a rename, so a display that is currently running is
-upgraded rather than hit with `ETXTBSY`.
+goes in through a temporary file and a rename.
 
-And the table you need is printed **on stdout**, with everything else on stderr, so that
-somebody who has already decided can redirect it:
+The table is filed in `conf.d/macos-notifications.toml` beside your `config.toml`, which is
+never written. It carries no `binary`, because core cannot run this, and the launch agent's
+label, so that `doctor` can ask launchd about it:
 
-```console
-$ agent-notify install macos-notifications --sign "agent-notify self-signed"
+```toml
 [integration.macos-notifications]
+launch-agent = "io.github.lassocolombo.agent-notify-notifications"
 
 [integration.macos-notifications.settings]
 sign = "agent-notify self-signed"
+```
 
-The bundle is at /Users/you/Applications/agent-notify-macos-notifications.app. Nothing else was written:
-put the table above in /Users/you/.config/agent-notify/config.toml when you want this configurable,
-and load the launch agent below when you want it running.
-…
+And the launch agent is written to `~/Library/LaunchAgents` and loaded, restarting a job
+that was already there.
+
+```console
+$ agent-notify install macos-notifications --sign "agent-notify self-signed"
+built /Users/you/Applications/agent-notify-macos-notifications.app
+wrote /Users/you/.config/agent-notify/conf.d/macos-notifications.toml
+wrote /Users/you/Library/LaunchAgents/io.github.lassocolombo.agent-notify-notifications.plist
+started io.github.lassocolombo.agent-notify-notifications
 ```
 
 Flags:
@@ -274,26 +272,15 @@ Flags:
 | `--sign IDENTITY` | whatever `sign` in the config already says, else ad-hoc | the code-signing identity, as `security find-identity -p codesigning` names it |
 | `--app DIR` | `~/Applications` | where to put the `.app` |
 
-There is no `--print`, and there is nothing for one to select: `install` only ever prints
-the table, and never writes to your config. Passing it exits 2 with *"flag provided but
-not defined"*.
+There is no `--print`. `--sign` is remembered in the table so that re-running `install`
+after a rebuild signs the same way without the flag: when the flag is absent, `install`
+reads the identity back out of the config.
 
-`--sign` is remembered in the printed table so that re-running `install` after a rebuild
-signs the same way without the flag. When the flag is absent, `install` reads the identity
-back out of your config — reading is not writing, and the value there is yours.
+### 4. It is running
 
-### 4. Add the table to agent-notify's config
-
-`install` deliberately does not write it. Everything in agent-notify's config file is yours,
-and the test for whether something belongs there is whether only you can know the answer.
-Whether this display should be running is exactly that — and since `enabled` defaults to
-true, **the table being there is what turns it on**.
-
-```sh
-agent-notify install macos-notifications >> ~/.config/agent-notify/config.toml
-# then put the launch agent it printed in ~/Library/LaunchAgents and:
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.github.lassocolombo.agent-notify-notifications.plist
-```
+`enabled` defaults to true and the table being there is what turns it on, so nothing is
+left to do: the next time an agent wants you, a banner says so. `agent-notify doctor` says
+whether launchd has the job loaded.
 
 **agent-notify does not start this display, and that is deliberate.** Every other
 integration is a program core runs and waits for. A notifier cannot be written that way,
@@ -376,18 +363,18 @@ and no banner arrives, the problem is macOS's side of it — go back to `check`.
 
 ### Upgrading, and uninstalling
 
-The bundle holds a signed **copy** of the binary, so rebuilding does not reach it:
+The bundle holds a signed **copy** of the binary, so rebuilding does not reach it, and
+`install` is the upgrade: it rebuilds the bundle, re-signs it with the remembered
+identity, and restarts the launchd job on the new binary.
 
 ```sh
-cd ~/projects/agent-notify/tool-integrations/agent-notify-macos-notifications
-go install ./...
-agent-notify install macos-notifications      # re-signs the bundle with the remembered identity
-agent-notify watcher reload
+make install                             # at the root
+agent-notify install macos-notifications
 ```
 
-To remove it, unload the launch agent, delete its table from the config, and drag
-`~/Applications/agent-notify-macos-notifications.app` to the bin. macOS keeps its decision
-about the identifier either way; reinstalling later does not have to ask again.
+`agent-notify uninstall macos-notifications` stops the job and removes the launch agent,
+the bundle and the drop-in. macOS keeps its decision about the identifier either way;
+reinstalling later does not have to ask again.
 
 ## Configuration
 

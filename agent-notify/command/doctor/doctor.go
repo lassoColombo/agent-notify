@@ -8,7 +8,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"runtime"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +19,7 @@ import (
 
 	"github.com/lassoColombo/agent-notify/command/internal/onpath"
 	"github.com/lassoColombo/agent-notify/internal/config"
+	"github.com/lassoColombo/agent-notify/internal/containers"
 	"github.com/lassoColombo/agent-notify/internal/onewatcher"
 	"github.com/lassoColombo/agent-notify/internal/paths"
 	"github.com/lassoColombo/agent-notify/internal/process"
@@ -81,7 +85,7 @@ func doctor() int {
 	logger, closer := logs.OpenFile(layout.LogFile(), "doctor")
 	defer closer.Close()
 
-	settings, problems := config.Load(layout.ConfigFile)
+	settings, problems := config.Load(layout)
 	for _, problem := range problems {
 		logger.Warn("configuration", "problem", problem.Error())
 	}
@@ -104,6 +108,8 @@ func doctor() int {
 		report("config", true, summary)
 	}
 
+	reportCoreBinary(settings, &healthy)
+
 	openedStore, err := sessionstore.Open(layout, settings)
 	switch {
 	case err != nil:
@@ -119,16 +125,18 @@ func doctor() int {
 			report("store", true, fmt.Sprintf("%d live session(s), %d ended and still "+
 				"resumable, %d forgotten this run", len(live), len(ended), pruned(openedStore, logger)))
 			reportLiveness(live, &healthy)
+			reportAgents(append(live, ended...), settings, &healthy)
 		}
 	}
 
 	reportWatcher(layout, &healthy)
 	reportIntegrations(layout, settings, &healthy)
+	reportContainers(layout, settings, &healthy)
 	reportWhatIsInstalledAndNotAskedFor(settings)
 
 	fmt.Println()
-	fmt.Println("not checked here: which agents have their hooks installed. Each")
-	fmt.Println("agent-integration answers that with its own `install`.")
+	fmt.Println("not checked here: whether each agent still runs its hooks. An")
+	fmt.Println("agent-integration's `install` says so, and is safe to run again.")
 
 	if healthy {
 		return 0
@@ -164,6 +172,67 @@ func pruned(openedStore *sessionstore.SessionStore, logger *slog.Logger) int {
 		logger.Info("forgot an ended session past its welcome", "session", key.String())
 	}
 	return len(removed)
+}
+
+// reportCoreBinary: without it no hook can start a session-watcher and no
+// launchd child can focus anything, and the only sign is a line in the log.
+func reportCoreBinary(settings config.Config, healthy *bool) {
+	found, err := onewatcher.CoreBinary(settings.AgentNotifyBinary)
+	if err != nil {
+		report("binary", false, err.Error()+"\n`agent-notify install` files it")
+		*healthy = false
+		return
+	}
+	report("binary", true, found)
+}
+
+// reportAgents: a session from an agent with no [agent.<name>] table has no
+// process to be judged by, so it can never be found dead.
+func reportAgents(records []session.Record, settings config.Config, healthy *bool) {
+	var unknown []string
+	for _, record := range records {
+		if _, known := settings.Agent[record.Key.Agent]; !known && !slices.Contains(unknown, record.Key.Agent) {
+			unknown = append(unknown, record.Key.Agent)
+		}
+	}
+	slices.Sort(unknown)
+	if len(unknown) == 0 {
+		report("agents", true, fmt.Sprintf("%d configured", len(settings.Agent)))
+		return
+	}
+	report("agents", false, fmt.Sprintf("sessions from %s and no [agent.<name>] table for them, so "+
+		"their liveness cannot be judged;\n`agent-notify install %s` files it",
+		strings.Join(unknown, ", "), strings.Join(unknown, " ")))
+	*healthy = false
+}
+
+// reportContainers says what the session-watcher would complain about in its
+// log, here where a person is looking.
+func reportContainers(layout paths.Layout, settings config.Config, healthy *bool) {
+	if len(settings.Container.Order) == 0 {
+		report("containers", true, "none in [container] order; nothing can be focused, everything else works")
+		return
+	}
+	configured, problems := containers.Configured(settings, sessionwatcher.CapabilitiesByIntegration(layout, settings))
+	if len(problems) == 0 {
+		names := make([]string, 0, len(configured))
+		for _, one := range configured {
+			names = append(names, one.Name)
+		}
+		report("containers", true, "outermost first: "+strings.Join(names, ", "))
+		return
+	}
+	lines := make([]string, 0, len(problems))
+	for _, problem := range problems {
+		lines = append(lines, problem.Error())
+	}
+	report("containers", false, strings.Join(lines, "\n"))
+	*healthy = false
+}
+
+// launchdKnows asks launchd whether a display's job is loaded.
+func launchdKnows(label string) bool {
+	return exec.Command("launchctl", "print", "gui/"+strconv.Itoa(os.Getuid())+"/"+label).Run() == nil
 }
 
 // reportLiveness only looks; ending sessions is the session-watcher's job.
@@ -247,7 +316,16 @@ func reportIntegrations(
 		fmt.Sprintf("reported by pid %d at %s", report.PID, report.Written))
 
 	for _, one := range report.Integrations {
-		fmt.Printf("             %-22s %s\n", one.Name, one.State)
+		state := one.State
+		if label := settings.Integration[one.Name].LaunchAgent; label != "" {
+			if launchdKnows(label) {
+				state = "running under launchd as " + label
+			} else {
+				state = "NOT loaded under launchd; `agent-notify install " + one.Name + "` loads it"
+				*healthy = false
+			}
+		}
+		fmt.Printf("             %-22s %s\n", one.Name, state)
 		if one.Binary != "" {
 			fmt.Printf("             %-22s %s\n", "", whatItAnswers(one))
 		}
@@ -270,9 +348,8 @@ func whatItAnswers(one sessionwatcher.Integration) string {
 	}
 }
 
-// reportWhatIsInstalledAndNotAskedFor names the programs on your PATH that are
-// in no table: since D-66 installing and enabling are two acts, and nothing
-// else says the second never happened. Never a failure.
+// reportWhatIsInstalledAndNotAskedFor names the programs on your PATH whose
+// install has not been run. Never a failure.
 func reportWhatIsInstalledAndNotAskedFor(settings config.Config) {
 	var unasked []string
 	for _, name := range onpath.Integrations() {
@@ -292,7 +369,5 @@ func reportWhatIsInstalledAndNotAskedFor(settings config.Config) {
 		fmt.Sprintf("%d on your PATH and not mentioned here: %s",
 			len(unasked), strings.Join(unasked, ", ")))
 	fmt.Printf("%-12s %-5s %s\n", "", "",
-		"`agent-notify install <name>` hands over to each: a tool-integration prints")
-	fmt.Printf("%-12s %-5s %s\n", "", "",
-		"the table for you to add, an agent-integration writes its agent's hooks.")
+		"`agent-notify install` sets each of them up.")
 }

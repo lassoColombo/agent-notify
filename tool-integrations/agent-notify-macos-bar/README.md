@@ -204,98 +204,70 @@ separately or not at all — its own binary, its own bundle, its own
 
 This is one module inside the `agent-notify` monorepo, and core is not published
 yet: `go.mod` carries a `replace` pointing at `../../agent-notify`. So there is
-**one clone**, and you build this module from its own directory.
+**one clone**, and `make install` at the root builds every module into
+`$(go env GOPATH)/bin`.
 
 ```sh
 git clone git@github.com:lassoColombo/agent-notify.git ~/projects/agent-notify
 cd ~/projects/agent-notify
-
-# core first — the CLI everything else talks to
-go -C agent-notify build -o /opt/homebrew/bin/agent-notify .
-
-# then this display
-go -C tool-integrations/agent-notify-macos-bar build -o /opt/homebrew/bin/agent-notify-macos-bar .
+make install
 
 agent-notify-macos-bar --help    # it built
 ```
 
-Anywhere on `PATH` will do instead of `/opt/homebrew/bin` — `~/.local/bin`, or
-whatever `go env GOBIN` says. Being on `PATH` matters for exactly one thing:
-`agent-notify install macos-bar` finds this program by name. The config file
-names the binary by absolute path afterwards, and the session-watcher runs that
-path and not your `PATH`.
+Being on `PATH` matters for exactly one thing: `agent-notify install macos-bar`
+finds this program by name. What ends up running is a copy inside the bundle.
 
-### `install`: the bundle, and the table it prints
+### `install`: the bundle, the table, and the launch agent
 
 ```sh
-agent-notify install macos-bar              # the normal spelling: core execs this program's install
+agent-notify install macos-bar              # the normal spelling: core runs this program's install
 agent-notify-macos-bar install              # the same thing, directly
 agent-notify-macos-bar install --app DIR    # put the .app somewhere other than ~/Applications
 agent-notify-macos-bar install --sign NAME  # sign the bundle with a named identity
 ```
 
-`agent-notify install <integration>` is a dispatcher and nothing else: core
-`exec`s `agent-notify-macos-bar install` and every option after the name belongs
-to this program. Core does not know what a bundle is and must not.
-
-Two things happen, and they are deliberately unlike each other:
+Three things happen, and `install` says each as it goes:
 
 **A `.app` bundle is written**, to `~/Applications/agent-notify-macos-bar.app`.
-That is this program's own artifact — macOS will not remember where you put a
-menu bar item without one and there is no other way for it to exist — so
-building it is mechanical and `install` does it, idempotently, over whatever was
-there before. It holds a signed **copy** of the binary, an `Info.plist` with
-`LSUIElement` so the display never appears in the Dock or the app switcher, and
-an icon drawn at install time.
+macOS will not remember where you put a menu bar item without one, so building
+it is mechanical and `install` does it, idempotently, over whatever was there
+before. It holds a signed **copy** of the binary, an `Info.plist` with
+`LSUIElement` so the display never appears in the Dock or the app switcher,
+and an icon drawn at install time.
 
-**The config table is printed, not written.** Everything in agent-notify's
-config file is yours to write, and the test for whether something belongs there
-is whether only you can know the answer. Whether this display should be running
-is exactly that — and since `enabled` defaults to true, the table being there is
-what turns it on. So `install` puts the table on **stdout** and everything else
-on stderr, and you decide:
+**The table is filed**, in `conf.d/macos-bar.toml` beside your `config.toml`,
+which is never written. It carries no `binary`, because core cannot run a menu
+bar, and the launch agent's label, so that `doctor` can ask launchd about it:
+
+```toml
+[integration.macos-bar]
+launch-agent = "io.github.lassocolombo.agent-notify-bar"
+
+[integration.macos-bar.settings]
+sign = "agent-notify self-signed"
+```
+
+**The launch agent is written and loaded**:
+`~/Library/LaunchAgents/io.github.lassocolombo.agent-notify-bar.plist`, then
+`launchctl bootout` of any job already there and `bootstrap` of this one. The
+item is on your menu bar when `install` returns.
 
 ```
 $ agent-notify install macos-bar
-[integration.macos-bar]
-
-The bundle is at /Users/you/Applications/agent-notify-macos-bar.app. Nothing else was written:
-put the table above in /Users/you/.config/agent-notify/config.toml when you want this configurable,
-and load the launch agent below when you want it running.
-
-The bundle holds a COPY of the binary, so run this again after rebuilding.
-
-This display runs itself rather than being started by agent-notify:
-a menu bar item dies with its process, so there is nothing core could
-usefully run. It watches the store itself instead.
-
-<?xml version="1.0" encoding="UTF-8"?>
-… a launch agent naming the binary inside the bundle …
-
-Put it in ~/Library/LaunchAgents/io.github.lassocolombo.agent-notify-bar.plist and load it:
-
-  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.github.lassocolombo.agent-notify-bar.plist
-
-Banners are a second display, agent-notify-macos-notifications, with a table
-of its own — install it too if you want to be interrupted as well as informed.
+built /Users/you/Applications/agent-notify-macos-bar.app
+wrote /Users/you/.config/agent-notify/conf.d/macos-bar.toml
+wrote /Users/you/Library/LaunchAgents/io.github.lassocolombo.agent-notify-bar.plist
+started io.github.lassocolombo.agent-notify-bar
 ```
 
-The split of streams is the point: somebody who has already decided can redirect
-the table into the file and nothing else will land inside it.
-
-```sh
-agent-notify install macos-bar >> ~/.config/agent-notify/config.toml
-```
-
-`--print` is not a flag here; printing is what `install` does.
+`--sign` is remembered in the table so that re-running `install` after a
+rebuild signs the same way without the flag. There is no `--print`.
 
 ### Turning it on
 
-```sh
-agent-notify install macos-bar >> ~/.config/agent-notify/config.toml
-# then put the launch agent it printed in ~/Library/LaunchAgents and:
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.github.lassocolombo.agent-notify-bar.plist
-```
+`install` did it. What follows is why it is launchd and not core that keeps
+this running.
 
 **agent-notify does not start this display, and that is deliberate.** Every
 other integration is a program core runs and waits for — it hands over a view,
@@ -446,23 +418,21 @@ is already the second identifier this display has had, for exactly that reason.
 ### Upgrading and uninstalling
 
 The bundle holds a **copy** of the binary, not a symlink, because `codesign`
-refuses a symlinked executable outright — "the main executable or Info.plist
-must be a regular file". So a rebuild does not reach the bundle on its own:
+refuses a symlinked executable outright. So a rebuild does not reach the bundle
+on its own, and `install` is the upgrade: it rebuilds the bundle, re-signs it
+with the remembered identity, and restarts the launchd job on the new binary.
 
 ```sh
-go -C tool-integrations/agent-notify-macos-bar build -o /opt/homebrew/bin/agent-notify-macos-bar .
-agent-notify install macos-bar > /dev/null     # refresh the bundle; it is idempotent
-agent-notify watcher reload
+make install                    # at the root
+agent-notify install macos-bar
 ```
 
 Copying into the bundle goes through a temporary file and a rename, because the
-file being replaced is usually the one being executed — writing over a running
-binary is `ETXTBSY` — and a rename leaves the running process on the inode it
-already has, so there is never a moment when the bundle holds half a binary.
+file being replaced is usually the one being executed, and a rename leaves the
+running process on the inode it already has.
 
-To uninstall, delete the `[integration.macos-bar]` table, `agent-notify watcher
-reload`, and remove `~/Applications/agent-notify-macos-bar.app`. Nothing else in
-the config file changes and no other integration notices.
+`agent-notify uninstall macos-bar` stops the job, removes the launch agent, the
+bundle and the drop-in. Nothing else changes and no other integration notices.
 
 ---
 
@@ -685,7 +655,8 @@ agent-notify-macos-bar --help     this list
 | *(none)* | — | Connects to the session-watcher and paints until it is stopped. This is what the watcher runs; you do not. Exits 1 if there is no window server. |
 | `check` | — | Binary, bundle identifier, menu bar, the `agent-notify` it would run, and what the accessibility API says is on the bar. Exits 1 with no window server. |
 | `dump` | — | The document it would apply, as indented JSON, read straight from the store with no menu bar involved. |
-| `install` | `--app DIR`, `--sign NAME` | Writes the bundle, prints the table on stdout and the explanation on stderr. Idempotent. |
+| `install` | `--app DIR`, `--sign NAME` | Builds the bundle, files the table in `conf.d`, writes and loads the launch agent. Idempotent; run again after a rebuild. |
+| `uninstall` | `--app DIR` | Stops the launch agent and removes it, the bundle and the table. |
 
 ---
 

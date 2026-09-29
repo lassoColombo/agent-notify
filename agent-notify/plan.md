@@ -127,6 +127,11 @@ identifiers and this document. It stops at two borders, deliberately.
 `.git`, its own `.tool-versions`, its own dotfiles, its own release cycle and
 its own version number. Nothing is a submodule and nothing is a Go workspace.
 
+**[amended 2026-09-23, and again 2026-09-29 — D-85]** The leaves became
+directories of one repository, and the last sentence went with them: there is a
+`go.work` listing all eight modules, for an editor that wants to see them at
+once. The `replace` directives are still what say where core is.
+
 ```
 ~/projects/personal/agent-notify/         a directory on one machine, NOT a repo
     agent-notify/                         REPO: the core. One Go module: library + CLI.
@@ -2124,7 +2129,15 @@ capture-environment = true     # each integration captures for itself, so either
 order = ["aerospace-container", "zellij-container"]
 ```
 
-**Everything in this file is the user's to write, and nothing in it is an
+**[decided 2026-09-29 — D-85] Beside the file is `conf.d/`, one file per
+integration, written by that integration's `install` and read before the
+user's file, which wins.** A drop-in holds what only the program can know: the
+absolute path of its binary and of the tool it drives, the signing identity
+its bundle carries, the launch agent that keeps it alive, an agent's process
+name. Nothing in `conf.d` is the user's to maintain and nothing in
+`config.toml` is a program's to write.
+
+**Everything in `config.toml` is the user's to write, and nothing in it is an
 integration's.** **[decided 2026-09-19 — D-57; extended from the file's contents
 to the act of writing it 2026-09-20 — D-66]** That is what the file is *for*,
 and it was not true until D-57: `capture` named the variables an integration
@@ -4802,6 +4815,54 @@ of this section is that it prevents re-litigating.
     the record. `//go:build unix` is off files whose only implementation is
     darwin; the XDG branches in `paths` stay because M17 is still planned.
     `container` stays a package, as D-83 chose.
+
+- **D-85** (2026-09-29) — **Integrations file what only they know, in files
+  they own; two commands set a machine up.** *Amends* D-66: the file the user
+  edits is still never written by any program, and a table an integration
+  derives from its own binary is that integration's to file, in
+  `conf.d/<name>.toml` beside `config.toml`, read first with the user's file on
+  top. *Amends* §A14 (the configuration is the drop-ins and the user's file),
+  §A12 and D-52 (a resident display's `install` writes and loads its launch
+  agent; re-running it is the upgrade, and the reload waits for the old job to
+  go, because `bootout` returns before launchd is done and a `bootstrap` inside
+  that window fails and leaves nothing running), and `[integration.<name>]`
+  (gains `launch-agent`), and §A3.1 (*reverses* "nothing is a Go workspace":
+  there is a `go.work`). *Keeps* `[container] order` the user's: the one fact that
+  is not discoverable stays hand-written, and was offered as derivable and
+  declined.
+
+  - **The rule over-reached.** D-66 protected `config.toml` and took with it
+    the absolute path of a binary, the path of the tool beside it, the
+    signing identity a bundle was built with and the launch agent that keeps
+    a display alive: facts no person can know better than the program, which
+    every install printed and every person retyped, and three of which no
+    install printed at all. The install path was eight builds, seven
+    installs, nine hand-written tables and two launch agents copied out of
+    stderr. It is `make install` and `agent-notify install`.
+  - **A drop-in is a file, not a stanza.** Writing into `config.toml` would
+    mean a TOML rewriter that keeps a person's comments, which go-toml does
+    not do, and seven programs touching a file they do not own. A file per
+    integration is written whole, replaced whole and removed whole, and the
+    user's file wins by being read last.
+  - **The agent's process name is the agent-integration's fact.**
+    `[agent.claude] binary = "claude"` was the one table no install produced,
+    without which liveness never works and with which `doctor` stopped
+    complaining; `agent-notify-claude install` files it.
+  - **Core files itself.** `agent-notify-binary` is where `agent-notify` is,
+    which `agent-notify install` knows; it goes in `conf.d/agent-notify.toml`
+    before any integration is handed the terminal.
+  - **`uninstall` is `install` backwards**, for core and for every
+    integration: hooks out of the agent's file, the drop-in gone, the launch
+    agent stopped and removed, the bundle removed.
+  - **`doctor` checks the first-hour failures**: that `agent-notify-binary`
+    resolves, what `containers.Configured` would complain about, an agent with
+    sessions and no table, and whether each launch agent is loaded.
+  - **A `go.work` and a `Makefile`.** §A3.1 refused a workspace when these
+    were ten repositories a contributor might clone one of; they are one clone
+    now and the `replace` directives still say where core is, so the reason
+    went with the repositories. Workspace mode does not make `./...` span
+    modules, so the Makefile walks them, honours `GOBIN`, and says where it
+    put things and whether that is on your PATH.
 
 **The payload discussion of 2026-09-17 is now ratified**
  in D-10 through D-18.

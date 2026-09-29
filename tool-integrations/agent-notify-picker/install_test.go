@@ -1,11 +1,30 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/pelletier/go-toml/v2"
 )
+
+// written runs install into a fresh root and returns the drop-in it filed
+// and what it said.
+func written(t *testing.T) (table string, complaints string) {
+	t.Helper()
+	root := t.TempDir()
+	t.Setenv("AGENT_NOTIFY_ROOT", root)
+	var out, problems strings.Builder
+	if code := printTable(&out, &problems, nil); code != 0 {
+		t.Fatalf("install exited %d: %s", code, problems.String())
+	}
+	filed, err := os.ReadFile(filepath.Join(root, "conf.d", Name+".toml"))
+	if err != nil {
+		t.Fatalf("install filed nothing: %v", err)
+	}
+	return string(filed), problems.String()
+}
 
 // TestTheTableNamesNoBinary is the whole of what this install has to get right.
 //
@@ -14,12 +33,7 @@ import (
 // needs a terminal, so every one of those is a process with nowhere to draw —
 // and it used to happen, five times, before the supervisor gave up on it.
 func TestTheTableNamesNoBinary(t *testing.T) {
-	t.Setenv("AGENT_NOTIFY_ROOT", t.TempDir())
-
-	var table, complaints strings.Builder
-	if code := printTable(&table, &complaints, nil); code != 0 {
-		t.Fatalf("install exited %d: %s", code, complaints.String())
-	}
+	table, _ := written(t)
 
 	var parsed struct {
 		Integration map[string]struct {
@@ -27,13 +41,13 @@ func TestTheTableNamesNoBinary(t *testing.T) {
 			Enabled *bool  `toml:"enabled"`
 		} `toml:"integration"`
 	}
-	if err := toml.Unmarshal([]byte(table.String()), &parsed); err != nil {
-		t.Fatalf("what install printed is not TOML: %v\n%s", err, table.String())
+	if err := toml.Unmarshal([]byte(table), &parsed); err != nil {
+		t.Fatalf("what install printed is not TOML: %v\n%s", err, table)
 	}
 
 	mine, present := parsed.Integration[Name]
 	if !present {
-		t.Fatalf("no [integration.%s] table in:\n%s", Name, table.String())
+		t.Fatalf("no [integration.%s] table in:\n%s", Name, table)
 	}
 	if mine.Binary != "" {
 		t.Errorf("binary = %q, so core would try to run a picker", mine.Binary)
@@ -50,19 +64,11 @@ func TestTheTableNamesNoBinary(t *testing.T) {
 // so it is the one place the path has to be right — and absolute, because a
 // keybinding's PATH is not your shell's.
 func TestTheKeybindingCarriesTheResolvedPath(t *testing.T) {
-	t.Setenv("AGENT_NOTIFY_ROOT", t.TempDir())
-
-	var table, complaints strings.Builder
-	if code := printTable(&table, &complaints, nil); code != 0 {
-		t.Fatalf("install exited %d: %s", code, complaints.String())
-	}
-
-	said := complaints.String()
+	table, said := written(t)
 	if !strings.Contains(said, `Run "/`) {
 		t.Errorf("the keybinding does not name an absolute path:\n%s", said)
 	}
-	if strings.Contains(table.String(), `Run "/`) {
-		t.Errorf("the keybinding is KDL and landed on stdout, where a TOML file "+
-			"is waiting for it:\n%s", table.String())
+	if strings.Contains(table, `Run "/`) {
+		t.Errorf("the keybinding is KDL and landed in the TOML drop-in:\n%s", table)
 	}
 }

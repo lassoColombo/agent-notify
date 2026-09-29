@@ -1,6 +1,10 @@
-// Package config reads the one configuration file and, whatever it finds there,
-// returns something usable: a missing or malformed file must never break the
-// agent (plan.md §A14), so Load returns defaults and complaints, never an error.
+// Package config reads the configuration and, whatever it finds there, returns
+// something usable: a missing or malformed file must never break the agent
+// (plan.md §A14), so Load returns defaults and complaints, never an error.
+//
+// The configuration is the drop-ins each integration's install wrote, read in
+// name order, with the user's own file on top (D-85). The user's file is the
+// only one a person edits and the only one any program never writes.
 package config
 
 import (
@@ -9,9 +13,11 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"slices"
 	"time"
 
+	"github.com/lassoColombo/agent-notify/internal/paths"
 	"github.com/lassoColombo/agent-notify/session"
 	"github.com/pelletier/go-toml/v2"
 )
@@ -60,6 +66,11 @@ type Integration struct {
 	// table without one belongs to something core never runs — a menu bar
 	// launchd starts — and is here for its settings (D-81).
 	Binary string `toml:"binary"`
+
+	// LaunchAgent is the launchd label that keeps a display that owns its
+	// process running, filed by its install so that doctor can ask launchd
+	// whether it is loaded (D-85).
+	LaunchAgent string `toml:"launch-agent"`
 
 	// Settings is handed to the integration verbatim and never read by core
 	// (R7).
@@ -110,42 +121,119 @@ func Defaults() Config {
 	}
 }
 
-// Load reads the file at path. An absent file is not a complaint.
-func Load(path string) (Config, []error) {
-	data, err := os.ReadFile(path)
+// Load reads every drop-in and then the user's file. An absent file is not a
+// complaint; a drop-in that does not parse is named and skipped; the user's
+// file not parsing is the one refusal.
+func Load(layout paths.Layout) (Config, []error) {
+	merged := map[string]any{}
+	var problems []error
+
+	dropIns, _ := filepath.Glob(filepath.Join(layout.DropIns(), "*.toml"))
+	for _, file := range dropIns {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			problems = append(problems, fmt.Errorf("cannot read %s, skipping it: %w", file, err))
+			continue
+		}
+		problems = append(problems, mergeInto(merged, data, file, false)...)
+	}
+
+	data, err := os.ReadFile(layout.ConfigFile)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return Defaults(), nil
 	case err != nil:
-		return Defaults(), []error{fmt.Errorf("cannot read %s, using defaults: %w", path, err)}
+		problems = append(problems, fmt.Errorf("cannot read %s, using defaults: %w", layout.ConfigFile, err))
+	default:
+		problems = append(problems, mergeInto(merged, data, layout.ConfigFile, true)...)
 	}
-	return Parse(data, path)
+	config, valueProblems := decode(merged)
+	return config, append(problems, valueProblems...)
 }
 
-// ErrRefused marks a file that does not parse and was refused whole. An
+// ErrRefused marks the user's file not parsing and being ignored whole. An
 // integration's settings section is unreachable then, which is a different
 // answer from "your table is not there".
 var ErrRefused = errors.New("configuration refused")
 
-// Parse is Load without the filesystem. A file that does not parse as TOML is
-// refused whole; one that parses but says something unrecognised keeps
-// everything it got right.
+// Parse is Load for one file's bytes, with no drop-ins.
 func Parse(data []byte, name string) (Config, []error) {
-	config := Defaults()
-	if err := toml.NewDecoder(bytes.NewReader(data)).Decode(&config); err != nil {
-		var decodeErr *toml.DecodeError
-		if errors.As(err, &decodeErr) {
-			return Defaults(), []error{fmt.Errorf(
-				"%s is malformed and was ignored entirely, using defaults:\n%s: %w",
-				name, decodeErr.String(), ErrRefused)}
-		}
-		return Defaults(), []error{fmt.Errorf(
-			"%s could not be read, using defaults: %w: %w", name, err, ErrRefused)}
-	}
+	merged := map[string]any{}
+	problems := mergeInto(merged, data, name, true)
+	config, valueProblems := decode(merged)
+	return config, append(problems, valueProblems...)
+}
 
-	problems := unknownKeys(data, name)
-	problems = append(problems, config.problemsWith(name)...)
-	return config, problems
+// mergeInto lays one file over what was read before it. A file that does not
+// parse as TOML contributes nothing; one that parses but says something
+// unrecognised keeps everything it got right.
+func mergeInto(into map[string]any, data []byte, name string, theUsers bool) []error {
+	var read map[string]any
+	if err := toml.Unmarshal(data, &read); err != nil {
+		var decodeErr *toml.DecodeError
+		problem := fmt.Errorf("%s could not be read and was ignored entirely: %w", name, err)
+		if errors.As(err, &decodeErr) {
+			problem = fmt.Errorf("%s is malformed and was ignored entirely:\n%s", name, decodeErr.String())
+		}
+		if theUsers {
+			problem = fmt.Errorf("%w, using defaults: %w", problem, ErrRefused)
+		}
+		return []error{problem}
+	}
+	deepMerge(into, read)
+	return unknownKeys(data, name)
+}
+
+// deepMerge lays over on top of into: a table over a table merges, anything
+// else replaces.
+func deepMerge(into, over map[string]any) {
+	for key, value := range over {
+		if overTable, isTable := value.(map[string]any); isTable {
+			if intoTable, wasTable := into[key].(map[string]any); wasTable {
+				deepMerge(intoTable, overTable)
+				continue
+			}
+		}
+		into[key] = value
+	}
+}
+
+// decode turns the merged tables into a Config, every value checked.
+func decode(merged map[string]any) (Config, []error) {
+	config := Defaults()
+	encoded, err := toml.Marshal(merged)
+	if err != nil {
+		return config, []error{fmt.Errorf("the configuration cannot be re-encoded, using defaults: %w", err)}
+	}
+	if err := toml.Unmarshal(encoded, &config); err != nil {
+		return Defaults(), []error{fmt.Errorf("the configuration cannot be decoded, using defaults: %w", err)}
+	}
+	return config, config.problemsWith("the configuration")
+}
+
+// WriteDropIn files one integration's table, replacing what it wrote before,
+// and says where. The directory is created 0700 and the file written 0600,
+// like everything else agent-notify owns.
+func WriteDropIn(layout paths.Layout, name, table string) (string, error) {
+	if err := os.MkdirAll(layout.DropIns(), paths.DirMode); err != nil {
+		return "", fmt.Errorf("cannot create %s: %w", layout.DropIns(), err)
+	}
+	path := layout.DropIn(name)
+	temporary := path + ".writing"
+	if err := os.WriteFile(temporary, []byte(table), paths.FileMode); err != nil {
+		return "", fmt.Errorf("cannot write %s: %w", path, err)
+	}
+	if err := os.Rename(temporary, path); err != nil {
+		return "", fmt.Errorf("cannot write %s: %w", path, err)
+	}
+	return path, nil
+}
+
+// RemoveDropIn takes one integration's table away. Absent is done.
+func RemoveDropIn(layout paths.Layout, name string) error {
+	if err := os.Remove(layout.DropIn(name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 // unknownKeys re-decodes strictly, purely to report typos: the first pass must

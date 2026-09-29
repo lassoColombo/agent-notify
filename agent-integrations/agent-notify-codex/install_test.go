@@ -11,6 +11,8 @@ import (
 
 func configAt(t *testing.T, body string) string {
 	t.Helper()
+	// The drop-in goes under a root of the test's own, never the real one.
+	t.Setenv("AGENT_NOTIFY_ROOT", t.TempDir())
 	path := filepath.Join(t.TempDir(), "config.toml")
 	if body != "" {
 		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
@@ -186,5 +188,24 @@ func TestInstallAddsANewlineWhenTheFileLacksOne(t *testing.T) {
 	}
 	if len(hooksIn(t, path)) != len(SubscribedHooks) {
 		t.Errorf("the block was glued onto the previous line:\n%s", read(t, path))
+	}
+}
+
+// TestUninstallTakesTheBlockOutVerbatim and leaves the rest of the file as it
+// was, comments included.
+func TestUninstallTakesTheBlockOutVerbatim(t *testing.T) {
+	theirs := "# mine\nmodel = \"o3\"\n\n[sandbox]\nmode = \"strict\"\n"
+	path := configAt(t, theirs)
+	if code := install([]string{"--config", path}); code != 0 {
+		t.Fatalf("install exited %d", code)
+	}
+	if code := uninstall([]string{"--config", path}); code != 0 {
+		t.Fatalf("uninstall exited %d", code)
+	}
+	if got := read(t, path); got != theirs {
+		t.Errorf("uninstall left the file as:\n%s\nwant exactly what was there before:\n%s", got, theirs)
+	}
+	if hooks := hooksIn(t, path); len(hooks) != 0 {
+		t.Errorf("hooks remain: %v", hooks)
 	}
 }

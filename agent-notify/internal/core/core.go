@@ -39,7 +39,7 @@ func OpenEverythingACommandNeeds(component string) (*Core, error) {
 // OpenAt is OpenEverythingACommandNeeds for a caller that already has a
 // layout. The store creates the directories; the log lives in one of them.
 func OpenAt(layout paths.Layout, component string) (*Core, error) {
-	settings, problems := config.Load(layout.ConfigFile)
+	settings, problems := config.Load(layout)
 	opened, err := sessionstore.Open(layout, settings)
 	if err != nil {
 		return nil, err

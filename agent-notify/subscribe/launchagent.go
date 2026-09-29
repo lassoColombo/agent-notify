@@ -7,8 +7,7 @@ import (
 
 // LaunchAgentPlist is the launchd job that keeps a display running: started at
 // login, restarted if it dies, inside the logged-in session a menu bar or a
-// notification requires. Printed, never installed: loading one puts a program
-// in your login session for ever (D-66).
+// notification requires. InstallBundle writes and loads it (D-85).
 func LaunchAgentPlist(label, binary string) string {
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -28,16 +27,4 @@ func LaunchAgentPlist(label, binary string) string {
 </dict>
 </plist>
 `, html.EscapeString(label), html.EscapeString(binary))
-}
-
-// HowToLoadTheLaunchAgent is what to do with what [LaunchAgentPlist] printed.
-func HowToLoadTheLaunchAgent(label string) string {
-	return fmt.Sprintf(`Put it in ~/Library/LaunchAgents/%s.plist and load it:
-
-  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/%s.plist
-
-It starts now and at every login. To stop it:
-
-  launchctl bootout gui/$(id -u)/%s
-`, label, label, label)
 }

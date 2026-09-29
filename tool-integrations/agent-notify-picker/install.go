@@ -35,7 +35,8 @@ func keybinding(program string) string {
 }`, program)
 }
 
-// install prints what this needs and changes nothing (D-66).
+// install files the table and prints the keybinding, which is KDL in a file
+// of yours (D-66, D-85).
 func install(arguments []string) int {
 	return printTable(os.Stdout, os.Stderr, arguments)
 }
@@ -52,6 +53,10 @@ func printTable(out, problems io.Writer, arguments []string) int {
 			"\nThe path is in the keybinding and not in the table, because a table with a\n" +
 			"binary in it is one core may run, and nothing core runs has a terminal.\n",
 	}, out, problems, arguments)
+}
+
+func uninstall(arguments []string) int {
+	return me.Uninstall(os.Stdout, os.Stderr, arguments)
 }
 
 func indent(text string) string {

@@ -36,30 +36,34 @@ focus-session` runs `focus`. Each is one JSON object on stdin, one on stdout.
 - **Go 1.26** to build. A **Nerd Font** if you want the default glyphs.
 
 ```sh
-cd tool-integrations/agent-notify-zellij
-env -u GOROOT go build ./...
-cp agent-notify-zellij /opt/homebrew/bin/      # anywhere absolute
+make install                    # at the root: every module, into $(go env GOPATH)/bin
 agent-notify install zellij
 ```
 
-`install` prints the tables and writes nothing; put them in
-`~/.config/agent-notify/config.toml` yourself:
+`install` writes `conf.d/zellij.toml` beside your `config.toml` and touches
+nothing else:
 
 ```toml
 [integration.zellij]
-binary = "/opt/homebrew/bin/agent-notify-zellij"
+binary = "/Users/you/go/bin/agent-notify-zellij"
 
 [integration.zellij.settings]
 zellij = "/opt/homebrew/bin/zellij"
 
 [container]
-order = ["aerospace-container", "zellij"]
+order = ["zellij"]
 ```
 
 `binary` and `zellij` are absolute because the programs that run this do not
-have your shell's PATH. `zellij` is resolved at install time, in your shell,
-for the same reason. If you already have a `[container]` table, add `"zellij"`
-to its `order` rather than pasting a second one; outermost first.
+have your shell's PATH; `zellij` is resolved at install time, in your shell,
+for the same reason. The `[container] order` in that file is the whole order
+only when this is your only container. With a window manager outside it, write
+the order in `config.toml`, outermost first, and yours wins:
+
+```toml
+[container]
+order = ["aerospace-container", "zellij"]
+```
 
 Then `agent-notify watcher reload` so the session-watcher asks this program
 what it answers, and `agent-notify doctor` to see it listed:
@@ -68,10 +72,12 @@ what it answers, and `agent-notify doctor` to see it listed:
 integrations ok    reported by pid 41022 at 2026-09-28T08:14:02Z
              zellij                 drawn when something it watches moves
                                     answers interpret-environment, focus, focused, render — built against 0.0.0-dev
+containers   ok    outermost first: aerospace-container, zellij
 ```
 
 A rebuilt binary is picked up on the next render; a rebuild that changes the
-wake list needs a reload.
+wake list needs a reload. `agent-notify uninstall zellij` removes the drop-in;
+a line naming it in your own `[container] order` is yours to take out.
 
 ## Configuration
 

@@ -2,18 +2,19 @@ package config_test
 
 import (
 	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/lassoColombo/agent-notify/internal/config"
+	"github.com/lassoColombo/agent-notify/internal/paths"
 	"github.com/lassoColombo/agent-notify/session"
 )
 
 func TestMissingFileIsNotAComplaint(t *testing.T) {
-	settings, problems := config.Load(filepath.Join(t.TempDir(), "absent.toml"))
+	layout, _ := paths.Under(t.TempDir())
+	settings, problems := config.Load(layout)
 	if len(problems) != 0 {
 		t.Errorf("an absent file produced %d complaint(s): %v", len(problems), problems)
 	}
@@ -250,15 +251,14 @@ func TestDisabledIntegrationsAreNotNagged(t *testing.T) {
 }
 
 func TestUnreadableFileIsAComplaintNotACrash(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "config.toml")
-	if err := os.WriteFile(path, []byte("keep-ended-sessions = \"24h\"\n"), 0o000); err != nil {
+	layout, _ := paths.Under(t.TempDir())
+	if err := os.WriteFile(layout.ConfigFile, []byte("keep-ended-sessions = \"24h\"\n"), 0o000); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	if os.Geteuid() == 0 {
 		t.Skip("root reads anything")
 	}
-	settings, problems := config.Load(path)
+	settings, problems := config.Load(layout)
 	if len(problems) != 1 {
 		t.Fatalf("got %d complaints, want 1: %v", len(problems), problems)
 	}

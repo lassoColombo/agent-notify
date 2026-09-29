@@ -7,40 +7,32 @@ before it can be closed.
 
 ## Decisions nobody but you can make
 
-- **Your config still names `zellij-display` and `zellij-container`.** They are
-  one program now, `agent-notify-zellij` (D-83): build it, put it on your PATH,
-  replace the two tables with `[integration.zellij]` (`agent-notify install
-  zellij` prints it), and put `"zellij"` in `[container] order` where
-  `zellij-container` was. The two old binaries on your PATH can go. The macOS
-  displays need a rebuild and reinstall too: they watch the store themselves
-  now and no longer run `agent-notify tail`.
-
-- **Three accounts of the macOS menu bar disagree, and two of them are in the
-  repository.**
-  - Your live `~/.config/agent-notify/config.toml:44-51` points `binary` at the
-    **bare** `/opt/homebrew/bin/agent-notify-macos-bar`, with a
-    `[measured 2026-09-21]` note: a bundled build puts up its `NSStatusItem`,
-    reports visible at level 25 with a real frame, and the window server never
-    draws it — bare binaries are adopted into the menu bar, bundles signed by
-    something this machine does not trust are not. The accepted cost is no saved
-    position.
+- **Two accounts of the macOS menu bar still disagree, and the machine is on
+  the older one.** `install` now writes a launch agent naming the binary
+  INSIDE the bundle and loads it (D-85). On 2026-09-29 that was installed and
+  then repointed by hand at the bare `/opt/homebrew/bin/agent-notify-macos-bar`,
+  because the `[measured 2026-09-21]` note said a bundled build is put up,
+  reports visible at level 25 with a real frame, and is never drawn — and
+  nothing could verify otherwise: the accessibility API was not granted, and
+  `check` says being ON the bar is not being DRAWN on it anyway.
   - D-52 (`plan.md:3195`) argues the bundle is **mandatory** for the opposite
-    reason: without one there is no surviving preferences domain, so
-    `autosaveName` has nowhere to file the position, so the item lands leftmost,
-    and on a full menu bar the leftmost slot is not drawn.
+    reason: no bundle means no surviving preferences domain, so `autosaveName`
+    has nowhere to file the position, the item lands leftmost, and a full menu
+    bar does not draw the leftmost slot.
   - D-52's third bullet also says the bundle "is a wrapper, not a copy… a
     symlink to the real binary". `bundle.go:25-40` says it is a **copy**, and
     explains why the symlink was abandoned: `codesign -s - --force` refuses one
-    ("the main executable or Info.plist must be a regular file") and an unsigned
-    bundle is invisible to the notification system. So D-52 is stale on the
-    mechanism as well as the conclusion.
+    and an unsigned bundle is invisible to the notification system. So D-52 is
+    stale on the mechanism as well as the conclusion.
   - The 2026-09-21 measurement is **not in plan.md** at all. That day produced
     D-68 through D-74 and none of them touch the menu bar.
   **The decision**: which measurement still holds. Read together they point at
-  signature trust rather than bundle-versus-bare being the real variable, which
-  would make a trusted signature the fix and the bare binary a workaround. Once
-  you know, D-52 needs an amendment and the finding needs to leave the config
-  file and enter plan.md.
+  signature trust rather than bundle-versus-bare, which would make a trusted
+  signature the fix and the bare binary a workaround. **The test is one
+  command and a glance**: `agent-notify install macos-bar` puts the bundle
+  back, and you look at the menu bar. Once you know, D-52 needs an amendment,
+  the finding needs to leave `config.toml` and enter plan.md, and — if the
+  bundle wins — the by-hand plist in `config.toml`'s comment goes.
 
 ## Monorepo follow-through
 
@@ -82,21 +74,36 @@ before it can be closed.
   `git update-ref -d HEAD` drops it and touches no file. Decide whether to keep
   it as a baseline or unwind it.
 
-- **The corrected help texts are not on your PATH yet.** The fixes are in the
-  tree; `/opt/homebrew/bin/agent-notify-{zellij-display,macos-bar,picker}` and
-  the notifications binary inside its `.app` still print the old wording. They
-  need a rebuild and reinstall, and the two macOS displays are running.
-
-- **`/opt/homebrew/bin/agent-notify-sketchybar` is orphaned.** The module is
-  gone; the binary you installed is still on your PATH, so `doctor` will keep
-  listing it under "on your PATH and not mentioned here". Delete it when you
-  like — it is outside the repo, so I left it alone.
-
 - **The only copy of ten repositories' history is in a session scratchpad.**
   `…/scratchpad/git-backup/*.git.tgz`, 9.7 MB, ten archives, one per deleted
   `.git`. Nothing was ever pushed anywhere, so when that directory is cleaned
   the history is gone for good. Move it somewhere durable or decide out loud
   that it is not wanted.
+
+## Closed 2026-09-29
+
+- **Installation** (D-85): integrations file what only they know in
+  `conf.d/<name>.toml`; `config.toml` is never written by a program. `make
+  install` builds every module, `agent-notify install` sets every integration
+  on PATH up and `uninstall` takes it back; agent-integrations file their
+  `[agent.<name>]` table, core files `agent-notify-binary`, the macOS displays
+  write and load their launch agents, and `doctor` checks the binary, the
+  containers, the agent tables and launchd. [install-plan.md](install-plan.md)
+  is the working plan. The `go.work` item under "Monorepo follow-through" is
+  closed with it: workspace mode does not make `./...` span modules, so the
+  Makefile walks them.
+
+- **It was installed on this machine the same day.** `make install
+  GOBIN=/opt/homebrew/bin`, then `agent-notify install`. The three stale
+  binaries — sketchybar, zellij-display, zellij-container — were moved to
+  `~/.config/agent-notify/backup-before-d85/stale-binaries/`, and the old
+  `config.toml` and launch agents are beside them. `config.toml` is now only
+  `[container] order`, `sound = false` and the menu-bar note; everything else
+  it used to carry is in `conf.d/`. Two bugs came out of doing it:
+  `InstallBundle` bootstrapped launchd before the old job had finished going
+  away, which left the notifications display stopped, and `make install`
+  reported `$(go env GOPATH)/bin` rather than where it had actually put
+  anything. Both are fixed.
 
 ## Closed 2026-09-28
 

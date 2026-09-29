@@ -172,65 +172,54 @@ ls
 # agent-integrations  agent-notify  tool-integrations
 ```
 
-### Build and install core
-
-```sh
-cd ~/projects/agent-notify/agent-notify
-
-env -u GOROOT go build ./...                        # everything compiles
-env -u GOROOT go test ./...                         # and passes
-
-env -u GOROOT go build -o /opt/homebrew/bin/agent-notify .
-agent-notify version
-# 0.0.0-dev
-```
-
-`go install .` works too and puts the binary in
-`$(go env GOPATH)/bin`. Either way the binary must be somewhere your **shell**
-can find it *and* somewhere a program core starts can: see
-[`agent-notify-binary`](#the-top-level-keys) below, which is what a hook's PATH
-and a launchd child's PATH make necessary.
-
-### Build the integrations
-
-Each is a module of its own, built the same way. Install only the ones you want.
+### Build and install everything
 
 ```sh
 cd ~/projects/agent-notify
-
-for module in agent-integrations/* tool-integrations/*; do
-  (cd "$module" && env -u GOROOT go build -o "/opt/homebrew/bin/$(basename "$module")" .)
-done
+make install
 ```
 
-The naming convention is the only thing core knows about an integration: a
-program called `agent-notify-<name>` on your PATH is what `agent-notify install
-<name>` execs and what TAB offers you.
-
-### Turn them on
-
-Installing the program and asking for it are two acts, deliberately. The program
-being on your PATH does nothing; **its table in the configuration file is what
-says yes.**
+`make install` runs `go install .` in every module. Where they land is
+`GOBIN`, and it has to be a directory on your PATH: finding
+`agent-notify-<name>` there by name is the whole of what core knows about an
+integration. `make install` prints where it put them and says so when that is
+not on your PATH.
 
 ```sh
-agent-notify install claude       # an agent-integration writes its agent's hooks
-agent-notify install macos-bar    # a tool-integration prints the table to add
+make install GOBIN=/opt/homebrew/bin
+``` `make test` runs every module's tests; the `go.work` at
+the root is what lets an editor see all eight modules as one.
+
+### Set them up
+
+```sh
+agent-notify install
 ```
 
-`install` is a dispatcher and nothing more: it execs `agent-notify-<name>
-install` and every option after the name belongs to that program. Core does not
-know where Claude keeps its settings or which environment variables zellij puts
-in a pane, and must not.
+It files where `agent-notify` itself is, then runs `agent-notify-<name>
+install` for every integration on your PATH. Each writes what only it knows
+into a file of its own under `conf.d`, beside your `config.toml`: an
+agent-integration writes its agent's hooks and its `[agent.<name>]` table, a
+tool-integration its table with the absolute path of its binary and of the
+tool it drives, and a macOS display also builds its `.app` and loads its launch
+agent. **Your `config.toml` is never written by any of them** (D-66, D-85).
 
-`doctor` names the programs that are on your PATH and nowhere in your
-configuration, which is exactly the gap this split opens:
+Name the ones you want to set up just those; options after a name belong to
+that program:
 
+```sh
+agent-notify install claude codex zellij
+agent-notify install macos-notifications --sign "agent-notify self-signed"
 ```
-installed    --    1 on your PATH and not mentioned here: picker
-                   `agent-notify install <name>` hands over to each: a tool-integration prints
-                   the table for you to add, an agent-integration writes its agent's hooks.
-```
+
+Two things stay yours. `[container] order` says which shell is outside which,
+and that is not discoverable, so it goes in `config.toml` by hand. And the
+picker's keybinding is KDL in zellij's config, so its install prints it.
+
+`agent-notify uninstall` takes it all back, integration by integration, and
+`agent-notify uninstall zellij` takes back one. Run `install` again after a
+rebuild: every step of it is idempotent, and for the macOS displays it is the
+upgrade.
 
 ### Start the watcher
 
@@ -400,6 +389,15 @@ copy that can disagree with the first, and you would be the one who broke it.
 `agent-notify doctor` prints the one it resolved, which is the answer to use
 when the two of you disagree.
 
+Beside it is `conf.d/`, one file per integration, written by that
+integration's `install` and removed by its `uninstall`: `conf.d/zellij.toml`,
+`conf.d/claude.toml`, and `conf.d/agent-notify.toml` for core's own
+`agent-notify-binary`. They are read first, in name order, and `config.toml`
+is read on top, so anything you write there wins: `enabled = false` in your
+file switches off an integration whose drop-in says nothing about it. A
+drop-in that does not parse is reported by name and skipped; nothing else
+about it is yours to maintain.
+
 ### Environment variables
 
 There are two variables agent-notify owns, and the rest are the platform's own,
@@ -479,9 +477,9 @@ binary = "codex"
 ### `[integration.<name>]`
 
 One table per integration, and **the table being there is how you ask for it**.
-An integration is installed by adding its table and uninstalled by deleting it;
-nothing else in the file changes, and no integration can be made to depend on
-another being present.
+An integration's `install` writes its own into `conf.d/<name>.toml` and its
+`uninstall` removes it; what you write in `config.toml` is laid on top. No
+integration can be made to depend on another being present.
 
 ```toml
 [integration.zellij]
@@ -494,6 +492,7 @@ binary = "/opt/homebrew/bin/agent-notify-zellij"
 | --- | --- | --- | --- |
 | `enabled` | boolean | absent means **yes** | `false` means "do not run this for me". Writing the table at all is how you ask for the integration, so absence means enabled. |
 | `binary` | string | none | The program, and naming one means **core may run this**: the hook runs it on the agent's path, the session-watcher runs it to ask what it answers and then to render or to focus. Looked up on PATH unless it is an absolute path. Leaving it out is a decision rather than an omission — a table with no binary belongs to something core never runs, like a menu bar, which owns its own process and is started by launchd. |
+| `launch-agent` | string | none | The launchd label that keeps a display that owns its process running, filed by its `install` so that `doctor` can ask launchd whether it is loaded. |
 | `settings` | table | empty | Handed to the integration verbatim. See below. |
 
 ### `[integration.<name>.settings]`
@@ -516,7 +515,7 @@ sound = false
 ```
 
 What each integration accepts is in that integration's own README, and
-`agent-notify install <name>` prints the table it wants.
+`agent-notify install <name>` files the table it wants.
 
 The one shape core does define is the **palette**: a display that paints a glyph
 or a colour per state resolves it most-specific-first, and the table is yours.
@@ -682,7 +681,8 @@ disagree.
 | [`version`](#agent-notify-version) | 0 | what every integration handshakes against |
 | [`focus-session`](#agent-notify-focus-session) | 0/1 | bring one session to the front |
 | [`annotate`](#agent-notify-annotate) | 0/1 | write one owner's section of a record |
-| [`install`](#agent-notify-install) | any | hand over to that integration to set itself up |
+| [`install`](#agent-notify-install) | any | set up every integration on your PATH, or the ones named |
+| [`uninstall`](#agent-notify-install) | any | take every integration on your PATH down, or the ones named |
 | [`watcher`](#agent-notify-watcher) | 0/1/3 | the one long-lived process |
 | [`report-event`](#agent-notify-report-event) | **always 0** | what an agent-integration calls when its agent did something |
 | [`completion`](#agent-notify-completion) | 0/1 | a completion script for your shell |
@@ -887,19 +887,25 @@ agent-notify annotate lenny-load jira --remove
 
 ### `agent-notify install`
 
-Hand over to that integration to set itself up. It execs `agent-notify-<name>
-install`, replacing this process, so the integration owns the terminal, the exit
-code and anything it wants to ask you. **Every option after the name belongs to
-that program**, and core does not parse them.
+Sets integrations up. With no name it files core's own `agent-notify-binary`
+into `conf.d/agent-notify.toml` and runs `agent-notify-<name> install` for
+every `agent-notify-*` on your PATH, one after another, each owning the
+terminal while it runs. With names it runs those, and **every option after a
+name belongs to that program**: core does not parse them.
 
 ```sh
+agent-notify install
 agent-notify install claude --print
-agent-notify install macos-bar
+agent-notify install macos-bar --sign "agent-notify self-signed"
 ```
 
-TAB offers the integrations on your PATH. An integration that is not there is
-refused with the reason: it is its own program, in its own module, and you build
-it first.
+Each integration writes its own file under `conf.d` and nothing in
+`config.toml`. TAB offers the integrations on your PATH. An integration that is
+not there is refused with the reason: it is its own program, and you build it
+first.
+
+`agent-notify uninstall` is the reverse: `agent-notify-<name> uninstall` for
+every program on PATH or for the ones named, then core's own drop-in goes.
 
 ### `agent-notify watcher`
 

@@ -17,7 +17,7 @@ func main() {
 	resolved := sync.OnceValues(func() (Resolved, error) { return Read(me) })
 
 	os.Exit(subscribe.Main(me, subscribe.Commands{
-		Named: map[string]func([]string) int{"install": install},
+		Named: map[string]func([]string) int{"install": install, "uninstall": uninstall},
 		Render: func(view session.View) error {
 			settings, err := resolved()
 			if err != nil {

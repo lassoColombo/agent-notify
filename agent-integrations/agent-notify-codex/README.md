@@ -72,37 +72,19 @@ you.
 ### Build it
 
 agent-notify is a monorepo: core, the agent-integrations and the
-tool-integrations are one git repository and one clone. Nothing is published to
-a remote yet, so this module's `go.mod` carries a `replace` pointing at core's
-directory beside it — which means a clone of the whole repository builds and a
-copy of this directory alone does not.
+tool-integrations are one git repository and one clone. `make install` at the
+root builds every module into `$(go env GOPATH)/bin`, which has to be on your
+PATH under exactly the name **`agent-notify-codex`**, because that is the name
+`agent-notify install codex` looks for.
 
 ```sh
-git clone git@github.com:lassoColombo/agent-notify.git
-cd agent-notify/agent-integrations/agent-notify-codex
-go build ./...
+git clone git@github.com:lassoColombo/agent-notify.git ~/projects/agent-notify
+cd ~/projects/agent-notify
+make install
 ```
 
-Go 1.26 or newer; `.tool-versions` pins 1.26.2. If your shell exported `GOROOT`
-from an outer context it overrides that pin, and `env -u GOROOT go build ./...`
-is the fix.
-
-### Put it on PATH
-
-The program has to be on your PATH under exactly the name
-**`agent-notify-codex`**, because that is the name `agent-notify install codex`
-looks for — core's `install` is a dispatcher that execs `agent-notify-<name>
-install` and knows nothing else about you.
-
-```sh
-go build -o /opt/homebrew/bin/agent-notify-codex .
-```
-
-Install core the same way while you are here, if you have not:
-
-```sh
-cd ../../agent-notify && go build -o /opt/homebrew/bin/agent-notify .
-```
+Go 1.26 or newer; `.tool-versions` pins 1.26.2. The Makefile unsets a `GOROOT`
+an outer shell exported, which would otherwise override that pin.
 
 ### Register it with codex
 
@@ -112,8 +94,8 @@ agent-notify install codex --print  # show what it would add, change nothing
 ```
 
 `agent-notify install codex` and `agent-notify-codex install` are the same
-command: the first execs the second, replacing the process, so the flags, the
-output and the exit code are this program's.
+command: the first runs the second, so the flags, the output and the exit code
+are this program's.
 
 What it writes is seven hook blocks, all running the same absolute path — the
 path of the binary you ran it from, resolved at that moment, because a hook's
@@ -167,27 +149,22 @@ This installer deliberately does not write those entries. The hash is codex's
 own, and writing one would be forging your consent to run a program on every
 event. So start a codex thread, answer the prompt, and the hooks begin firing.
 
-### Tell core what a codex process looks like
+### Core is told what a codex process looks like
 
-One line in agent-notify's own configuration, and without it the session is
-recorded but never judged dead:
+One table in agent-notify's configuration, and without it the session is
+recorded but never judged dead. The name of the process is codex's, so
+`install` files it, in `conf.d/codex.toml` beside your `config.toml`:
 
 ```toml
-# ~/.config/agent-notify/config.toml
 [agent.codex]
 binary = "codex"
 ```
 
 On every hook, core walks the process ancestry from this program upwards
 looking for a process that matches `binary` — the short name the kernel
-reports, the full path, or the basename of that path, so
-`binary = "/opt/homebrew/bin/codex"` works too when you have two codexes. What
-it finds is the PID and start time that let the session-watcher notice when a
-thread's codex is gone. With no `[agent.codex]` table nothing matches, the hook
-logs a warning, and the record carries no process.
-
-This is also the table that makes `agent-notify doctor` stop listing
-`agent-notify-codex` as "on your PATH and not mentioned here".
+reports, the full path, or the basename of that path. With two codexes to tell
+apart, write `binary = "/opt/homebrew/bin/codex"` under `[agent.codex]` in your
+own `config.toml`, which wins over the drop-in.
 
 ### Check it
 
@@ -207,10 +184,15 @@ cannot do goes there, because nothing a hook does may reach the agent.
 
 ### Uninstalling
 
-Delete the blocks from `~/.codex/config.toml` by hand, and the `[hooks.state]`
-entries beside them if you want codex to forget it trusted the program. There
-is no `uninstall` subcommand: the same reasoning that makes `install` append
-rather than rewrite makes deleting your lines from your file your business.
+```sh
+agent-notify uninstall codex
+```
+
+It takes the block `install` appended out again, verbatim, and removes
+`conf.d/codex.toml`. A block somebody has edited is not recognised and is
+left, with a word about it: rearranging a hooks table under a person is worse
+than asking them to. The `[hooks.state]` entries codex wrote when you trusted
+the hooks are codex's, and stay unless you delete them.
 
 ## Configuration
 
@@ -229,6 +211,7 @@ runs. This program is started by codex, not by core.
 
 ```
 agent-notify-codex install [--print] [--config PATH]
+agent-notify-codex uninstall [--config PATH]
 ```
 
 | Flag | Type | Default | What it does |
@@ -266,7 +249,7 @@ without one is supported — but the one key below is worth having.
 
 | Key | Type | Default | What it changes |
 | --- | --- | --- | --- |
-| `agent.codex.binary` | string | none | What to look for when climbing this hook's ancestry to find codex itself. Matched against the kernel's command name, the executable path, or that path's basename. Unset means no process is recorded and liveness has nothing to judge. |
+| `agent.codex.binary` | string | `"codex"`, filed by `install` in `conf.d/codex.toml` | What to look for when climbing this hook's ancestry to find codex itself. Matched against the kernel's command name, the executable path, or that path's basename. A value in your `config.toml` wins. |
 
 Everything else in that file — `keep-ended-sessions`, the integration tables,
 `container.order` — belongs to core and to the tools, and this program neither
