@@ -12,9 +12,6 @@ import (
 // and the bar are about the same thing at the same moment, and they say it in
 // the same colour.
 func TestTheMarkIsDrawnInTheStatesColour(t *testing.T) {
-	if !Available() {
-		t.Skip("nothing to draw with here")
-	}
 	marks := &InvaderPNGs{Size: 128, Directory: t.TempDir()}
 	path := marks.PathOfTheInvaderDrawnIn(DefaultColours[session.BlockedOnYou])
 	if path == "" {
@@ -31,9 +28,6 @@ func TestTheMarkIsDrawnInTheStatesColour(t *testing.T) {
 // change state, and redrawing a PNG for every one of them would be work nobody
 // asked for.
 func TestEachColourIsDrawnOnce(t *testing.T) {
-	if !Available() {
-		t.Skip("nothing to draw with here")
-	}
 	marks := &InvaderPNGs{Size: 64, Directory: t.TempDir()}
 	first := marks.PathOfTheInvaderDrawnIn("0xffeb6f92")
 	if first == "" {
@@ -61,9 +55,6 @@ func TestEachColourIsDrawnOnce(t *testing.T) {
 // second notification about a state finds the path empty. A cache that only
 // remembered it had drawn something would post one picture and then none.
 func TestAMarkTakenAwayIsDrawnAgain(t *testing.T) {
-	if !Available() {
-		t.Skip("nothing to draw with here")
-	}
 	marks := &InvaderPNGs{Size: 64, Directory: t.TempDir()}
 	first := marks.PathOfTheInvaderDrawnIn("0xfff6c177")
 	if first == "" {
@@ -127,9 +118,6 @@ func TestEveryDefaultColourCanBeDrawn(t *testing.T) {
 // obvious way to write this and it litters: one empty directory per restart,
 // for ever, in a place nothing sweeps until the machine reboots.
 func TestTheInvaderPNGsShareOneFixedDirectory(t *testing.T) {
-	if !Available() {
-		t.Skip("nothing to draw with here")
-	}
 	if !strings.HasSuffix(whereTheInvaderPNGsGo(), "agent-notify-invaders") {
 		t.Errorf("they live in %q, which is not a fixed name", whereTheInvaderPNGsGo())
 	}

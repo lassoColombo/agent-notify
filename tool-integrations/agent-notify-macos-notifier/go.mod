@@ -1,4 +1,4 @@
-module github.com/lassoColombo/agent-notify-macos-bar
+module github.com/lassoColombo/agent-notify-macos-notifier
 
 go 1.26.0
 

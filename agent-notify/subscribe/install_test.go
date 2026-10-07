@@ -10,7 +10,6 @@ import (
 
 	"github.com/lassoColombo/agent-notify/internal/config"
 	"github.com/lassoColombo/agent-notify/internal/paths"
-	"github.com/pelletier/go-toml/v2"
 )
 
 var painter = Install{
@@ -88,109 +87,5 @@ func TestAToolThatIsNotThereLeavesAVisibleHole(t *testing.T) {
 	}
 	if !strings.Contains(problems.String(), "no-such-tool-anywhere is not on this PATH") {
 		t.Errorf("nothing said which tool is missing:\n%s", problems.String())
-	}
-}
-
-var bar = BundleInstall{
-	Program: "agent-notify-test-bar", Identifier: "io.github.lassocolombo.agent-notify-test",
-	Table: func(identity string) string {
-		table := "[integration.bar]\nlaunch-agent = \"io.github.lassocolombo.agent-notify-test\"\n"
-		if identity != "" {
-			table += fmt.Sprintf("\n[integration.bar.settings]\nsign = %q\n", identity)
-		}
-		return table
-	},
-	Advice: "\nThere is a second display too.\n",
-}
-
-// askedOfLaunchd replaces launchctl for one test and records what it was asked.
-func askedOfLaunchd(t *testing.T) *[]string {
-	t.Helper()
-	was := launchctl
-	var asked []string
-	launchctl = func(arguments ...string) error {
-		if arguments[0] == "print" {
-			// Nothing is loaded in a test, which is what makes the wait for a
-			// job to go away finish immediately.
-			return fmt.Errorf("no such service")
-		}
-		asked = append(asked, strings.Join(arguments, " "))
-		return nil
-	}
-	t.Cleanup(func() { launchctl = was })
-	return &asked
-}
-
-// TestInstallBundleDoesTheWholeJob: the bundle is built, the drop-in and the
-// launch agent are written, launchd is asked, and the config file is not
-// touched. Re-running it is the upgrade.
-func TestInstallBundleDoesTheWholeJob(t *testing.T) {
-	root, app, home := t.TempDir(), t.TempDir(), t.TempDir()
-	t.Setenv("HOME", home)
-	asked := askedOfLaunchd(t)
-	me := Integration{Name: "bar", Root: root}
-	layout, _ := paths.Under(root)
-
-	var out, problems strings.Builder
-	if code := me.InstallBundle(bar, &out, &problems, []string{"--app", app}); code != 0 {
-		t.Fatalf("install exited %d:\n%s", code, problems.String())
-	}
-	if bundles, err := os.ReadDir(app); err != nil || len(bundles) == 0 {
-		t.Errorf("no bundle was built in %s (%v)", app, err)
-	}
-	plist := filepath.Join(home, "Library", "LaunchAgents", bar.Identifier+".plist")
-	if content, err := os.ReadFile(plist); err != nil || !strings.Contains(string(content), ".app/Contents/MacOS/"+bar.Program) {
-		t.Errorf("the launch agent was not written pointing inside the bundle: %v", err)
-	}
-	if len(*asked) != 1 || !strings.HasPrefix((*asked)[0], "bootstrap ") {
-		t.Errorf("launchd was asked %v, want a bootstrap of a job that was not loaded", *asked)
-	}
-	settings, complaints := config.Load(layout)
-	if len(complaints) > 0 {
-		t.Fatalf("core complains about the drop-in: %v", complaints)
-	}
-	if mine := settings.Integration["bar"]; mine.Binary != "" || mine.LaunchAgent != bar.Identifier {
-		t.Errorf("the drop-in reads %+v: want no binary and the launch agent's label", mine)
-	}
-	if _, err := os.Stat(layout.ConfigFile); err == nil {
-		t.Error("install wrote the config file, which is the user's")
-	}
-	if !strings.Contains(problems.String(), "second display") {
-		t.Errorf("the advice is not on stderr:\n%s", problems.String())
-	}
-
-	if code := me.UninstallBundle(bar, &out, &problems, []string{"--app", app}); code != 0 {
-		t.Fatalf("uninstall exited %d:\n%s", code, problems.String())
-	}
-	for _, gone := range []string{plist, layout.DropIn("bar"), filepath.Join(app, bar.Program+".app")} {
-		if _, err := os.Stat(gone); err == nil {
-			t.Errorf("uninstall left %s behind", gone)
-		}
-	}
-	if last := (*asked)[len(*asked)-1]; !strings.HasPrefix(last, "bootout ") {
-		t.Errorf("uninstall did not stop the job: launchd was asked %v", *asked)
-	}
-}
-
-// TestAnIdentityThisKeychainDoesNotHaveIsRefused before anything is built,
-// because a bundle signed with nothing is the failure that is hardest to see.
-func TestAnIdentityThisKeychainDoesNotHaveIsRefused(t *testing.T) {
-	askedOfLaunchd(t)
-	me := Integration{Name: "bar", Root: t.TempDir()}
-	var problems strings.Builder
-	code := me.InstallBundle(bar, io.Discard, &problems, []string{"--app", t.TempDir(), "--sign", "nobody has this"})
-	if code == 0 {
-		t.Error("an identity that is not in the keychain was accepted")
-	}
-	if !strings.Contains(problems.String(), "nobody has this") {
-		t.Errorf("the refusal does not name it:\n%s", problems.String())
-	}
-}
-
-// The table a bundle install files is TOML core reads.
-func TestTheBundleTableIsToml(t *testing.T) {
-	var parsed map[string]any
-	if err := toml.Unmarshal([]byte(bar.Table("me")), &parsed); err != nil {
-		t.Fatal(err)
 	}
 }

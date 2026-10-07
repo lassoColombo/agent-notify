@@ -2132,9 +2132,11 @@ order = ["aerospace-container", "zellij-container"]
 **[decided 2026-09-29 — D-85] Beside the file is `conf.d/`, one file per
 integration, written by that integration's `install` and read before the
 user's file, which wins.** A drop-in holds what only the program can know: the
-absolute path of its binary and of the tool it drives, the signing identity
-its bundle carries, the launch agent that keeps it alive, an agent's process
-name. Nothing in `conf.d` is the user's to maintain and nothing in
+absolute path of its binary and of the tool it drives, an agent's process
+name. **[amended 2026-10-07 — D-87]** It used to hold two more — the signing
+identity a bundle carried and the launch agent that kept a display alive — and
+there is no longer a bundle or a launch agent anywhere in this repository to
+describe. Nothing in `conf.d` is the user's to maintain and nothing in
 `config.toml` is a program's to write.
 
 **Everything in `config.toml` is the user's to write, and nothing in it is an
@@ -4877,6 +4879,131 @@ entry per decision, with the reversals named as D-4 and D-6 name theirs.
 ---
 
 # B. Plan
+
+- **D-86** (2026-10-07) — **The notification is somebody else's bundle, and this
+  display becomes an ordinary one.** *Reverses* the implementation half of D-53
+  and D-54 — the `.app`, the identifier, the signing identity, the icon, the
+  copy of the binary and the Objective-C — and *amends* D-85 (this integration
+  no longer files a launch agent) and D-81 (`binary` is back in its table,
+  because core may now run this). *Keeps* every measurement D-53 recorded: they
+  are all still true, they are simply no longer ours to live with.
+
+  - **What D-53 found was never about notifications, it was about identity.**
+    macOS will not take a notification from a process without a bundle it has
+    registered; an ad-hoc signature is refused silently; and a decision it makes
+    about an identifier cannot be unmade — two were burned finding that out. The
+    cost of owning an identity was a `.app` holding a COPY of the binary, a
+    self-signed certificate made by hand with openssl, a reinstall after every
+    rebuild, and a hazard that could not be undone. `alerter` is a bundle
+    somebody else maintains, signed and notarised by Apple, installed with brew.
+    Posting through it is an exec.
+  - **The embedded Info.plist was tried first and does not reach this far**
+    [measured 2026-10-07, macOS 26.6.2]. A bare Go binary with an
+    `__TEXT,__info_plist` section does get a real `bundleIdentifier` and a
+    preferences domain that SURVIVES the process — written on one run and read
+    back on the next, out of `~/Library/Preferences`. It does not get a
+    notification: `UNUserNotificationCenter` still aborts with
+    `bundleProxyForCurrentProcess is nil`, because what it wants is
+    LaunchServices registration of a bundle on disk and not a plist in a
+    binary. **So the trick is no use here and may be the whole of the menu bar
+    display's bundle**, which exists for the preferences domain alone (D-52).
+    Recorded here because the measurement was taken here.
+  - **The three facts that decide the shape** [measured 2026-10-07, macOS
+    26.6.2, alerter 26.5]:
+    - **A second banner in the same `--group` reaps the first.** The superseded
+      alerter exits by itself, printing `@CLOSED`. So nothing tracks children:
+      one banner per session, replaced rather than stacked, is what `--group`
+      already means, and D-54's requirement is met by somebody else's code.
+    - **A detached alerter outlives whatever started it**, reparented to pid 1,
+      still holding its banner. That is what makes this a render rather than a
+      resident process.
+    - **A tap is `@CONTENTCLICKED` on stdout**, and the close button, a timeout
+      and being replaced are three other words. Only the first focuses
+      anything: the other three are somebody declining to be interrupted, and
+      acting on them would take you to a session you had just dismissed.
+  - **The last one dissolves D-54's hardest finding.** "A program that posts is
+    not therefore a program that can be talked to" was true, and the reason
+    this display owned its process and launchd owned the display: a tap is
+    delivered to the poster, on its main thread, so a poster that had exited
+    left banners nobody could click. The poster is alerter now. What has to
+    stay alive is a detached child of this program holding a pipe, and the way
+    back is a line of text rather than an AppKit run loop — so there is no
+    `NSApp`, no main thread to lock, no run loop to prove is draining, and no
+    launch agent. `binary` goes back in the table and core renders this like
+    any other display.
+  - **The sprite moved to `image/png`** and the module now builds with
+    `CGO_ENABLED=0`. Nine rows of squares and a rounded tile are not a reason
+    to carry a cgo toolchain, an Objective-C file and the Xcode command line
+    tools as a build dependency — they were only ever free because Cocoa had to
+    be linked anyway.
+  - **What it costs, and it is not nothing**: a dependency that is not in this
+    repository and that a person has to install; banners that arrive under
+    ALERTER's identity, so System Settings files them under its name and the
+    per-app controls are its own rather than agent-notify's; alerter's default
+    of impersonating `com.apple.Terminal`, which is left alone; and one process
+    per outstanding banner, bounded by the number of live sessions and reaped
+    by the next banner for the same one.
+  - **What it buys**: 489 lines of Objective-C and the cgo wrapper over them gone, no bundle, no
+    `codesign`, no keychain identity, no `iconutil`, no launch agent, no copy
+    to go stale, no reinstall after a rebuild — `make install` is the whole
+    upgrade — and no identifier of ours for macOS to make an irreversible
+    decision about.
+
+- **D-87** (2026-10-07) — **`agent-notify-macos-bar` is removed, and the macOS
+  display that survives is renamed `macos-notifier`.** *Retires* the module
+  delivered in M15a. *Amends* D-54 (there are no longer two macOS displays to
+  keep apart), D-52 (the `.app` it reasoned about exists nowhere in this tree
+  now) and D-85 (nothing here files a launch agent any more). Does not amend
+  D-51 or D-72, whose reasoning about what a paint costs and what a display may
+  wake for stands and is why `WhatToWakeFor` has the shape it has.
+
+  - **The same argument as D-79, and it is the owner's to make.** The bar cost a
+    signed `.app`, a launch agent, a copy of the binary that went stale on every
+    rebuild, and 820 lines of Objective-C — in a repository whose owner does not
+    want to maintain a bundle and does not write Objective-C. Unmaintained and
+    still in the tree is the worst of the three states: nothing here is
+    published, so core breaks its own API freely (D-77), and a module left
+    standing has to be kept compiling on every change. The choice was delete or
+    keep paying.
+  - **There was a way to keep it that was not taken, and it is recorded so that
+    nobody rediscovers it as an oversight.** The bundle existed for exactly one
+    thing — `NSStatusItem.autosaveName` needs a preferences domain, and a
+    bundle-less process has none (D-52) — and D-86 measured that an embedded
+    `__TEXT,__info_plist` section gives a bare binary a domain that survives the
+    process. So the `.app` was probably removable. It was not pursued, because
+    the Objective-C was the other half of the complaint and because removing
+    the bundle would have left the larger cost in place.
+  - **What is lost, and it is not nothing.** The bar was the only LEVEL this
+    system showed: an ambient "three working, one blocked" that is true whether
+    or not anybody asked. A notification is an EDGE (§A12.1, D-53) and answers a
+    different question. Nothing in this repository now says what every session
+    is doing without being asked — `picker` says it when you press a key,
+    `zellij` says it on the tabs you happen to be looking at. That is a
+    capability gone, not a capability moved.
+  - **What it left dead in core went with it**, on the same day and for the
+    same reason. `subscribe`'s `BundleInstall`, `InstallBundle`,
+    `UninstallBundle`, `DefaultBundle`, `Bundle` and `LaunchAgentPlist` existed
+    for a display that owns its process and lives in a bundle, and there is no
+    longer one — they were used by nothing but their own tests. So
+    `subscribe/bundle.go`, `subscribe/launchagent.go` and `subscribe/bundle_test.go`
+    are gone, `subscribe/install.go` is 95 lines where it was 306, and what is
+    left is `Install` and `Uninstall`: a drop-in written, a drop-in removed.
+    **This reverses the half of D-85 that is about resident displays** — an
+    install no longer writes or loads a launch agent, because nothing here has
+    one — and *amends* `[integration.<name>]`, which **loses `launch-agent`**
+    (D-85 added it). `doctor` no longer asks launchd anything. A config file
+    still carrying `launch-agent` will be reported as an unknown key, which is
+    the right way to find out.
+  - **The rename reaches the configuration.** Core derives an integration's
+    program as `agent-notify-<name>` (`command/install`), so renaming the module
+    renames the integration and therefore its table: `[integration.macos-bar]`
+    is gone and `[integration.macos-notifications]` is now
+    `[integration.macos-notifier]`. A machine that had either removes the old
+    drop-in and runs `agent-notify install macos-notifier`. The name is the
+    honest one: this is a notifier, and "notifications" named the surface rather
+    than the program.
+  - **Where it is**: `tool-integrations/agent-notify-macos-bar/` in `ab3dbed`
+    and every commit before it.
 
 ## B1. How this works
 

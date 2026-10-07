@@ -8,10 +8,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"runtime"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -230,11 +228,6 @@ func reportContainers(layout paths.Layout, settings config.Config, healthy *bool
 	*healthy = false
 }
 
-// launchdKnows asks launchd whether a display's job is loaded.
-func launchdKnows(label string) bool {
-	return exec.Command("launchctl", "print", "gui/"+strconv.Itoa(os.Getuid())+"/"+label).Run() == nil
-}
-
 // reportLiveness only looks; ending sessions is the session-watcher's job.
 func reportLiveness(live []session.Record, healthy *bool) {
 	boot, err := process.BootIdentity()
@@ -316,16 +309,7 @@ func reportIntegrations(
 		fmt.Sprintf("reported by pid %d at %s", report.PID, report.Written))
 
 	for _, one := range report.Integrations {
-		state := one.State
-		if label := settings.Integration[one.Name].LaunchAgent; label != "" {
-			if launchdKnows(label) {
-				state = "running under launchd as " + label
-			} else {
-				state = "NOT loaded under launchd; `agent-notify install " + one.Name + "` loads it"
-				*healthy = false
-			}
-		}
-		fmt.Printf("             %-22s %s\n", one.Name, state)
+		fmt.Printf("             %-22s %s\n", one.Name, one.State)
 		if one.Binary != "" {
 			fmt.Printf("             %-22s %s\n", "", whatItAnswers(one))
 		}

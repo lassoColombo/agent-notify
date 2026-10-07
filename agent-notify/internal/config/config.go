@@ -63,14 +63,9 @@ type Integration struct {
 	Enabled *bool `toml:"enabled"`
 
 	// Binary is this program, and naming one means "core may run this". A
-	// table without one belongs to something core never runs — a menu bar
-	// launchd starts — and is here for its settings (D-81).
+	// table without one belongs to something core never runs — the picker,
+	// which a keybinding starts — and is here for its settings (D-81).
 	Binary string `toml:"binary"`
-
-	// LaunchAgent is the launchd label that keeps a display that owns its
-	// process running, filed by its install so that doctor can ask launchd
-	// whether it is loaded (D-85).
-	LaunchAgent string `toml:"launch-agent"`
 
 	// Settings is handed to the integration verbatim and never read by core
 	// (R7).

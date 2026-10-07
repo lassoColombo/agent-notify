@@ -10,24 +10,22 @@ import (
 // Name is what this integration calls itself: its config table and its
 // handshake.
 //
-// It is a separate integration from the menu bar and not a setting on it
-// (D-37), and the reason is what macOS makes of a bundle. A bundle identifier
-// that has been decided about cannot be undecided; notifications are the only
-// thing in this system that asks a person for permission; and somebody may
-// perfectly well want banners without an item on their bar, or an item on
-// their bar and no banners. Two programs, two bundles, two answers.
-const Name = "macos-notifications"
+// It was a separate integration from the menu bar rather than a setting on it
+// (D-37), because macOS files its decision about notifications against a bundle
+// identifier and that decision cannot be unmade — so the program that asked a
+// person for permission had to be the one that needed it, with nothing else
+// riding on the same identifier. Neither half of that is load bearing any more:
+// there is no bundle of ours (D-86) and no menu bar display (D-87).
+const Name = "macos-notifier"
 
 var me = subscribe.Integration{Name: Name, WakeOn: WhatToWakeFor()}
 
 // DefaultColours is what the invader on a banner is drawn in.
 //
-// The same table the menu bar display uses, written out again rather than
-// shared (D-54), because the whole point of it is that the two agree: a banner
-// and the bar are about the same thing at the same moment, and an agent that is
-// Love on one and something else on the other is two programs telling you two
-// stories. Rosé Pine, and only the three states that ever notify are ever
-// drawn — the other two are here so that the table is the same table.
+// Rosé Pine. Only the three states that ever notify are ever drawn; the other
+// two are here so that the table is a whole table, which is what let it be
+// compared with the menu bar display's when there was one to disagree with
+// (D-54, D-87).
 //
 // The alpha is written and then dropped: a banner's picture is composited by
 // macOS onto a surface nobody here knows the colour of (invaderpngs.go).
@@ -39,14 +37,14 @@ var DefaultColours = map[session.Kernel]string{
 	session.Idle:          "0xcce0def4", // text — never notifies
 }
 
-// Settings is `[integration.macos-notifications.settings]`, and nothing else in
+// Settings is `[integration.macos-notifier.settings]`, and nothing else in
 // the file is ours. A key nobody declared is refused by name.
 type Settings struct {
-	// Sign is the code signing identity `install` gives the bundle, remembered
-	// so that re-running install after a rebuild does not need the flag again.
-	// Empty is ad-hoc, and macOS refuses notifications from an ad-hoc bundle
-	// silently.
-	Sign string `toml:"sign"`
+	// Alerter is the program that puts the banner on the screen, absolute,
+	// written by `install` from your PATH because nothing core starts has one
+	// (D-67). Empty falls back to PATH, which is right for a shell and wrong
+	// for a session-watcher.
+	Alerter string `toml:"alerter"`
 
 	// Preview is how much of what the agent said a banner carries.
 	Preview PreviewSettings `toml:"preview"`
@@ -77,7 +75,7 @@ type Settings struct {
 	Colors map[string]string `toml:"colors"`
 }
 
-// PreviewSettings is `[integration.macos-notifications.settings.preview]`.
+// PreviewSettings is `[integration.macos-notifier.settings.preview]`.
 type PreviewSettings struct {
 	Lines *int `toml:"lines"`
 	Width *int `toml:"width"`
@@ -89,6 +87,9 @@ type Resolved struct {
 	Preview Preview
 	Sound   Sound
 	Colours session.Palette
+	// Alerter is the program that posts, found once here so that a missing one
+	// is a refusal at startup rather than a banner that never arrives.
+	Alerter string
 }
 
 // The default preview: eight lines of sixty characters. A banner is not a
@@ -143,5 +144,13 @@ func Read(given subscribe.Integration) (Resolved, error) {
 	if _, err := given.CoreBinary(); err != nil {
 		return Resolved{}, fmt.Errorf("tapping a banner has to be able to run something, and %w", err)
 	}
+	// And refused now rather than at the moment something is worth saying: a
+	// display that discovers it cannot post only when it has something to post
+	// is a display that fails on the one occasion it mattered.
+	alerter, err := Alerter(settings.Alerter)
+	if err != nil {
+		return Resolved{}, err
+	}
+	resolved.Alerter = alerter
 	return resolved, nil
 }

@@ -135,8 +135,7 @@ Each is its own Go module in this monorepo, one per agent and one per tool.
 | --- | --- | --- |
 | [agent-notify-claude](../agent-integrations/agent-notify-claude) | agent | Claude Code's hooks |
 | [agent-notify-codex](../agent-integrations/agent-notify-codex) | agent | Codex CLI's hooks |
-| [agent-notify-macos-bar](../tool-integrations/agent-notify-macos-bar) | display | the semaphore on the macOS menu bar |
-| [agent-notify-macos-notifications](../tool-integrations/agent-notify-macos-notifications) | display | a macOS notification when an agent wants you |
+| [agent-notify-macos-notifier](../tool-integrations/agent-notify-macos-notifier) | display | a macOS notification when an agent wants you |
 | [agent-notify-zellij](../tool-integrations/agent-notify-zellij) | display and container | pane and tab titles, placing and focusing a session |
 | [agent-notify-picker](../tool-integrations/agent-notify-picker) | display | every session in a terminal, and a way into one |
 | [agent-notify-aerospace-container](../tool-integrations/agent-notify-aerospace-container) | container | finding and raising the window a session is in |
@@ -209,7 +208,7 @@ that program:
 
 ```sh
 agent-notify install claude codex zellij
-agent-notify install macos-notifications --sign "agent-notify self-signed"
+agent-notify install macos-notifier
 ```
 
 Two things stay yours. `[container] order` says which shell is outside which,
@@ -253,8 +252,8 @@ watcher      ok    pid 86777, version 0.0.0-dev, since 2026-09-28T20:15:40Z
 integrations ok    reported by pid 86777 at 2026-09-28T20:38:09Z
              aerospace-container    run when core needs it
                                     answers interpret-environment, focus, focused — built against 0.0.0-dev
-             macos-bar              yours to start; core never runs it
-             macos-notifications    yours to start; core never runs it
+             macos-notifier         drawn when something it watches moves
+                                    answers render — built against 0.0.0-dev
              picker                 yours to start; core never runs it
              zellij                 drawn when something it watches moves
                                     answers interpret-environment, focus, focused, render — built against 0.0.0-dev
@@ -491,8 +490,7 @@ binary = "/opt/homebrew/bin/agent-notify-zellij"
 | Key | Type | Default | What it does |
 | --- | --- | --- | --- |
 | `enabled` | boolean | absent means **yes** | `false` means "do not run this for me". Writing the table at all is how you ask for the integration, so absence means enabled. |
-| `binary` | string | none | The program, and naming one means **core may run this**: the hook runs it on the agent's path, the session-watcher runs it to ask what it answers and then to render or to focus. Looked up on PATH unless it is an absolute path. Leaving it out is a decision rather than an omission — a table with no binary belongs to something core never runs, like a menu bar, which owns its own process and is started by launchd. |
-| `launch-agent` | string | none | The launchd label that keeps a display that owns its process running, filed by its `install` so that `doctor` can ask launchd whether it is loaded. |
+| `binary` | string | none | The program, and naming one means **core may run this**: the hook runs it on the agent's path, the session-watcher runs it to ask what it answers and then to render or to focus. Looked up on PATH unless it is an absolute path. Leaving it out is a decision rather than an omission — a table with no binary belongs to something core never runs, like the picker, which a keybinding starts. |
 | `settings` | table | empty | Handed to the integration verbatim. See below. |
 
 ### `[integration.<name>.settings]`
@@ -509,9 +507,9 @@ says nothing is the config bug people give up on.
 [integration.zellij.settings]
 zellij = "/opt/homebrew/bin/zellij"
 
-[integration.macos-notifications.settings]
-sign  = "agent-notify self-signed"
-sound = false
+[integration.macos-notifier.settings]
+alerter = "/opt/homebrew/bin/alerter"
+sound   = false
 ```
 
 What each integration accepts is in that integration's own README, and
@@ -574,14 +572,12 @@ aerospace = "/opt/homebrew/bin/aerospace"
 [container]
 order = ["aerospace-container", "zellij"]
 
-[integration.macos-bar]
-[integration.macos-bar.settings]
-sign = "agent-notify self-signed"
+[integration.macos-notifier]
+binary = "/opt/homebrew/bin/agent-notify-macos-notifier"
 
-[integration.macos-notifications]
-[integration.macos-notifications.settings]
-sign  = "agent-notify self-signed"
-sound = false
+[integration.macos-notifier.settings]
+alerter = "/opt/homebrew/bin/alerter"
+sound   = false
 
 # Run when you press a key. It needs a terminal, so it has no binary: the path
 # lives in the keybinding, which is the only thing that runs it.
@@ -896,7 +892,7 @@ name belongs to that program**: core does not parse them.
 ```sh
 agent-notify install
 agent-notify install claude --print
-agent-notify install macos-bar --sign "agent-notify self-signed"
+agent-notify install macos-notifier
 ```
 
 Each integration writes its own file under `conf.d` and nothing in

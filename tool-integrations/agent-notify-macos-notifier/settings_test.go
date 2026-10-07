@@ -28,6 +28,10 @@ func settingsIn(t *testing.T, body string) (Resolved, error) {
 	// `/usr/bin/true` stands in for core: what matters here is that something
 	// is there to be found, because a program that could not run anything when
 	// a banner is tapped refuses to start at all.
+	// And a stub alerter on PATH, so that this suite says the same thing on a
+	// machine that has never installed one. The tests that care about which
+	// alerter is found write their own into the body.
+	t.Setenv("PATH", stubAlerterOnPATH(t))
 	whole := "agent-notify-binary = \"/usr/bin/true\"\n" + body
 	if err := os.WriteFile(path, []byte(whole), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
@@ -70,7 +74,7 @@ func TestSoundTakesThreeShapes(t *testing.T) {
 		{`sound = "submarine"`, Sound{Plays: true, Name: "Submarine.aiff"}},
 		{`sound = "Submarine.aiff"`, Sound{Plays: true, Name: "Submarine.aiff"}},
 	} {
-		settings, err := settingsIn(t, "[integration.macos-notifications.settings]\n"+shape.written)
+		settings, err := settingsIn(t, "[integration.macos-notifier.settings]\n"+shape.written)
 		if err != nil {
 			t.Fatalf("%s: %v", shape.written, err)
 		}
@@ -89,7 +93,7 @@ func TestASoundThatIsNotOnThisMachineIsRefused(t *testing.T) {
 		t.Skip("this machine has no Submarine.aiff to offer in the refusal")
 	}
 	_, err := settingsIn(t, `
-[integration.macos-notifications.settings]
+[integration.macos-notifier.settings]
 sound = "Submarien"
 `)
 	if err == nil {
@@ -107,7 +111,7 @@ sound = "Submarien"
 // than being read as false by a switch with a lazy default.
 func TestSoundIsNotAnythingElse(t *testing.T) {
 	if _, err := settingsIn(t, `
-[integration.macos-notifications.settings]
+[integration.macos-notifier.settings]
 sound = 3
 `); err == nil {
 		t.Errorf("sound = 3 was accepted")
@@ -116,7 +120,7 @@ sound = 3
 
 func TestThePreviewCanBeChangedAndCanBeWrong(t *testing.T) {
 	settings, err := settingsIn(t, `
-[integration.macos-notifications.settings.preview]
+[integration.macos-notifier.settings.preview]
 lines = 3
 width = 40
 `)
@@ -128,7 +132,7 @@ width = 40
 	}
 
 	if _, err := settingsIn(t, `
-[integration.macos-notifications.settings.preview]
+[integration.macos-notifier.settings.preview]
 width = 4
 `); err == nil {
 		t.Errorf("a preview four characters wide was accepted")
@@ -139,7 +143,7 @@ width = 4
 // changes nothing and says nothing is the config bug people give up on.
 func TestAKeyNobodyDeclaredIsRefused(t *testing.T) {
 	_, err := settingsIn(t, `
-[integration.macos-notifications.settings]
+[integration.macos-notifier.settings]
 sing = "agent-notify self-signed"
 `)
 	if err == nil {
@@ -155,33 +159,48 @@ sing = "agent-notify self-signed"
 // refusing the file because of them — is the failure this checks for.
 func TestSomebodyElsesTableIsNotOurs(t *testing.T) {
 	settings, err := settingsIn(t, `
-[integration.macos-bar]
+[integration.zellij]
 binary = "/usr/bin/true"
 
-[integration.macos-bar.settings]
-rows = 3
-resting = "0xff8c88a6"
+[integration.zellij.settings]
+zellij = "/usr/bin/true"
 
-[integration.macos-notifications.settings.preview]
+[integration.macos-notifier.settings.preview]
 lines = 2
 `)
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
 	if settings.Preview.Lines != 2 {
-		t.Errorf("preview.lines = %d, want ours and not the bar's", settings.Preview.Lines)
+		t.Errorf("preview.lines = %d, want ours and not somebody else's", settings.Preview.Lines)
 	}
 }
 
-// TestSignIsRememberedForInstallAndIgnoredAtRuntime. It is written by
-// `install --sign` and read by `install` alone; nothing in Resolved carries it,
-// because nothing at runtime may quietly re-sign anything.
-func TestSignIsDeclaredSoItIsNotRefused(t *testing.T) {
-	if _, err := settingsIn(t, `
-[integration.macos-notifications.settings]
-sign = "agent-notify self-signed"
-`); err != nil {
-		t.Errorf("the identity install writes was refused when read back: %v", err)
+// TestTheWrittenAlerterWinsOverPATH, because nothing core starts has your
+// shell's PATH (D-67), and `install` writes down what it found in yours.
+func TestTheWrittenAlerterWinsOverPATH(t *testing.T) {
+	settings, err := settingsIn(t, `
+[integration.macos-notifier.settings]
+alerter = "/usr/bin/true"
+`)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if settings.Alerter != "/usr/bin/true" {
+		t.Errorf("alerter = %q, want the one written down", settings.Alerter)
+	}
+}
+
+// TestAnAlerterThatIsNotThereIsRefusedWhenTheConfigIsRead. A brew upgrade that
+// moved it would otherwise be a display that silently stops interrupting
+// anybody, which is the failure this whole file exists to make impossible.
+func TestAnAlerterThatIsNotThereIsRefused(t *testing.T) {
+	_, err := settingsIn(t, `
+[integration.macos-notifier.settings]
+alerter = "/nowhere/alerter"
+`)
+	if err == nil || !strings.Contains(err.Error(), "/nowhere/alerter") {
+		t.Errorf("err = %v, want the path named", err)
 	}
 }
 
@@ -190,14 +209,14 @@ sign = "agent-notify self-signed"
 // adapts to the appearance has nothing to adapt to.
 func TestAColourThatCannotBeDrawnIsRefused(t *testing.T) {
 	if _, err := settingsIn(t, `
-[integration.macos-notifications.settings.colors]
+[integration.macos-notifier.settings.colors]
 broke = "systemOrange"
 `); err == nil || !strings.Contains(err.Error(), "broke") {
 		t.Errorf("err = %v, want the state named", err)
 	}
 
 	settings, err := settingsIn(t, `
-[integration.macos-notifications.settings.colors]
+[integration.macos-notifier.settings.colors]
 broke = "0xfff6c177"
 `)
 	if err != nil {

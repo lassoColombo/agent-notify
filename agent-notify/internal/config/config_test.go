@@ -211,11 +211,11 @@ func TestEveryDurationIsValidated(t *testing.T) {
 // container that cannot be run cannot answer `focus`
 // (containers.TestAContainerWithNoBinaryIsRefusedAndNamed).
 func TestATableWithNoBinaryIsAccepted(t *testing.T) {
-	settings, problems := config.Parse([]byte("[integration.macos-bar]\n"), "client.toml")
+	settings, problems := config.Parse([]byte("[integration.macos-notifier]\n"), "client.toml")
 	if len(problems) != 0 {
 		t.Fatalf("a client's settings table was complained about: %v", problems)
 	}
-	if _, present := settings.Integration["macos-bar"]; !present {
+	if _, present := settings.Integration["macos-notifier"]; !present {
 		t.Error("the table was accepted and then not kept, so nothing can read its settings")
 	}
 }

@@ -30,7 +30,7 @@ touched. Options after one name belong to that program.
 
   agent-notify install
   agent-notify install claude --print
-  agent-notify install macos-bar --sign "agent-notify self-signed"
+  agent-notify install macos-notifier
 
 Press TAB for the integrations that are on your PATH.`,
 		DisableFlagParsing: true,
