@@ -5027,6 +5027,24 @@ of this section is that it prevents re-litigating.
     this reader (D-44: "what is stored instead is two keys: the process
     chain…"). Storing it once and reading it is the shape that was intended.
 
+- **D-94** (2026-10-09) — **`LastShown.Replace` answers with the view to hand
+  over, or nothing.** Found by the architecture review of the same day; the
+  exact case R24 names.
+  - **What was wrong.** `LastShown` had three methods — `HasSeenAView`,
+    `Replace` reporting what changed and whether anything departed, and
+    `ViewOf` — and the decision "first view, or something changed, or
+    something departed" was written at both callers, eight lines each: the
+    renderer core runs (`internal/sessionwatcher/render.go`) and the loop a
+    display owns (`subscribe.Run`). Two copies of one rule, and the rule has
+    a trap in it: a departure is a change to no record, so a copy that
+    compared records alone would draw nothing when a session left.
+  - **Now `Replace(fresh, wakeOn)` returns `(View, bool)`.** It swaps the
+    world in, decides the three cases once, and hands back the view with
+    `Changed` filled in, or false. The first view carries no changes (R22) as
+    before; the other two methods are gone. A test in `session` pins the
+    four outcomes — first world, nothing moved, a watched field moved, a
+    departure — where the rule lives rather than through a shell script.
+
 **The payload discussion of 2026-09-17 is now ratified**
  in D-10 through D-18.
 What is still marked [proposed] elsewhere — the field list of §A7.4, the event

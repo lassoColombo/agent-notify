@@ -41,6 +41,10 @@ a decision in `agent-notify/plan.md` §A19.
   `ancestry`, and aerospace's walker, its `!darwin` stub, its walk test and
   its direct `x/sys` dependency are gone. `TestAContainerIsHandedItsOwnEntryAndTheChain`
   pins the shape, including that another integration's entry is not handed over.
+- **The render decision was written twice** (D-94). `LastShown.Replace` now
+  swaps the world in and answers with the view to hand over, or nothing;
+  `HasSeenAView` and `ViewOf` are gone, and both callers are one line. A
+  test in `session` pins the four outcomes where the rule lives.
 - **Dead since D-87.** `JustArrived`, `Arrival`, `Announced`, `Same` and
   `moreRecent` in `session/display.go`, with `arrival_test.go`, had no caller
   once the menu bar went. `plural` in the notifier's `preview.go` likewise.
@@ -51,15 +55,7 @@ a decision in `agent-notify/plan.md` §A19.
 Ordered by what they cost, most first. Each names the code and the shape of
 the fix; none is started.
 
-### 1. The render decision is written twice
-
-- `subscribe/run.go` and `internal/sessionwatcher/render.go` both do
-  `LastShown.Replace`, then "first view, or something changed, or something
-  departed", then `ViewOf`. Eight lines each, and the exact case R24 names.
-- One method on `LastShown` — replace the world and answer with the view to
-  hand over, or nothing — serves both.
-
-### 2. Integrations open the log twice
+### 1. Integrations open the log twice
 
 - zellij's `main.go` and the notifier's `main.go` and `alerter.go` call
   `logs.Open(Name)` while `subscribe.Integration.core()` has already opened a
@@ -69,7 +65,7 @@ the fix; none is started.
   variable that sets the level is reached through `subscribe` like everything
   else.
 
-### 3. `session` carries three vocabularies
+### 2. `session` carries three vocabularies
 
 - The package is documented as the floor that "speaks nothing", and that is
   true of its imports. It now exports about 140 symbols of three kinds: the
@@ -85,7 +81,7 @@ the fix; none is started.
   its purpose is in its path. This is a relocation, not new weight, and it is
   the lowest-value item here.
 
-### 4. `hook.Main` asks for the payload twice
+### 3. `hook.Main` asks for the payload twice
 
 - `hook.Main(arguments, usage, named, payload any, translate func() (Report,
   bool))` takes a pointer to decode into and a closure that captures the same
@@ -93,7 +89,7 @@ the fix; none is started.
 - `Main[P any](arguments, usage, named, translate func(P) (session.Report,
   bool))` decodes into a fresh `P` and hands it over.
 
-### 5. Housekeeping
+### 4. Housekeeping
 
 - Four stale git worktrees under `.claude/worktrees/` and
   `agent-notify/.claude/worktrees/` hold older trees, including sketchybar and

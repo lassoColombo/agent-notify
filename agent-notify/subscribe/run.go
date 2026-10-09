@@ -44,10 +44,8 @@ func Run(ctx context.Context, i Integration, onChange func(session.View) error) 
 
 	var shown session.LastShown
 	for ctx.Err() == nil {
-		first := !shown.HasSeenAView()
-		changed, departed := shown.Replace(opened.WhatIsRunning(i.WantEnded), i.WakeOn)
-		if first || len(changed) > 0 || departed {
-			if err := onChange(shown.ViewOf(changed)); err != nil {
+		if view, worth := shown.Replace(opened.WhatIsRunning(i.WantEnded), i.WakeOn); worth {
+			if err := onChange(view); err != nil {
 				opened.Logger.Warn("rendering", "problem", err.Error())
 			}
 		}

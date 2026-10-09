@@ -32,14 +32,14 @@ type LastShown struct {
 	shown    bool
 }
 
-func (l *LastShown) HasSeenAView() bool { return l.shown }
-
-// Replace swaps the whole world in and reports what moved, on the fields this
-// display asked to be woken for, and separately whether anything LEFT. A
-// departure is not a change to any record, so a caller deciding whether a view
-// is worth handing over would otherwise take a session vanishing for nothing
-// happening.
-func (l *LastShown) Replace(fresh []Record, wakeOn []string) (changed []Change, departed bool) {
+// Replace swaps the whole world in and answers with the view to hand over, or
+// false when this display has nothing to be told: it has seen a view, nothing
+// moved on the fields it asked to be woken for, and nothing LEFT. The three
+// are decided here, once, because the second is not the third: a departure is
+// not a change to any record, and a caller comparing records would take a
+// session vanishing for nothing happening (R24). The first view carries no
+// changes, since nothing has moved when there was no previous one (R22).
+func (l *LastShown) Replace(fresh []Record, wakeOn []string) (View, bool) {
 	if l.sessions == nil {
 		l.sessions = make(map[string]Record, len(fresh))
 	}
@@ -56,6 +56,7 @@ func (l *LastShown) Replace(fresh []Record, wakeOn []string) (changed []Change, 
 		}
 		l.sessions[key] = record
 	}
+	departed := false
 	for key := range l.sessions {
 		if !arrived[key] {
 			delete(l.sessions, key)
@@ -63,26 +64,25 @@ func (l *LastShown) Replace(fresh []Record, wakeOn []string) (changed []Change, 
 		}
 	}
 
-	ByUrgency(moved)
-	changed = make([]Change, 0, len(moved))
-	for _, record := range moved {
-		changed = append(changed, Change{Record: record, PreviousKernel: was[record.Key.String()]})
+	first := !l.shown
+	l.shown = true
+	if !first && len(moved) == 0 && !departed {
+		return View{}, false
 	}
-	return changed, departed
-}
 
-// ViewOf is the view to hand over: everything held, most urgent first, with
-// these changes, or with none if this is the first.
-func (l *LastShown) ViewOf(changed []Change) View {
 	all := make([]Record, 0, len(l.sessions))
 	for _, record := range l.sessions {
 		all = append(all, record)
 	}
 	ByUrgency(all)
-
-	if !l.shown {
-		changed = nil
-		l.shown = true
+	if first {
+		return View{Sessions: all}, true
 	}
-	return View{Sessions: all, Changed: changed}
+
+	ByUrgency(moved)
+	changed := make([]Change, 0, len(moved))
+	for _, record := range moved {
+		changed = append(changed, Change{Record: record, PreviousKernel: was[record.Key.String()]})
+	}
+	return View{Sessions: all, Changed: changed}, true
 }

@@ -71,13 +71,12 @@ func (r *renderer) renderOnce() {
 		})
 	}
 
-	first := !r.shown.HasSeenAView()
-	changed, departed := r.shown.Replace(world, r.asked.WakeOn)
-	if !first && len(changed) == 0 && !departed {
+	view, worth := r.shown.Replace(world, r.asked.WakeOn)
+	if !worth {
 		return
 	}
 
-	handed, err := json.Marshal(r.shown.ViewOf(changed))
+	handed, err := json.Marshal(view)
 	if err != nil {
 		r.logger.Warn("a view could not be encoded", "display", r.name, "problem", err.Error())
 		return
