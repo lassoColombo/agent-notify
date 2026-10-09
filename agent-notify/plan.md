@@ -823,6 +823,12 @@ socket, and nothing that can fail louder than an empty string:
   `ai-title` Claude generates, and the best of three is reported — a `/rename`,
   that title, Claude's own label — with **nothing at all** reported when Claude
   has none of them (D-75).
+
+  **[amended 2026-10-09 — D-88]** The payload does carry the name now, on two
+  hooks: `UserPromptSubmit` and `SessionStart` send `session_title` when the
+  session was given one, and it is read before the file. `nameSource` has six
+  values rather than four, `hook` and a missing one are names somebody chose,
+  and the placeholder ends in a random byte, not a counter.
 - **Codex** keeps the name in `threads.name` in `~/.codex/state_5.sqlite` and
   projects it into `~/.codex/session_index.jsonl`, one line per named thread,
   newest last. The projection is read rather than the database: a hook has no
@@ -3630,7 +3636,10 @@ of this section is that it prevents re-litigating.
     2.1.236] Claude builds every hook input from the same six fields; only the
     statusLine command is given `session_name`, and that slot belongs to the
     user. `CLAUDE_PID` in a real hook's environment was verified the same way,
-    by printing it from inside one.
+    by printing it from inside one. *[amended 2026-10-09 — D-88] It does now,
+    on `UserPromptSubmit` and `SessionStart`, as `session_title`, and that is
+    read first. The placeholder thrown away above ends in a random byte, not a
+    counter.*
   - **Neither agent exposes a live per-session directory the way the other
     does.** Claude's `~/.claude/sessions/<pid>.json` has no codex equivalent:
     `~/.codex/sessions/` holds date-partitioned rollout transcripts with no name
@@ -4340,6 +4349,12 @@ of this section is that it prevents re-litigating.
     would run on every hook of every untitled session, which today is all of
     them.
 
+  **[amended 2026-10-09 — D-88]** The rule stands and two more kinds of name
+  come under it. `nameSource` has six values, not four: `hook` is a name
+  somebody chose, and so is a name with no `nameSource` at all. The payload's
+  `session_title` is read before all three of the above. `<cwd-basename>-<counter>`
+  is `<cwd-basename>-<random byte>`; nothing depended on it being a counter.
+
 - **D-76** (2026-09-22) — **The record stops carrying what no display can read
   across agents: context, quota, and the agent's own namespace.** *Amends*
   §A7.4, §A7.4.3, §A7.4.4 and §A7.7; *retires* `agent_data`.
@@ -5004,6 +5019,52 @@ entry per decision, with the reversals named as D-4 and D-6 name theirs.
     than the program.
   - **Where it is**: `tool-integrations/agent-notify-macos-bar/` in `ab3dbed`
     and every commit before it.
+
+- **D-88** (2026-10-09) — **The title a session was given is read from the
+  payload first, and a name a hook chose is a name.** *Amends* D-60, whose "the
+  hook payload could not have carried it" stopped being true on 2026-09-20, and
+  D-75, whose four values of `nameSource` are six and whose placeholder ends in
+  a random byte rather than a counter. Does not amend D-75's rule — an
+  agent-integration reports a name or nothing, and core does the guessing —
+  which this applies to two more kinds of name.
+
+  - **Three kinds of name were being dropped.** [verified 2026-10-09, 2.1.285]
+    by driving six interactive sessions in tmux against a store of their own,
+    with `agent-notify-claude` built from the tree. A `sessionTitle` returned by
+    a `UserPromptSubmit` hook is filed with `nameSource: hook`, which the
+    integration did not know. One returned by a `SessionStart` hook is written
+    to the transcript and never to the session file, whose `nameSource` stays
+    `derived`. And a session started with `CLAUDE_CODE_SESSION_NAME` gets a file
+    with a name and no `nameSource` at all. All three were listed under core's
+    fallback: `p5-upstitle-c7` for a session called `ups-named-probe`.
+  - **The payload is read first.** `UserPromptSubmit` and `SessionStart` carry
+    `session_title`: 910 of 47,742 captured payloads, on those two hooks and no
+    other, and only ever a title somebody gave — `/rename`, `--name` or a hook's
+    — never the placeholder and never the `ai-title`. The objection recorded in
+    `sessionname.go` on 2026-09-22, that it arrives on a prompt and not on the
+    tool call after it, does not hold: an empty name leaves the stored one alone
+    (D-60), so a name reported once stays. It is also the only name there is on
+    a `SessionStart`, which runs about 37 ms before Claude writes the session
+    file, so until now the first record of a `--name` or resumed session was
+    unnamed even though its payload said what it was called.
+  - **`hook`, and no `nameSource` at all, count as chosen.** The second is a
+    name the binary itself labels `user` and the file leaves the label off.
+    Claude strips `CLAUDE_CODE_SESSION_NAME` from a hook's environment, so the
+    file is the only place that name exists. The risk is a Claude that writes a
+    placeholder with no source, and none in reach does: `nameSource` was there at
+    2.1.236.
+  - **What stays as it was.** `custom-title` in the transcript is not read: the
+    payload and the file between them carry every named session the probes
+    produced, and a third read would add nothing. `ai-title` is still read and
+    still dark — none of the 206 transcripts on this machine holds one, and a
+    probe session driven through a prompt wrote none. `collision` stays a
+    placeholder: it is behind `tengu_session_name_uniqueness`, which is off on
+    this machine, so two sessions given one name both kept it and the case could
+    not be seen. `peer` was not traced.
+  - **The placeholder's suffix is `randomBytes(1)` in hex, not a counter.** Two
+    sessions started in the same second were `-4a` and `-2a`, and none of five
+    matched a hash of its session id. Nothing depended on it being a counter,
+    and the word is corrected where it was written.
 
 ## B1. How this works
 

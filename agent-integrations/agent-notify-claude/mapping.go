@@ -52,6 +52,12 @@ type Payload struct {
 	Cwd            string `json:"cwd"`
 	TranscriptPath string `json:"transcript_path"`
 
+	// UserPromptSubmit and SessionStart: the title the session was given — a
+	// `/rename`, `--name`, or a hook's `sessionTitle` — and absent when nobody
+	// gave it one. [verified 2026-10-09, 2.1.285] It is on no other hook, and
+	// it is never Claude's placeholder or its `ai-title` (sessionname.go).
+	SessionTitle string `json:"session_title"`
+
 	// SessionStart: startup, resume, clear or compact. [verified 2026-09-17]
 	// against 38 real starts; all four occur.
 	Source string `json:"source"`
@@ -122,18 +128,25 @@ func Translate(
 	report := session.Report{
 		Key: session.Key{Agent: AgentName, SessionID: payload.SessionID},
 		// The best name Claude has for this session, and nothing at all when it
-		// has none (sessionname.go, sessiontitle.go): what a person renamed it
-		// to, then Claude's own title for it, then Claude's own label.
+		// has none (sessionname.go, sessiontitle.go): the title the payload
+		// says it was given, then the name a person or a hook chose in the
+		// session file, then Claude's own title for it, then Claude's own label.
+		// The payload's comes first because it is the only one there on a
+		// SessionStart, which runs before Claude writes the file, and the only
+		// one there at all for a title a SessionStart hook gave (D-88). It rides
+		// on two hooks of the nine, and that is enough: an empty name leaves the
+		// stored one alone.
 		//
-		// What is not here is the `<cwd-basename>-<counter>` Claude stamps on
-		// an unnamed session — `agent-notify-16`. Reporting it meant no display
+		// What is not here is the placeholder Claude stamps on an unnamed
+		// session — `agent-notify-16`. Reporting it meant no display
 		// could tell it from a name somebody chose, and it is a guess core can
 		// make for every agent rather than one this program makes for one of
 		// them. An agent-integration that has a name reports it; one that has
 		// none reports nothing, and the guessing belongs to the SDK so that
 		// every display does it identically (§A7.4.2, D-75, R24).
 		Name: cmp.Or(
-			claude.NameAHumanChose(),
+			strings.TrimSpace(payload.SessionTitle),
+			claude.NameSomebodyChose(),
 			title,
 			claude.NameClaudeGenerated(),
 		),

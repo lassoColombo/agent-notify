@@ -9,7 +9,7 @@ import (
 
 // realSessionFile is a copy of a live one, fields and all. [captured
 // 2026-09-19, 2.1.236] The name is what an ordinary interactive session looks
-// like: Claude stamped the directory and a counter on it and nobody has
+// like: Claude stamped the directory and a random byte on it and nobody has
 // renamed it.
 const realSessionFile = `{"pid":38514,"sessionId":"4a152fd4-7280-4f7d-a172-3f5fef078783",
   "cwd":"/Users/x/projects/personal/agent-notify","startedAt":1789646635977,
@@ -43,13 +43,11 @@ func writeSession(t *testing.T, directory, pid string, session map[string]any) {
 	}
 }
 
-// TestADerivedNameIsStillTheOnlyThingThatTellsThemApart is why a placeholder is
-// read rather than discarded. `agent-notify-96` is the directory plus a counter
-// and core's fallback is the directory, so dropping it read like losing nothing
-// — until three sessions in one repository all painted `agent-notify` and the
-// counter turned out to be the whole of what distinguished them. What
-// `nameSource` decides is where it ranks, not whether it is read.
-func TestADerivedNameIsStillTheOnlyThingThatTellsThemApart(t *testing.T) {
+// TestARealSessionFileIsReadWhateverItsNameSource is the reader, which reads
+// the name whatever `nameSource` says. `agent-notify-96` is the placeholder and
+// is never reported (D-75), but that is Translate's decision, made where it is
+// tested beside the others.
+func TestARealSessionFileIsReadWhateverItsNameSource(t *testing.T) {
 	directory := sessionsDirectory(t)
 	if err := os.WriteFile(filepath.Join(directory, "38514.json"),
 		[]byte(realSessionFile), 0o600); err != nil {
@@ -57,8 +55,9 @@ func TestADerivedNameIsStillTheOnlyThingThatTellsThemApart(t *testing.T) {
 	}
 
 	known := WhatClaudeKnowsAboutThisSession("4a152fd4-7280-4f7d-a172-3f5fef078783")
-	if known.Name != "agent-notify-96" {
-		t.Errorf("name = %q, want the counter that tells it from its siblings", known.Name)
+	if known.Name != "agent-notify-96" || known.NameSource != "derived" {
+		t.Errorf("name = %q from %q, want the placeholder as Claude filed it",
+			known.Name, known.NameSource)
 	}
 	if known.Cwd != "/Users/x/projects/personal/agent-notify" {
 		t.Errorf("cwd = %q, want the one the session started in", known.Cwd)
@@ -189,10 +188,11 @@ func TestEveryHookCarriesTheName(t *testing.T) {
 }
 
 // TestTheBestNameClaudeHasIsTheOneReported is the order, which is the whole of
-// this program's naming policy: a person's rename first, then Claude's title
-// for the session, then Claude's label — and nothing at all when Claude has
-// none of the three, because `agent-notify-16` is a guess and core makes the
-// guesses (D-75).
+// this program's naming policy: a name a person or a hook chose first, then
+// Claude's title for the session, then Claude's label — and nothing at all when
+// Claude has none of the three, because `agent-notify-16` is a guess and core
+// makes the guesses (D-75). The payload's title, which ranks above all of them,
+// is TestATitleTheSessionWasGivenIsReadFromThePayload.
 func TestTheBestNameClaudeHasIsTheOneReported(t *testing.T) {
 	var payload Payload
 	if err := json.Unmarshal([]byte(realPostTool), &payload); err != nil {
@@ -200,6 +200,11 @@ func TestTheBestNameClaudeHasIsTheOneReported(t *testing.T) {
 	}
 
 	renamed := ClaudeSession{Name: "an-picker", NameSource: "user"}
+	// [verified 2026-10-09, 2.1.285] What the file says after a
+	// UserPromptSubmit hook returned a `sessionTitle`, and after a session was
+	// started with `CLAUDE_CODE_SESSION_NAME` (D-88).
+	hooked := ClaudeSession{Name: "ups-named-probe", NameSource: "hook"}
+	launched := ClaudeSession{Name: "clash-probe"}
 	placeholder := ClaudeSession{Name: "agent-notify-16", NameSource: "derived"}
 	labelled := ClaudeSession{Name: "session-naming", NameSource: "auto"}
 	const titled = "Fix configuration resetting tab name"
@@ -211,6 +216,8 @@ func TestTheBestNameClaudeHasIsTheOneReported(t *testing.T) {
 		want   string
 	}{
 		{"a rename beats everything", renamed, titled, "an-picker"},
+		{"so does a hook's title", hooked, titled, "ups-named-probe"},
+		{"and a name with no source", launched, titled, "clash-probe"},
 		{"a title beats a placeholder", placeholder, titled, titled},
 		{"a title beats a label", labelled, titled, titled},
 		{"a label beats a placeholder", labelled, "", "session-naming"},
@@ -221,6 +228,59 @@ func TestTheBestNameClaudeHasIsTheOneReported(t *testing.T) {
 			report, worth := Translate("PostToolUse", payload, one.claude, ClaudeTranscript{}, one.title)
 			if !worth {
 				t.Fatal("PostToolUse was ignored")
+			}
+			if report.Name != one.want {
+				t.Errorf("Name = %q, want %q", report.Name, one.want)
+			}
+		})
+	}
+}
+
+// The two hooks that carry `session_title`, as Claude sent them. [captured
+// 2026-09-20 and 2026-09-21] A resume is the SessionStart that carries it most
+// often, and it runs before Claude has written the session file.
+const (
+	realTitledPrompt = `{"session_id":"6a77f40b-ad62-44f2-abe8-489f37e5e59c",
+	  "transcript_path":"/Users/x/.claude/projects/p/6a77f40b.jsonl",
+	  "cwd":"/Users/x/projects/personal/agent-notify","prompt_id":"6f5e1c9d",
+	  "permission_mode":"auto","hook_event_name":"UserPromptSubmit",
+	  "prompt":"this implementation seems stratificated. i'd rather have a single function",
+	  "session_title":"cobra-completer"}`
+
+	realTitledResume = `{"session_id":"438c513c-5772-41c4-a662-1b3b5dc28ea3",
+	  "transcript_path":"/Users/x/.claude/projects/p/438c513c.jsonl",
+	  "cwd":"/Users/x/projects/personal/agent-notify","hook_event_name":"SessionStart",
+	  "source":"resume","session_title":"wholeness"}`
+)
+
+// TestATitleTheSessionWasGivenIsReadFromThePayload is the rung above the file
+// (D-88). It is the only name there is on a SessionStart, which runs before
+// Claude writes the file, and the only one at all for a title a SessionStart
+// hook gave, which never reaches the file — so it wins over whatever the file
+// holds, and is reported when the file holds nothing.
+func TestATitleTheSessionWasGivenIsReadFromThePayload(t *testing.T) {
+	placeholder := ClaudeSession{Name: "p1-hooktitle-4a", NameSource: "derived"}
+	labelled := ClaudeSession{Name: "session-naming", NameSource: "auto"}
+
+	for _, one := range []struct {
+		what, hook, payload string
+		claude              ClaudeSession
+		title               string
+		want                string
+	}{
+		{"over a placeholder", "UserPromptSubmit", realTitledPrompt, placeholder, "", "cobra-completer"},
+		{"over Claude's title and label", "UserPromptSubmit", realTitledPrompt, labelled,
+			"Fix configuration resetting tab name", "cobra-completer"},
+		{"before the file exists", "SessionStart", realTitledResume, ClaudeSession{}, "", "wholeness"},
+	} {
+		t.Run(one.what, func(t *testing.T) {
+			var payload Payload
+			if err := json.Unmarshal([]byte(one.payload), &payload); err != nil {
+				t.Fatalf("the fixture is not JSON: %v", err)
+			}
+			report, worth := Translate(one.hook, payload, one.claude, ClaudeTranscript{}, one.title)
+			if !worth {
+				t.Fatalf("%s was ignored", one.hook)
 			}
 			if report.Name != one.want {
 				t.Errorf("Name = %q, want %q", report.Name, one.want)

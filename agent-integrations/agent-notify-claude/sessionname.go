@@ -13,20 +13,21 @@ import (
 	"strings"
 )
 
-// The hook payload carries neither, on the hooks that matter. [verified
-// 2026-09-19, 2.1.236] Every hook input Claude built was spread from the same
-// six fields — session_id, transcript_path, cwd, prompt_id, permission_mode and
-// the agent pair — and the name was not among them.
+// The hook payload carries the name on two hooks of the nine, and only when
+// somebody gave the session one. [verified 2026-09-19, 2.1.236] Every hook
+// input Claude built was spread from the same six fields — session_id,
+// transcript_path, cwd, prompt_id, permission_mode and the agent pair — and the
+// name was not among them.
 //
-// [verified 2026-09-22, 2.1.267] That has since half changed, and the half
-// matters. Claude began sending `session_title` on 2026-09-20; 225 of 23,984
-// captured payloads carry one, and every value is a `/rename` somebody typed —
-// so it is the top rung of the three and never the other two. It rides on
-// `UserPromptSubmit` and `SessionStart` alone, which is two of the nine hooks
-// this program subscribes to, so a name taken from it would be a name that
-// arrives on a prompt and not on the tool call after it. The file below answers
-// on all nine and is the only source for `nameSource`, so the file is still
-// what is read; the payload agrees with it wherever both speak.
+// [verified 2026-10-09, 2.1.285] Since 2026-09-20 `UserPromptSubmit` and
+// `SessionStart` carry `session_title`: 910 of 47,742 captured payloads have
+// one, on those two hooks and no other, and it is only ever a title somebody
+// gave — a `/rename`, `--name`, or a hook's `sessionTitle`. Translate reads it
+// first (D-88). That it arrives on a prompt and not on the tool call after it
+// costs nothing, because an empty name leaves the stored one alone; and it is
+// the only place a title given by a SessionStart hook ever appears, because that
+// one never reaches the file below. The file is still read on every hook: it
+// holds the names the payload does not carry, and the directory.
 //
 // `session_name` remains the statusLine command's alone, which is a slot the
 // user owns and this program will not take.
@@ -57,33 +58,42 @@ const (
 	pidVariable = "CLAUDE_PID"
 )
 
-// The four things `nameSource` can say, of which two are a name and two are a
-// placeholder. [verified 2026-09-22, 2.1.267] The schema in the binary
-// enumerates `["user","auto","collision"]` and a second code path writes
-// `"derived"`; this machine's live sessions carry `user` and `derived`.
+// What `nameSource` can say. [verified 2026-10-09, 2.1.285] The binary accepts
+// six values — `user`, `hook`, `auto`, `derived`, `collision` and `peer` — and
+// a session started with `CLAUDE_CODE_SESSION_NAME` gets a file with a name and
+// no `nameSource` at all. `derived` is the placeholder. `collision` is what is
+// left when two live sessions want one name, behind a flag that is off on this
+// machine, so it has never been seen here and is treated as a placeholder.
+// `peer` was not traced.
 const (
-	// nameAHumanChose is a `/rename`, typed or accepted. It is the best name
-	// anything has for a session, because somebody decided it.
+	// nameAHumanChose is a `/rename` or `--name`, typed or accepted. It is the
+	// best name anything has for a session, because somebody decided it.
 	nameAHumanChose = "user"
+	// nameAHookChose is the `sessionTitle` a UserPromptSubmit hook returned.
+	// [verified 2026-10-09, 2.1.285] One returned by a SessionStart hook is
+	// written to the transcript and carried by the next payload, and never
+	// reaches this file: its `nameSource` stays `derived`.
+	nameAHookChose = "hook"
 	// nameClaudeGenerated is Claude's own label for the session, written by a
 	// side query that is told to produce at most five lowercase words and to
 	// "skip generic verbs like fix/add/update". [verified 2026-09-22, 2.1.267]
 	// It is written on the bridge path — remote and cloud sessions — and not on
 	// an ordinary interactive one, so it is read here rather than relied on.
+	// The 2.1.285 binary also writes it when a plan is approved; that has not
+	// been seen.
 	nameClaudeGenerated = "auto"
 )
 
 // ClaudeSession is the part of that file this program reads. Claude writes a
 // dozen more fields and will write more; they are none of our business.
 //
-// The two placeholder sources, `derived` and `collision`, are both
-// `<cwd-basename>-<counter>` — `agent-notify-16` — and the name is still
-// reported when that is all there is. The counter looked like noise beside
-// core's own fallback, which is that basename without it, and it is the only
-// thing that tells three sessions in one repository apart: throwing it away
-// made all three read `agent-notify`. What `nameSource` buys is the order — a
-// placeholder now sorts below Claude's own title and below the first prompt
-// (sessiontitle.go), and above nothing else.
+// The placeholder is the last component of the directory and one random byte
+// in hex — `agent-notify-16`. [verified 2026-10-09, 2.1.285] It is
+// `randomBytes(1)` in the binary and not a counter: two sessions started in the
+// same second were `-4a` and `-2a`. It is read and never reported (D-75): core's
+// own fallback is the directory plus two characters of the session id, which
+// tells sessions in one repository apart just as well and is the same for every
+// agent.
 type ClaudeSession struct {
 	SessionID  string `json:"sessionId"`
 	Name       string `json:"name"`
@@ -91,17 +101,25 @@ type ClaudeSession struct {
 	Cwd        string `json:"cwd"`
 }
 
-// NameAHumanChose is the name if somebody decided it, and nothing otherwise.
-func (session ClaudeSession) NameAHumanChose() string {
-	if session.NameSource == nameAHumanChose {
+// NameSomebodyChose is the name if a person or a hook decided it, and nothing
+// otherwise.
+//
+// A name with no `nameSource` is one of them. [verified 2026-10-09, 2.1.285] It
+// is how Claude files a session started with `CLAUDE_CODE_SESSION_NAME`, which
+// the binary itself labels `user` and the file leaves out. Claude strips that
+// variable from a hook's environment, so this file is the only place the name
+// exists.
+func (session ClaudeSession) NameSomebodyChose() string {
+	switch session.NameSource {
+	case nameAHumanChose, nameAHookChose, "":
 		return session.Name
 	}
 	return ""
 }
 
 // NameClaudeGenerated is the name if Claude wrote it as a label, and nothing
-// otherwise — in particular nothing for the `<cwd-basename>-<counter>` it
-// stamps on a session that has no name at all.
+// otherwise — in particular nothing for the placeholder it stamps on a session
+// that has no name at all.
 func (session ClaudeSession) NameClaudeGenerated() string {
 	if session.NameSource == nameClaudeGenerated {
 		return session.Name

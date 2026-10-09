@@ -86,7 +86,7 @@ call instead of waiting for a hook that happens to be special.
 | `event` | the hook name, and sometimes `source` / `agent_type` / `notification_type` | one of the nine, see [the mapping](#the-mapping) |
 | `detail` | this program | lowercase-kebab, by the shared convention of §A5.8 |
 | `message` | `prompt`, `last_assistant_message`, `message` or `error_details` | blank is not a message: it is reported as nothing, which means "leave the stored one alone" |
-| `name` | `~/.claude/sessions/<pid>.json`, then the transcript's `ai-title` | the best of three, or nothing at all |
+| `name` | the payload's `session_title`, then `~/.claude/sessions/<pid>.json`, then the transcript's `ai-title` | the best of four, or nothing at all |
 | `cwd` | that same session file, falling back to the payload | the session's own directory, not the one the tool ran in |
 | `model` | the newest assistant line of the transcript | the payload does not carry one |
 | `spent` | every response in one read of the tail of the transcript | oldest first; core adds up what it has not counted |
@@ -446,10 +446,15 @@ fixtures in `mapping_test.go` are what it chose.
 
 ## The name and the directory
 
-Claude puts neither the session's name nor the session's own directory in the
-hook payload — [verified 2026-09-19, 2.1.236] every hook input is built from the
-same six fields — so `sessionname.go` reads the file Claude keeps for each live
-session instead:
+Claude puts the session's own directory in no hook payload, and the session's
+name in two of them, and only when somebody gave the session one. [verified
+2026-09-19, 2.1.236] every hook input was built from the same six fields.
+[verified 2026-10-09, 2.1.285] Since 2026-09-20 `UserPromptSubmit` and
+`SessionStart` carry `session_title` — 910 of 47,742 captured payloads, on those
+two hooks and no other — and it is only ever a title somebody gave: a `/rename`,
+`--name`, or a hook's `sessionTitle`. It is read first (D-88), and two hooks are
+enough because an empty name leaves the stored one alone. Everything else
+`sessionname.go` reads from the file Claude keeps for each live session:
 
 ```
 ~/.claude/sessions/<pid>.json
@@ -464,21 +469,31 @@ was found: pids are reused, and `/clear` replaces the session inside a process
 without the file changing its name.
 
 **That file is not the only place a name can come from, and on its own it is
-usually the worst one.** `nameSource` says which of four things produced the
-name, and two of the four are not names at all: `derived` and `collision` are
-both `<cwd-basename>-<counter>`. So `sessiontitle.go` reads the head of the
-transcript as well, where Claude writes down what the session is about:
+usually the worst one.** `nameSource` says what produced the name. [verified
+2026-10-09, 2.1.285] The binary accepts six values: `user` is a `/rename` or
+`--name`, `hook` is the `sessionTitle` a `UserPromptSubmit` hook returned, `auto`
+is Claude's own label, `derived` is the placeholder — the last component of the
+directory and one random byte in hex, `agent-notify-16` — and `collision` and
+`peer` have not been seen here. A session started with
+`CLAUDE_CODE_SESSION_NAME` gets a name and no `nameSource` at all, and that is
+a name somebody chose too: Claude strips the variable from a hook's environment,
+so the file is the only place it exists. A title a `SessionStart` hook returned
+never reaches the file; it is in the next payload and nowhere else.
+
+So `sessiontitle.go` reads the head of the transcript as well, where Claude
+writes down what the session is about:
 
 ```
 ~/.claude/projects/<slug>/<session-id>.jsonl
 {"type":"ai-title","aiTitle":"Fix Sketchybar display on external monitors",…}
 ```
 
-and the report carries the best of three, or nothing at all:
+and the report carries the best of four, or nothing at all:
 
 | | where | what it looks like |
 | --- | --- | --- |
-| a person's `/rename` | `nameSource: user` | `an-picker` |
+| a title the session was given | the payload's `session_title` | `cobra-completer` |
+| a name a person or a hook chose | `nameSource: user`, `hook`, or none | `an-picker` |
 | Claude's title for the session | `ai-title` in the transcript | `Fix Sketchybar display on external monitors` |
 | Claude's label for the session | `nameSource: auto` | `session-naming` |
 | **nobody has named it** | — | **nothing is reported** |
@@ -492,7 +507,9 @@ still documents a custom title as one that "skips automatic title generation",
 so this is a path that stopped firing rather than a field that went away. It is
 read anyway: it costs one open and one read of a file `usage.go` has just read
 from the other end, and the day it comes back every unnamed session is better
-named for nothing.
+named for nothing. [verified 2026-10-09, 2.1.285] Still dark: none of the 206
+transcripts on this machine holds one, and an interactive session driven
+through a prompt wrote none.
 
 **The head is read once, forwards, and 64 KiB of it.** That is the opposite of
 `usage.go`, and for the opposite reason: the title is written at the beginning

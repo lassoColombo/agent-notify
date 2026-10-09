@@ -34,6 +34,10 @@ import (
 // from the other end, and the day it comes back every unnamed session is better
 // named for nothing.
 //
+// [verified 2026-10-09, 2.1.285] Still dark. None of the 206 transcripts on
+// this machine holds one — the 26 above have since been cleaned away by age —
+// and an interactive session driven through a prompt wrote none.
+//
 // What is deliberately **not** read is the first prompt below it. It is always
 // there and it says what the session is about, and it is still not a name: it
 // is prose, it would have to be cut to fit anywhere, and reporting it would
