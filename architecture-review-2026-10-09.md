@@ -49,6 +49,13 @@ a decision in `agent-notify/plan.md` §A19.
   the SDK returns the logger core already opened for the process; zellij and
   the notifier use it, `logs.Open` is gone, and `logs` lives under
   `internal/`, so the layering test's doors are five.
+- **`session` carries three vocabularies** (D-96, resolved rather than
+  relocated). Moving `View`, `Capabilities` and `LastShown` under `subscribe`
+  would have the session-watcher, `containers` and `tail` import a door that
+  imports core's internals, so the protocol stays on the floor and the
+  package doc now names its three kinds and why. The two exports nothing
+  outside the package used, `EachFieldMoved` and `MaxKeyBytes`, are private;
+  a display reaches the sweep through `FieldsRenderedButNotWokenFor` alone.
 - **Dead since D-87.** `JustArrived`, `Arrival`, `Announced`, `Same` and
   `moreRecent` in `session/display.go`, with `arrival_test.go`, had no caller
   once the menu bar went. `plural` in the notifier's `preview.go` likewise.
@@ -59,23 +66,7 @@ a decision in `agent-notify/plan.md` §A19.
 Ordered by what they cost, most first. Each names the code and the shape of
 the fix; none is started.
 
-### 1. `session` carries three vocabularies
-
-- The package is documented as the floor that "speaks nothing", and that is
-  true of its imports. It now exports about 140 symbols of three kinds: the
-  vocabulary (`Kernel`, `Event`, `Record`, `Reduce`, `Apply`, `Key`, the text
-  bounds), the display rules R24 puts in one place (`DisplayName`, `ByUrgency`,
-  `Palette`, `Differs`, `Ago`), and SDK machinery — `LastShown` (stateful),
-  `View` and `Capabilities` (the protocol between core and a tool-integration),
-  and `EachFieldMoved`, a reflection-driven mutator that exists to feed one
-  test in each display.
-- Anything exported lands here because `layering_test.go` allows six doors and
-  this is the one with no dependencies. The protocol and memory types read more
-  honestly under `subscribe`; the test helper under a `sessiontest` package so
-  its purpose is in its path. This is a relocation, not new weight, and it is
-  the lowest-value item here.
-
-### 2. `hook.Main` asks for the payload twice
+### 1. `hook.Main` asks for the payload twice
 
 - `hook.Main(arguments, usage, named, payload any, translate func() (Report,
   bool))` takes a pointer to decode into and a closure that captures the same
@@ -83,7 +74,7 @@ the fix; none is started.
 - `Main[P any](arguments, usage, named, translate func(P) (session.Report,
   bool))` decodes into a fresh `P` and hands it over.
 
-### 3. Housekeeping
+### 2. Housekeeping
 
 - Four stale git worktrees under `.claude/worktrees/` and
   `agent-notify/.claude/worktrees/` hold older trees, including sketchybar and

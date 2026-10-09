@@ -23,7 +23,7 @@ import (
 //
 // They are real fields and naming one is not refused: a list that also names
 // something live is perfectly reasonable, and refusing would need a guess
-// about intent. They are excluded from [EachFieldMoved] because a sweep that
+// about intent. They are excluded from [eachFieldMoved] because a sweep that
 // included them would ask every display to wake on `key`.
 var settledFields = map[string]bool{"key": true, "created_at": true}
 
@@ -92,7 +92,7 @@ func FieldsWorthWakingFor() []string {
 func FieldsRenderedButNotWokenFor(base Record, wakeOn []string, render func(Record) string) []string {
 	var missing []string
 	was := render(base)
-	for field, moved := range EachFieldMoved(base) {
+	for field, moved := range eachFieldMoved(base) {
 		if render(moved) != was && !slices.Contains(wakeOn, field) {
 			missing = append(missing, field)
 		}
@@ -101,34 +101,26 @@ func FieldsRenderedButNotWokenFor(base Record, wakeOn []string, render func(Reco
 	return missing
 }
 
-// EachFieldMoved is one copy of base per field, each differing from base in
-// exactly that one field.
-//
-// It is here so that a display can DISCOVER what its own renderer reads rather
-// than declare it from memory. Every renderer in this system is a pure
-// function of records, so the question "does my output depend on this field"
-// is answerable by asking it twice:
-//
-//	for field, moved := range session.EachFieldMoved(base) {
-//	    if renders(base) != renders(moved) && !slices.Contains(wakeOn, field) {
-//	        t.Errorf("the render moves with %q and this display does not wake for it", field)
-//	    }
-//	}
-//
-// That test is the one that would have caught D-72, and it catches the next
-// one without anybody having to think of it: a field added to a render is a
-// field the test immediately demands in the declaration.
+// eachFieldMoved is one copy of base per field, each differing from base in
+// exactly that one field. It is the sweep [FieldsRenderedButNotWokenFor] is
+// built on, and that function is the whole of what a display sees of it: a
+// display DISCOVERS what its renderer reads rather than declaring it from
+// memory, because every renderer in this system is a pure function of
+// records and "does my output depend on this field" is answerable by
+// rendering twice. That test is the one that would have caught D-72, and it
+// catches the next one without anybody having to think of it.
 //
 // It is core's rather than each display's for the usual reason. Producing a
 // value that is genuinely different for every field of a record — a time, a
 // kernel that is still a real kernel, a map, a raw JSON message — is fiddly
 // enough that four repositories would get it four subtly different kinds of
 // wrong, and a mutation that failed to move anything would read as "my
-// renderer does not use this field" and pass.
+// renderer does not use this field" and pass. Its contract has tests of its
+// own, which is why export_test.go lends it a public name.
 //
 // [settledFields] are left out: they cannot move, so nothing can be woken by
 // them.
-func EachFieldMoved(base Record) map[string]Record {
+func eachFieldMoved(base Record) map[string]Record {
 	moved := make(map[string]Record, len(recordFields))
 	shape := reflect.TypeOf(Record{})
 	for i := range shape.NumField() {

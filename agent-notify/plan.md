@@ -5069,6 +5069,33 @@ of this section is that it prevents re-litigating.
     environment table; no integration names it in code, and the watcher
     hands it down the tree as before.
 
+- **D-96** (2026-10-09) — **The words core and a tool-integration exchange
+  stay in `session`, and the sweep behind the wake-on test is not public.**
+  Resolves the architecture review's last point about `session`, which read
+  the package as three vocabularies — the record, the display rules, and SDK
+  machinery — and proposed moving `View`, `Capabilities` and `LastShown`
+  under `subscribe` and the field mover under a `sessiontest` package.
+  - **The relocation would invert the layering.** `View` and `Capabilities`
+    are spoken by the session-watcher, `containers`, `tail` and the SDK
+    alike, and `LastShown` by the watcher's renderer and `subscribe.Run`.
+    `subscribe` imports `internal/core`; an internal package importing
+    `subscribe` to name the view it hands over would have the floor depend
+    on a door. The doors that internals import today — `session`,
+    `container`, `tool` — are the ones that import nothing of ours, and
+    that is the property that makes them importable from below. A fourth
+    leaf door for eight symbols is the package-for-two-symbols this
+    package's own doc refuses (D-80).
+  - **So the package doc now names its three kinds and says why all three
+    are here.** The display rules were already decided into this package
+    (D-30); the protocol is decided in by this entry.
+  - **What did shrink.** `EachFieldMoved` had no caller outside the package
+    but its own tests, and a doc that invited displays to call it directly;
+    it is `eachFieldMoved` now, lent a public name by `export_test.go` for
+    its contract tests, and a display reaches it through
+    `FieldsRenderedButNotWokenFor` alone. `MaxKeyBytes` likewise had no
+    reader outside and is `maxKeyBytes`. Those were the only two exports
+    nothing outside the package referenced.
+
 **The payload discussion of 2026-09-17 is now ratified**
  in D-10 through D-18.
 What is still marked [proposed] elsewhere — the field list of §A7.4, the event

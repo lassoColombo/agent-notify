@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-// MaxKeyBytes bounds the encoded key, which becomes a filename.
-const MaxKeyBytes = 200
+// maxKeyBytes bounds the encoded key, which becomes a filename.
+const maxKeyBytes = 200
 
 // Key identifies a session (plan.md §A6).
 //
@@ -64,9 +64,9 @@ func (k Key) ReasonThisKeyCannotBeUsed() error {
 			return fmt.Errorf("a session key needs its %s", part.name)
 		}
 	}
-	if size := len(k.String()); size > MaxKeyBytes {
+	if size := len(k.String()); size > maxKeyBytes {
 		return fmt.Errorf("the encoded session key is %d bytes, over the %d a filename may take: %s",
-			size, MaxKeyBytes, k.String())
+			size, maxKeyBytes, k.String())
 	}
 	return nil
 }

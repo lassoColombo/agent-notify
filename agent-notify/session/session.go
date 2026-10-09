@@ -12,6 +12,16 @@
 // control. That boundary is deliberate — see plan.md §A10.4 — and it is what
 // makes this package's shape worth thinking about at all.
 //
+// Three kinds of thing live here, and the floor is why all three do (D-96):
+// the vocabulary itself — [Record], [Kernel], [Event], [Reduce], [Key], the
+// bounds; the rules every display would compute identically and so computes
+// once (R24, D-30) — [DisplayName], [ByUrgency], [Palette], [Differs], [Ago];
+// and the words core and a tool-integration exchange — [Capabilities], [View],
+// [Change] and [LastShown]. The last could read as the SDK's, but the
+// session-watcher and the commands speak them too, and the SDK imports core's
+// internals, so putting them under subscribe would have an internal package
+// import a door. The one place both sides can reach is here.
+//
 // Nothing here is promised to survive [D-77]. Every integration in this system
 // is built from this source and released with it, so a symbol that stops being
 // useful is deleted rather than kept for a reader that does not exist. That is
