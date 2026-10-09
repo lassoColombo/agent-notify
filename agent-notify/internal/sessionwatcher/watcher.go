@@ -56,9 +56,16 @@ type Watcher struct {
 	// startup and on reload; unanswered is why one did not say.
 	answers    map[string]session.Capabilities
 	unanswered map[string]string
+	// containers is [container] order resolved against those answers, which
+	// is the one piece of configuration the deriving goroutine reads.
+	containers []containers.Container
 
 	// renderers is one per display core runs.
 	renderers map[string]*renderer
+
+	// derivations is how reconcile asks the deriving goroutine to look at the
+	// store; one pending ask is enough, as with woken.
+	derivations chan struct{}
 }
 
 // Start takes the lock and opens the watches. Losing the race for the lock is
@@ -128,10 +135,25 @@ func (w *Watcher) Run(ctx context.Context) error {
 		"state", w.opened.Layout.State, "runtime", w.opened.Layout.Runtime)
 
 	w.askWhatEachIntegrationAnswers()
+	w.resolveContainers()
 	w.startRenderers(ctx)
 	// The answers are a property of the programs on disk, asked here and on
 	// reload, so the report is written at those two moments and no other.
 	w.writeReport(w.opened.Settings)
+
+	// Interpretation talks to the tool under its own timeout (D-38), so it
+	// runs beside the loop rather than on it: an exit or a store wake is never
+	// queued behind zellij. What it derives it writes through the store, and
+	// that write wakes the loop, which draws (D-91).
+	w.derivations = make(chan struct{}, 1)
+	var deriving sync.WaitGroup
+	deriving.Add(1)
+	go func() {
+		defer deriving.Done()
+		w.deriveWhenAsked(ctx)
+	}()
+	defer deriving.Wait()
+
 	// Reconciling from the store at startup is what makes every missed wake-up
 	// harmless (§A9.1, R4).
 	w.reconcile("startup")
@@ -209,7 +231,12 @@ func (w *Watcher) reconcile(why string) {
 		w.logger.Warn("reading the store", "why", why, "problem", err.Error())
 	}
 
-	live = w.derive(live)
+	// Derivation is asked for, not waited for; what it finds comes back as a
+	// store wake.
+	select {
+	case w.derivations <- struct{}{}:
+	default:
+	}
 
 	for _, record := range live {
 		if record.Process.PID > 0 {
@@ -228,11 +255,9 @@ func (w *Watcher) reconcile(why string) {
 	w.drawEverythingAgain()
 }
 
-// derive runs each container's `interpret-environment` on what the hook
-// captured, here rather than in the hook because this half talks to the tool
-// (D-27). A container is asked once per session per capture: replacing a
-// capture voids what was derived from it (§A7.4.1).
-func (w *Watcher) derive(live []session.Record) []session.Record {
+// resolveContainers reads [container] order against what each integration
+// answered, once per ask, so the deriving goroutine never touches Settings.
+func (w *Watcher) resolveContainers() {
 	w.mu.Lock()
 	answers := w.answers
 	w.mu.Unlock()
@@ -240,11 +265,39 @@ func (w *Watcher) derive(live []session.Record) []session.Record {
 	for _, problem := range problems {
 		w.complainOnce(problem.Error())
 	}
-	if len(configured) == 0 {
-		return live
-	}
+	w.mu.Lock()
+	w.containers = configured
+	w.mu.Unlock()
+}
 
-	updated := make([]session.Record, 0, len(live))
+// deriveWhenAsked is the deriving goroutine: each ask is one read of the
+// store and one derive over it. A newer ask that arrives while it works
+// waits in the channel, so a capture written mid-derive is seen next time.
+func (w *Watcher) deriveWhenAsked(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-w.derivations:
+			live, err := w.opened.Store.List()
+			if err != nil {
+				w.logger.Warn("reading the store to derive", "problem", err.Error())
+				continue
+			}
+			w.derive(live)
+		}
+	}
+}
+
+// derive runs each container's `interpret-environment` on what the hook
+// captured, here rather than in the hook because this half talks to the tool
+// (D-27). A container is asked once per session per capture: replacing a
+// capture voids what was derived from it (§A7.4.1).
+func (w *Watcher) derive(live []session.Record) {
+	w.mu.Lock()
+	configured := w.containers
+	w.mu.Unlock()
+
 	for _, record := range live {
 		for _, one := range configured {
 			captured, present := record.CapturedContext.By[one.Name]
@@ -274,7 +327,7 @@ func (w *Watcher) derive(live []session.Record) []session.Record {
 				continue
 			}
 
-			written, err := w.opened.Store.Update(record.Key, time.Now().UTC(),
+			_, err = w.opened.Store.Update(record.Key, time.Now().UTC(),
 				func(previous session.Record) session.Record {
 					next := previous.Clone()
 					// A capture replaced while this ran must not get the old
@@ -294,11 +347,8 @@ func (w *Watcher) derive(live []session.Record) []session.Record {
 				continue
 			}
 			w.logger.Info("placed", "container", one.Name, "session", record.Key.String())
-			record = written
 		}
-		updated = append(updated, record)
 	}
-	return updated
 }
 
 // isEmptyObject is what an integration with nothing to read captured.
@@ -380,11 +430,11 @@ func (w *Watcher) reloadConfiguration(ctx context.Context) {
 	w.opened.Settings = settings
 
 	w.askWhatEachIntegrationAnswers()
-	w.startRenderers(ctx)
-
 	w.mu.Lock()
 	w.refused, w.complained = nil, nil
 	w.mu.Unlock()
+	w.resolveContainers()
+	w.startRenderers(ctx)
 
 	w.writeReport(w.opened.Settings)
 	w.logger.Info("configuration re-read")

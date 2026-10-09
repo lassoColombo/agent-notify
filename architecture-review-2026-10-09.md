@@ -2,7 +2,7 @@
 
 A read of all seven modules for separation of concerns, abstraction and
 correctness, after M17. The bus (D-83) and the layering (D-80) hold; what is
-left is one bug, a handful of places that do one job twice, and one package
+left is two bugs, a handful of places that do one job twice, and one package
 that has become the default home for anything exported. Nothing here reverses
 a decision in `agent-notify/plan.md` §A19.
 
@@ -19,6 +19,16 @@ a decision in `agent-notify/plan.md` §A19.
   swapped underscores; codex's also split camelCase. §A5.8 says details are one
   namespace across agents, so the rule is `hook.Detail`, once, and both
   adapters call it.
+- **One failing capture voided every container's coordinates** (D-90). The
+  hook asks only the integrations with no entry, and `session.Apply` merges
+  what they answer under their own names, voiding only what was derived from
+  those. A new process still replaces the whole capture. One rule,
+  `Record.CaptureIsStale`, decides which case both are in.
+- **`interpret-environment` held every draw** (D-91). `reconcile` ran it
+  synchronously, 5s per (session, container), so an exit or a finished turn
+  waited behind zellij. It now runs on its own goroutine with a one-slot ask
+  channel, writes through the store, and the write wakes the loop.
+  `TestASlowContainerDoesNotDelayADraw` fails on the old loop.
 - **Dead since D-87.** `JustArrived`, `Arrival`, `Announced`, `Same` and
   `moreRecent` in `session/display.go`, with `arrival_test.go`, had no caller
   once the menu bar went. `plural` in the notifier's `preview.go` likewise.
@@ -29,34 +39,7 @@ a decision in `agent-notify/plan.md` §A19.
 Ordered by what they cost, most first. Each names the code and the shape of
 the fix; none is started.
 
-### 1. One failing capture voids every container's coordinates
-
-- `hook.worthCapturing` (`agent-notify/hook/hook.go`) recaptures whenever the
-  set of integrations that answered differs from the set that would be asked.
-  `session.Apply` then replaces `CapturedContext` whole and sets
-  `DerivedContext` to nil.
-- So aerospace timing out once makes the next hook capture zellij again and the
-  session-watcher run `zellij action list-panes` for it again, up to
-  `attemptsBeforeGivingUp` times, for a session whose zellij answer never
-  changed.
-- Both maps are already keyed per integration. The fix is to replace
-  `CapturedContext.By[name]` and void `DerivedContext[name]` per key, and to
-  decide "worth capturing" per integration rather than per record. The
-  invariant §A7.4.1 wants — a derived entry never outlives the capture it came
-  from — is kept per key just as well.
-
-### 2. `interpret-environment` runs on the control loop
-
-- `Watcher.derive` is called inside `reconcile`, synchronously, with a 5s
-  timeout per (session, container) and up to three attempts. While it runs,
-  exit notifications and store wakes sit in the one-slot channel and nothing
-  is drawn.
-- The loop already wakes itself when it writes a record ("a record it writes
-  itself wakes it once more"), so derivation can run on its own goroutine and
-  write through the store with no new mechanism. The refusal counter it keeps
-  already lives behind `w.mu`.
-
-### 3. Liveness is computed N+1 times per change
+### 1. Liveness is computed N+1 times per change
 
 - `reconcile` judges every live pid through `process.Ended`, then each renderer
   calls `Core.WhatIsRunning` (`internal/sessionwatcher/render.go`), which lists
@@ -66,7 +49,7 @@ the fix; none is started.
   true if `reconcile` reads the world once (ended included) and hands it to the
   renderers, each of which drops ended sessions unless it asked for them.
 
-### 4. Core captures a process chain nobody reads
+### 2. Core captures a process chain nobody reads
 
 - `hook.look` walks the ancestry and stores it as `captured_context.ancestry`
   (`session/record.go`). Outside tests the only reference to the field is
@@ -81,7 +64,7 @@ the fix; none is started.
   a chain on every record and let aerospace keep its own. The first keeps
   §A8.4's chain where `doctor` could one day show it; the second is less code.
 
-### 5. The render decision is written twice
+### 3. The render decision is written twice
 
 - `subscribe/run.go` and `internal/sessionwatcher/render.go` both do
   `LastShown.Replace`, then "first view, or something changed, or something
@@ -89,7 +72,7 @@ the fix; none is started.
 - One method on `LastShown` — replace the world and answer with the view to
   hand over, or nothing — serves both.
 
-### 6. Integrations open the log twice
+### 4. Integrations open the log twice
 
 - zellij's `main.go` and the notifier's `main.go` and `alerter.go` call
   `logs.Open(Name)` while `subscribe.Integration.core()` has already opened a
@@ -99,7 +82,7 @@ the fix; none is started.
   variable that sets the level is reached through `subscribe` like everything
   else.
 
-### 7. `session` carries three vocabularies
+### 5. `session` carries three vocabularies
 
 - The package is documented as the floor that "speaks nothing", and that is
   true of its imports. It now exports about 140 symbols of three kinds: the
@@ -115,7 +98,7 @@ the fix; none is started.
   its purpose is in its path. This is a relocation, not new weight, and it is
   the lowest-value item here.
 
-### 8. `hook.Main` asks for the payload twice
+### 6. `hook.Main` asks for the payload twice
 
 - `hook.Main(arguments, usage, named, payload any, translate func() (Report,
   bool))` takes a pointer to decode into and a closure that captures the same
@@ -123,7 +106,7 @@ the fix; none is started.
 - `Main[P any](arguments, usage, named, translate func(P) (session.Report,
   bool))` decodes into a fresh `P` and hands it over.
 
-### 9. Housekeeping
+### 7. Housekeeping
 
 - Four stale git worktrees under `.claude/worktrees/` and
   `agent-notify/.claude/worktrees/` hold older trees, including sketchybar and
@@ -132,7 +115,11 @@ the fix; none is started.
   `git worktree remove` each, or `git worktree prune` after deleting them.
 - D-84 points at `simplification-plan.md` at the repository root, which no
   longer exists.
-- `TestAnIntegrationIsAskedWhatItAnswers` in `internal/sessionwatcher` failed
-  once under a whole-repository `make test` (the 20s wait for the report
-  expired) and passed on every run since, alone and in the package. Worth
-  watching; it may be the full run contending for the stub binaries.
+- `TestAnIntegrationIsAskedWhatItAnswers` in `internal/sessionwatcher` and
+  `TestStdinReachesTheProgram` in `tool` fail under load: two `go test ./...`
+  of core run at once make a stub program take longer than the 2s
+  `capabilitiesTimeout` and the test's 1s. The first now prints the report,
+  which says so. The timeouts are right for production; what the watcher does
+  with a timed-out `capabilities` is the design point — it records the
+  problem and never asks again until a reload, so a slow first start costs a
+  display until somebody runs `watcher reload`.

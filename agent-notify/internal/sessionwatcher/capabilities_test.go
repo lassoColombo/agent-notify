@@ -26,12 +26,16 @@ func TestAnIntegrationIsAskedWhatItAnswers(t *testing.T) {
 		"[integration.painter]\nbinary = %q\n", binary))
 
 	layout := running(t, root)
-	waitFor(t, "the handshake to be reported", func() bool {
-		one, found := reported(t, layout, "painter")
-		return found && len(one.Answers.Methods) > 0
-	})
-
-	one, _ := reported(t, layout, "painter")
+	var one sessionwatcher.Integration
+	for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); {
+		if one, _ = reported(t, layout, "painter"); len(one.Answers.Methods) > 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if len(one.Answers.Methods) == 0 {
+		t.Fatalf("waited for the handshake to be reported and it never happened; the report says %+v", one)
+	}
 	if !slices.Equal(one.Answers.Methods, []string{session.MethodRender}) {
 		t.Errorf("answers %v, want [render]", one.Answers.Methods)
 	}

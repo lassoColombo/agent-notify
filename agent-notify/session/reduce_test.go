@@ -312,6 +312,7 @@ func TestReplacingTheCapturedContextVoidsWhatWasDerivedFromIt(t *testing.T) {
 
 	resumed := session.Apply(placed, session.Report{
 		Key: key, Event: session.SessionStarted,
+		Process: session.Process{PID: 9999},
 		CapturedContext: &session.CapturedContext{
 			By: map[string]json.RawMessage{"zellij": json.RawMessage(`{"pane_env":"12"}`)},
 		},
@@ -327,5 +328,65 @@ func TestReplacingTheCapturedContextVoidsWhatWasDerivedFromIt(t *testing.T) {
 	}
 	if !resumed.CapturedContext.CapturedAt.Equal(later) {
 		t.Errorf("CapturedAt = %v, want %v", resumed.CapturedContext.CapturedAt, later)
+	}
+}
+
+// TestACaptureForTheSameProcessIsMergedUnderItsOwnName is the other half of
+// D-90: an integration that answers late — installed since, or failing until
+// now — lands beside what is already there, and only what was derived from
+// ITS old entry is void. One container failing must not cost another its
+// placement on every hook.
+func TestACaptureForTheSameProcessIsMergedUnderItsOwnName(t *testing.T) {
+	running := session.Process{PID: 4242}
+	placed := session.Apply(session.Record{}, session.Report{
+		Key: key, Event: session.SessionStarted, Process: running,
+		CapturedContext: &session.CapturedContext{
+			Ancestry: []session.Ancestor{{PID: 4242, Command: "claude"}},
+			By:       map[string]json.RawMessage{"zellij": json.RawMessage(`{"pane_env":"7"}`)},
+		},
+	}, when)
+	placed.DerivedContext = map[string]json.RawMessage{"zellij": json.RawMessage(`{"pane":7,"tab":2}`)}
+
+	// The window manager answered this time; zellij was not asked and is not
+	// on the report.
+	toppedUp := session.Apply(placed, session.Report{
+		Key: key, Event: session.AgentProgressed, Process: running,
+		CapturedContext: &session.CapturedContext{
+			By: map[string]json.RawMessage{"aerospace": json.RawMessage(`{"title":"home | "}`)},
+		},
+	}, later)
+
+	if got := string(toppedUp.CapturedContext.By["zellij"]); got != `{"pane_env":"7"}` {
+		t.Errorf("zellij's capture = %s, want it kept: the process has not changed", got)
+	}
+	if got := string(toppedUp.CapturedContext.By["aerospace"]); got != `{"title":"home | "}` {
+		t.Errorf("aerospace's capture = %s, want what it answered", got)
+	}
+	if got := string(toppedUp.DerivedContext["zellij"]); got != `{"pane":7,"tab":2}` {
+		t.Errorf("zellij's coordinates = %s, want them kept: nothing they came from moved", got)
+	}
+	if len(toppedUp.CapturedContext.Ancestry) != 1 || !toppedUp.CapturedContext.CapturedAt.Equal(when) {
+		t.Errorf("the snapshot's ancestry and time moved on a top-up: %+v", toppedUp.CapturedContext)
+	}
+
+	// The same integration answering again for the same process replaces its
+	// own entry and voids its own coordinates, and nobody else's.
+	toppedUp.DerivedContext["aerospace"] = json.RawMessage(`{"chain":[]}`)
+	again := session.Apply(toppedUp, session.Report{
+		Key: key, Event: session.AgentProgressed, Process: running,
+		CapturedContext: &session.CapturedContext{
+			By: map[string]json.RawMessage{"zellij": json.RawMessage(`{"pane_env":"8"}`)},
+		},
+	}, later)
+	if _, still := again.DerivedContext["zellij"]; still {
+		t.Error("zellij's coordinates survived zellij's own capture being replaced")
+	}
+	if _, kept := again.DerivedContext["aerospace"]; !kept {
+		t.Error("aerospace's coordinates went with zellij's capture")
+	}
+
+	// Mutating the result must not reach the input (Clone).
+	if got := string(placed.CapturedContext.By["zellij"]); got != `{"pane_env":"7"}` {
+		t.Errorf("Apply's merge wrote into its input: %s", got)
 	}
 }

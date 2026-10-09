@@ -18,10 +18,9 @@ import (
 // beyond running the list: each blob is kept under its own integration's name,
 // and neither a failure nor an empty answer leaves an entry behind.
 //
-// An empty answer is kept and a failure is not, and worthCapturing tells them
-// apart: it compares who would be asked against who answered, so a broken
-// integration is asked again on every hook until it is fixed, and one with
-// nothing to read is not.
+// An empty answer is kept and a failure is not, and whoToAsk tells them
+// apart: an integration with no entry is asked again on every hook until it
+// is fixed, and one with nothing to read has its empty object and is not.
 func TestEachAnswerLandsUnderItsOwnName(t *testing.T) {
 	// This test is about routing, not about the bound. Three shell scripts
 	// against the production second is a race with whatever else the machine
@@ -85,15 +84,15 @@ func program(t *testing.T, dir, name, prints string, exit int) string {
 	return path
 }
 
-// TestNothingIsCapturedTwiceForOneUnchangedSession is the point of the whole
-// arrangement: the steady state spawns nothing.
+// TestOnlyWhatIsMissingIsCapturedForOneUnchangedSession is the point of the
+// whole arrangement: the steady state spawns nothing, and a session that is
+// missing one integration's answer spawns that one and no other (D-90).
 //
 // No filesystem and no subprocess anywhere in it, which is itself the claim —
-// the decision is two sorted lists and a pid, and that is exactly why it can be
-// made before anything is run.
-func TestNothingIsCapturedTwiceForOneUnchangedSession(t *testing.T) {
+// the decision is a record, a list and a pid, and that is exactly why it can
+// be made before anything is run.
+func TestOnlyWhatIsMissingIsCapturedForOneUnchangedSession(t *testing.T) {
 	running := session.Process{PID: 4242}
-	asked := []string{"pane"}
 	stored := session.Record{
 		Process: running,
 		CapturedContext: session.CapturedContext{
@@ -103,22 +102,30 @@ func TestNothingIsCapturedTwiceForOneUnchangedSession(t *testing.T) {
 	}
 
 	for _, one := range []struct {
-		what     string
-		previous session.Record
-		asked    []string
-		process  session.Process
-		want     bool
+		what      string
+		previous  session.Record
+		runnable  []string
+		process   session.Process
+		wantAsked []string
+		wantStale bool
 	}{
-		{"nothing stored yet", session.Record{}, asked, running, true},
-		{"nothing moved", stored, asked, running, false},
-		{"the session came back in a new process", stored, asked, session.Process{PID: 9999}, true},
-		{"an integration installed since", stored, []string{"pane", "window"}, running, true},
-		{"an integration removed since", stored, nil, running, true},
+		{"nothing stored yet", session.Record{}, []string{"pane"}, running, []string{"pane"}, true},
+		{"nothing moved", stored, []string{"pane"}, running, nil, false},
+		{"the session came back in a new process", stored, []string{"pane"},
+			session.Process{PID: 9999}, []string{"pane"}, true},
+		{"an integration installed since", stored, []string{"pane", "window"}, running,
+			[]string{"window"}, false},
 		{
-			// The accepted cost of deciding from the configuration: one that is
-			// run and fails is never in `by`, so the sets differ and every hook
-			// tries again until it is fixed (D-58).
-			"one that is asked and keeps failing", stored, []string{"broken", "pane"}, running, true,
+			// Its entry stays with the record and nothing asks for it: the
+			// environment it read has not changed.
+			"an integration removed since", stored, nil, running, nil, false,
+		},
+		{
+			// One that is run and fails is never in `by`, so it alone is asked
+			// again on every hook until it is fixed (D-58) — and the one that
+			// answered is left alone, with what was derived from it.
+			"one that keeps failing", stored, []string{"broken", "pane"}, running,
+			[]string{"broken"}, false,
 		},
 		{
 			// A machine with no capturing integrations stores its ancestry once
@@ -128,7 +135,7 @@ func TestNothingIsCapturedTwiceForOneUnchangedSession(t *testing.T) {
 				Process:         running,
 				CapturedContext: session.CapturedContext{CapturedAt: time.Now().UTC()},
 			},
-			nil, running, false,
+			nil, running, nil, false,
 		},
 		{
 			// An agent whose process could not be found leaves Process zero,
@@ -140,13 +147,23 @@ func TestNothingIsCapturedTwiceForOneUnchangedSession(t *testing.T) {
 					By:         map[string]json.RawMessage{"pane": json.RawMessage(`{}`)},
 				},
 			},
-			asked, session.Process{}, false,
+			[]string{"pane"}, session.Process{}, nil, false,
 		},
 	} {
 		t.Run(one.what, func(t *testing.T) {
-			if got := worthCapturing(one.previous, one.asked, one.process); got != one.want {
-				t.Errorf("worthCapturing = %v, want %v", got, one.want)
+			asked, stale := whoToAsk(one.previous, one.runnable, one.process)
+			if !slices.Equal(asked, one.wantAsked) || stale != one.wantStale {
+				t.Errorf("whoToAsk = %v, %v; want %v, %v", asked, stale, one.wantAsked, one.wantStale)
 			}
 		})
 	}
+}
+
+func owners(by map[string]json.RawMessage) []string {
+	names := make([]string, 0, len(by))
+	for name := range by {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
 }

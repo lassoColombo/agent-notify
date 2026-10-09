@@ -139,9 +139,10 @@ type Ancestor struct {
 // happens later and somewhere else: an integration that was not running when
 // the hook fired interprets this blob when it connects (R4).
 type CapturedContext struct {
-	// CapturedAt is when the hook took this snapshot. Nothing depends on it —
-	// the writer that replaces a captured context clears the derived one in the
-	// same write — but a stale placement is much easier to explain with it.
+	// CapturedAt is when the hook first captured for this process. A capture
+	// topped up later, for an integration that was not there or did not
+	// answer the first time, leaves it alone: it dates the snapshot, and a
+	// top-up is of the same environment (D-90).
 	CapturedAt time.Time `json:"captured_at,omitzero"`
 	// Ancestry is core's own capture, used to recognise which agent this is
 	// (§A8.4) and to resolve the ambient session (§A7.4.2).
@@ -149,6 +150,23 @@ type CapturedContext struct {
 	// By maps an integration's name to whatever its capture-environment
 	// returned. Opaque to core, in both directions (R7).
 	By map[string]json.RawMessage `json:"by,omitempty"`
+}
+
+// CaptureIsStale reports whether what this record captured can no longer be
+// trusted for the agent process a hook has just found, which is the one rule
+// the hook and the reducer share (D-90): the hook asks everybody again when it
+// is true and only the missing when it is false, and Apply replaces the whole
+// capture when it is true and merges per integration when it is false.
+//
+// An agent's environment does not change while its process runs, so a capture
+// is stale in exactly two cases: nothing has been captured for this session,
+// or the process is a different one. A hook that could not find the agent
+// hands over a zero Process, and that is not a changed process.
+func (r Record) CaptureIsStale(agent Process) bool {
+	if r.CapturedContext.CapturedAt.IsZero() {
+		return true
+	}
+	return agent.PID != 0 && agent.PID != r.Process.PID
 }
 
 // Usage is what a session has spent, in the one vocabulary every agent fills

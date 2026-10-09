@@ -1,6 +1,7 @@
 package session
 
 import (
+	"encoding/json"
 	"time"
 )
 
@@ -153,20 +154,37 @@ func Apply(previous Record, report Report, now time.Time) Record {
 	// has spent more is not a session that has been waiting for a shorter time
 	// — the rule Name and the annotations already keep.
 	next.Usage = next.Usage.Adding(report.Spent)
+	if report.CapturedContext != nil {
+		switch {
+		case previous.CaptureIsStale(report.Process):
+			// A new process is a new environment, and everything derived from
+			// the old one is void in the same write. A pane id worked out from
+			// an environment that no longer applies does not become merely out
+			// of date — it points at somebody else's pane, and focusing it
+			// takes you confidently to the wrong place, which §A11.3 calls
+			// worse than not going at all.
+			next.CapturedContext = *report.CapturedContext
+			next.DerivedContext = nil
+			if next.CapturedContext.CapturedAt.IsZero() {
+				next.CapturedContext.CapturedAt = now
+			}
+		default:
+			// The same process, so the same environment: what arrived is a
+			// top-up for integrations that were missing, and only their
+			// entries change. What zellij derived from a capture that has
+			// not moved is still true, and voiding it would have the
+			// session-watcher ask zellij again for nothing (D-90).
+			if next.CapturedContext.By == nil && len(report.CapturedContext.By) > 0 {
+				next.CapturedContext.By = map[string]json.RawMessage{}
+			}
+			for name, blob := range report.CapturedContext.By {
+				next.CapturedContext.By[name] = blob
+				delete(next.DerivedContext, name)
+			}
+		}
+	}
 	if report.Process.PID != 0 {
 		next.Process = report.Process
-	}
-	if report.CapturedContext != nil {
-		// Replacing the captured context voids everything derived from it in
-		// the same write. A pane id worked out from an environment that no
-		// longer applies does not become merely out of date — it points at
-		// somebody else's pane, and focusing it takes you confidently to the
-		// wrong place, which §A11.3 calls worse than not going at all.
-		next.CapturedContext = *report.CapturedContext
-		next.DerivedContext = nil
-		if next.CapturedContext.CapturedAt.IsZero() {
-			next.CapturedContext.CapturedAt = now
-		}
 	}
 	return next
 }

@@ -725,12 +725,15 @@ homes:
 
 | Section | Who writes it | How long it is true |
 | --- | --- | --- |
-| `captured_context` | core, in the hook, on behalf of each integration | until the next capture replaces it |
+| `captured_context.by.<owner>` | core, in the hook, on behalf of each integration | until the agent's process changes, or that integration captures again (D-90) |
 | `derived_context.<owner>` | an integration, interpreting a captured context | exactly as long as the capture it came from |
 | `annotations.<owner>` | anyone, unsolicited — an integration pushing, or a human at the CLI | until its owner overwrites it |
 
 - **The lifetime rule is one line and needs no bookkeeping**: the writer that
   replaces a captured context clears the derived context in the same write.
+  **[amended 2026-10-09 — D-90]** Per integration: replacing `by.zellij`
+  clears `derived_context.zellij` and nothing else, and a new process replaces
+  the whole capture and clears the whole derived context.
   Because that is a single atomic record write (§A7.3), no reader ever compares
   timestamps, and there is no window in which a stale coordinate looks fresh.
 - **Nothing is tagged, because nothing needs to be.** Which section a write
@@ -4886,6 +4889,65 @@ of this section is that it prevents re-litigating.
     went with the repositories. Workspace mode does not make `./...` span
     modules, so the Makefile walks them, honours `GOBIN`, and says where it
     put things and whether that is on your PATH.
+
+- **D-90** (2026-10-09) — **A capture is replaced per integration, and only
+  what was derived from that integration's entry goes with it.** *Amends*
+  §A7.4.1 (the lifetime of `captured_context` is per entry) and D-84's "an
+  empty capture is stored" (the hook no longer compares who was asked with who
+  answered; it asks whoever has no entry). Found by the architecture review of
+  the same day, `architecture-review-2026-10-09.md`.
+
+  - **What was wrong.** `worthCapturing` recaptured whenever the set of
+    integrations that answered differed from the set that would be asked, and
+    `session.Apply` replaced `captured_context` whole and set
+    `derived_context` to nil. So aerospace timing out once made the next hook
+    run zellij's capture again, and the session-watcher run `zellij action
+    list-panes` for it again, up to three attempts, for a session whose
+    zellij answer had not moved. One integration's failure cost every other
+    container its placement, on every hook, until the failure stopped.
+  - **The rule is one, and it is `Record.CaptureIsStale`.** An agent's
+    environment does not change while its process runs, so a capture is
+    stale in two cases only: nothing captured yet, or a different process. The
+    hook asks everybody when it is true and only the integrations with no
+    entry when it is false; `Apply` replaces the whole capture when it is
+    true and merges per name when it is false, voiding `derived_context` for
+    exactly the names that arrived. Both read the same method, so they cannot
+    disagree about which case they are in.
+  - **What a top-up leaves alone.** `captured_at` and `ancestry` date the
+    snapshot of this process and stay; an entry for an integration that has
+    since been removed from the configuration stays too, because nothing it
+    read has changed and nothing asks for it.
+  - **The invariant §A7.4.1 wanted is kept, per key.** A derived entry never
+    outlives the capture it came from; it is still one atomic record write,
+    and no reader compares timestamps.
+
+- **D-91** (2026-10-09) — **`interpret-environment` runs beside the loop, not
+  on it.** *Amends* D-84's "the record it writes from `derive` costs one empty
+  `reconcile`", which is now how derivation reaches the displays rather than a
+  side effect. Found by the architecture review of the same day.
+
+  - **What was wrong.** `reconcile` called `derive` synchronously, and
+    `derive` runs each container's `interpret-environment` under a 5s timeout,
+    up to three attempts per (session, container). While zellij was asked
+    about a pane, the one-slot wake channel held whatever arrived and nothing
+    was drawn: an agent that exited, or finished a turn, waited on a tool
+    that D-38 had put off the hook's path precisely because it is slow.
+    `TestASlowContainerDoesNotDelayADraw` shows a 3s container holding a draw
+    for 2.5s.
+  - **Derivation is a goroutine with a one-slot ask channel, the same shape
+    as the wake channel.** `reconcile` asks and goes on; the goroutine reads
+    the store, derives what has a capture and no coordinates, and writes each
+    answer through the store. That write wakes the loop, which draws. No new
+    mechanism: the store was already the bus (D-83), and the loop already
+    survived a wake it caused itself.
+  - **What the goroutine reads is narrow.** `[container] order` resolved
+    against the capabilities answers, under the one mutex, set at startup and
+    on reload; never `Settings`. The refusal counter already lived there. The
+    store is written from two goroutines the way it is written from two
+    processes, under flock per record, and the update still refuses to attach
+    coordinates to a capture that changed while it ran.
+  - **Shutdown waits for a derive in flight**, at most one `interpretTimeout`,
+    before closing the store and the lock.
 
 **The payload discussion of 2026-09-17 is now ratified**
  in D-10 through D-18.

@@ -13,7 +13,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"os"
-	"slices"
 	"sync"
 	"time"
 
@@ -126,8 +125,8 @@ func look(opened *core.Core, report *session.Report) {
 	// Decided before anything is spawned. [measured 2026-09-19, macOS 26]
 	// three capturing integrations cost a hook 9.3ms when it captures and
 	// 4.9ms when it does not.
-	asked := opened.Settings.Runnable()
-	if worthCapturing(previous, asked, report.Process) {
+	asked, stale := whoToAsk(previous, opened.Settings.Runnable(), report.Process)
+	if stale || len(asked) > 0 {
 		captured := askEveryoneWhoCaptures(opened.Settings, asked, opened.Logger, chain)
 		report.CapturedContext = &captured
 	}
@@ -171,30 +170,26 @@ func askEveryoneWhoCaptures(
 	return captured
 }
 
-// worthCapturing: an agent's environment does not change while it runs, and a
-// capture voids everything derived from the previous one (§A7.4.1). So only
-// when nothing is stored, the process is a different one, or the set of
-// integrations that answered is not the set that would be asked. One that
-// fails never appears in `stored.By`, so every hook captures again until it
-// is fixed.
-func worthCapturing(
-	previous session.Record, wouldAsk []string, agentProcess session.Process,
-) bool {
-	stored := previous.CapturedContext
-	if stored.CapturedAt.IsZero() {
-		return true
+// whoToAsk is which integrations this hook runs `capture-environment` on, and
+// whether the record's capture is stale (D-90).
+//
+// Stale — nothing captured yet, or a different process — asks everybody, and
+// Apply replaces the capture whole. Otherwise an agent's environment has not
+// changed, so only the integrations with no entry are asked: one installed
+// since, or one that failed last time and is tried again on every hook until
+// it is fixed (D-58). Apply merges what they answer under their own names and
+// voids only what was derived from those, so one integration that keeps
+// failing costs its own capture per hook and nobody else's placement.
+func whoToAsk(
+	previous session.Record, runnable []string, agentProcess session.Process,
+) (asked []string, stale bool) {
+	if previous.CaptureIsStale(agentProcess) {
+		return runnable, true
 	}
-	if previous.Process.PID != agentProcess.PID && agentProcess.PID != 0 {
-		return true
+	for _, name := range runnable {
+		if _, captured := previous.CapturedContext.By[name]; !captured {
+			asked = append(asked, name)
+		}
 	}
-	return !slices.Equal(wouldAsk, owners(stored.By))
-}
-
-func owners(by map[string]json.RawMessage) []string {
-	names := make([]string, 0, len(by))
-	for name := range by {
-		names = append(names, name)
-	}
-	slices.Sort(names)
-	return names
+	return asked, false
 }
