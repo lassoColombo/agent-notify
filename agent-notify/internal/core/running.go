@@ -32,7 +32,23 @@ func (c *Core) WhatIsRunning(includeEnded bool) []session.Record {
 		if err != nil {
 			c.Logger.Warn("reading ended sessions", "problem", err.Error())
 		}
-		records = append(records, ended...)
+		// A session being filed is written into ended/ before it leaves
+		// sessions/, so a read that falls between the two lists sees it twice.
+		// The higher sequence is the newer, which is how Read settles the same
+		// two files.
+		var both []session.Record
+		at := map[session.Key]int{}
+		for _, record := range append(records, ended...) {
+			if i, seen := at[record.Key]; seen {
+				if record.Sequence > both[i].Sequence {
+					both[i] = record
+				}
+				continue
+			}
+			at[record.Key] = len(both)
+			both = append(both, record)
+		}
+		records = both
 	}
 
 	boot, err := process.BootIdentity()

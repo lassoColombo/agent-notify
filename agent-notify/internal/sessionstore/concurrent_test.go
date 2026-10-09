@@ -253,6 +253,10 @@ func TestLockGivesUpRatherThanWaitingForever(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatal("the lock was never held: the test proved nothing")
 		}
+		// Let go long enough for the holder to get in. Retried back to back,
+		// this side holds the lock nearly all the time, and a holder polling
+		// every 20ms can miss it for seconds: on Linux it did, one run in two.
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

@@ -13,6 +13,7 @@ package process
 
 import (
 	"errors"
+	"os"
 	"time"
 
 	"github.com/lassoColombo/agent-notify/session"
@@ -30,6 +31,10 @@ type Facts struct {
 	// number that matched an agent an hour ago may match a stranger now, and a
 	// dead session would be kept alive forever in the belief that the stranger
 	// is it.
+	//
+	// It is only ever compared with another reading from the same boot, and on
+	// Linux it is not a date: it is the time since boot, counted from the Unix
+	// epoch, because that is the one form of it the kernel never moves (D-89).
 	StartedAt time.Time
 	// Command is the short name the kernel keeps, truncated to its own limit.
 	Command string
@@ -42,7 +47,7 @@ type Facts struct {
 }
 
 // ReadsProcessFacts is one question about one pid. The implementation that asks
-// this machine is in facts_darwin.go; tests hand in a map.
+// this machine is in facts_darwin.go and facts_linux.go; tests hand in a map.
 type ReadsProcessFacts interface {
 	FactsAbout(pid int) (Facts, error)
 }
@@ -72,3 +77,7 @@ func SameProcess(recorded session.Process, found Facts) bool {
 	difference := recorded.StartedAt.Sub(found.StartedAt)
 	return difference < SameProcessWindow && difference > -SameProcessWindow
 }
+
+// Self is the pid of this process, which is the one thing a working reader must
+// always be able to see (§A8.2).
+func Self() int { return os.Getpid() }

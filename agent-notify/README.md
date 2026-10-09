@@ -151,9 +151,9 @@ integrations find core through a `replace` directive pointing at this directory.
 - **Go 1.26 or newer.** `.tool-versions` pins `golang 1.26.2`. If your shell
   exported `GOROOT` from an outer context it overrides that pin, and
   `env -u GOROOT go build ./...` is the fix.
-- **macOS.** Process facts, exit watching and the peer-pid lookup have darwin
-  implementations and no others: `GOOS=linux go build ./...` does not compile
-  today. Linux is M17.
+- **macOS, or Linux 5.3 or newer.** Exits are watched with kqueue on one and
+  pidfds on the other, and nothing else is supported: the three packages that
+  ask the kernel have a `_darwin.go` and a `_linux.go` each, and no fallback.
 - `git`, for the branch a session is working on. Read on the hook path, from
   whatever is checked out at the session's working directory.
 
@@ -1152,10 +1152,11 @@ where each of yours stands.
 
 The codebase says this in places and it is worth saying here.
 
-- **It runs on macOS only.** `GOOS=linux go build ./...` does not compile:
-  process facts, exit watching and the store watch have darwin implementations
-  and no others. Linux is M17, and two assumptions in the
-  liveness design stay marked `[assumed]` until it lands.
+- **Linux is tested, not lived on.** The whole suite passes on Linux 6.10, in
+  Docker Desktop's VM, but no real agent has been watched on a Linux desktop.
+  A Linux record's `started_at` reads as a moment in 1970, on purpose: it is
+  the time since boot, because a date there moves when the clock is set
+  (D-89).
 - **Nothing is published.** No module proxy, no releases, no artifacts. Every
   integration is built beside core through a `replace` directive, and a clone of
   one module alone does not compile. That is M18's job, along with versioning.

@@ -1223,16 +1223,18 @@ still be right.
 
 ### A8.1 Watch, do not poll
 
-**[decided]** **[verified on macOS 26.6.2, 2026-09-16]** Both kernels will tell
-you when a process you did not fork exits, for a process owned by the same user,
-with no privileges or entitlements:
+**[decided]** **[verified on macOS 26.6.2, 2026-09-16, and Linux 6.10.11,
+2026-10-09]** Both kernels will tell you when a process you did not fork exits,
+for a process owned by the same user, with no privileges or entitlements:
 
 - **macOS**: `kqueue` with `EVFILT_PROC` / `NOTE_EXIT`. Verified with a probe
   registering on a sibling process' pid: registration succeeded and the event
   arrived the instant that process exited.
-- **Linux**: `pidfd_open(2)` (kernel ≥ 5.3) and `poll`; the descriptor becomes
-  readable on exit. **[assumed]**, to be verified the same way when we first
-  build for Linux.
+- **Linux**: `pidfd_open(2)` (kernel ≥ 5.3), the descriptors in one `epoll`
+  set; a descriptor becomes readable on exit. Verified the same way, in Docker
+  Desktop's VM: a `sleep` orphaned to pid 1 registered, was not readable while
+  it lived, and was readable about 0.4ms after a `kill -9`; a pid already gone
+  fails to register with `ESRCH`, as it does with kqueue.
 
 So the session-watcher holds one watch per live session and learns about a `kill
 -9` in milliseconds. The periodic sweep stays, but as a safety net rather than
@@ -1284,8 +1286,12 @@ week of uptime.
   it says may be acted on. Without that rail one broken moment ends every
   session on the bar at once. *(Taken from the Rust implementation, which got
   this right.)*
-- **Linux**: `/proc/<pid>/stat` field 22, in clock ticks since boot.
-  **[assumed]**
+- **Linux**: `/proc/<pid>/stat` field 22, in clock ticks since boot, and kept
+  that way rather than made a date (D-89). **[verified 2026-10-09, Linux
+  6.10.11]** by M5's machine tests: a killed and reaped `sleep` is judged gone,
+  and a record wearing this process's pid with the wrong start time is judged
+  gone. The name in that line is in parentheses and may hold either, so it ends
+  at the *last* `)`; a zombie is state `Z` and is read as gone, as `SZOMB` is.
 
 ### A8.3 Reboots
 
@@ -5066,6 +5072,36 @@ entry per decision, with the reversals named as D-4 and D-6 name theirs.
     matched a hash of its session id. Nothing depended on it being a counter,
     and the word is corrected where it was written.
 
+- **D-89** (2026-10-09) — **On Linux a process's start time is its time since
+  boot, not a date.** *Amends* §A8.2, whose Linux line named field 22 of
+  `/proc/<pid>/stat` and left unsaid how it becomes a `time.Time`.
+
+  - **The obvious conversion is the one D-29 refused on macOS.** Field 22 counts
+    clock ticks since boot, and a date is that plus `btime` from `/proc/stat`.
+    But `btime` is not stored: it is computed on every read as the wall clock
+    minus the time since boot (`getboottime64`, `offs_real − offs_boot`), so it
+    moves whenever the clock is stepped — NTP correcting a large offset, a
+    laptop waking with a drifted clock, `date -s`. It is also whole seconds, so
+    a step of a fraction of one can move it by one. A start time that moves by
+    a second makes `SameProcess` call every live session a stranger and ends
+    all of them at once, the failure §A8.3 calls the worst this system could
+    have. **[from the kernel source, not probed]**: the only Linux at hand was
+    Docker Desktop's VM, whose clock a running database shares.
+  - **So it is kept as the kernel counts it.** `Facts.StartedAt` on Linux is
+    `time.Unix(0, 0)` plus the ticks, at `USER_HZ`, which is 100 on every
+    architecture Go builds for. It stays a `time.Time` and nothing that compares
+    it changes: it is only compared with another reading from the same machine,
+    and a different boot is ruled out by the boot identity before any start
+    time is read.
+  - **What it costs.** `started_at` in a Linux record reads as a moment in
+    January 1970, and an integration that compares an ancestor's start time with
+    its own probe must read `/proc` the same way. No display reads
+    `session.Process`, and the one integration that reads ancestors,
+    aerospace-container, is macOS's.
+  - **Rejected: a field of its own, or an opaque start token.** Either moves the
+    difference out of `facts_linux.go`, where it is one line, into the record
+    and every test that builds one.
+
 ## B1. How this works
 
 - The entries below are **meta-steps**. Each is expanded into its own concrete
@@ -5904,12 +5940,34 @@ $ ax AXExtrasMenuBar (pid 91889)
 - **Done when** a floating pane lists sessions by urgency and jumps to the one
   you choose.
 
-### M17 — Linux
+### M17 — Linux — **done 2026-10-09**
 
 - **Delivers** `pidfd_open` exit watching and `/proc` start times, verified the
   way the macOS equivalents were on 2026-09-16.
 - **Done when** the M5 and M8 tests pass on Linux, and the two [assumed] marks
   in §A8 become [verified].
+- **Delivered**: a `_linux.go` beside each of the three `_darwin.go` files and
+  nothing else — `process` reads `/proc`, `sessionwatcher` watches exits with
+  pidfds in one `epoll` set, and `storewatch` watches the store with inotify.
+  The last was not in the milestone as written: it arrived with D-83, after
+  M17 was.
+- **Done**, in Docker Desktop's VM (Linux 6.10.11, arm64), as a user who is not
+  root: every test in core and in the claude, codex, picker and zellij
+  integrations passes. A `kill -9` on an agent is filed 0.7ms later with the
+  sweep five seconds away, and a record from a previous boot is ended 0.66ms
+  after startup with its process alive.
+- **The start time is not a date on Linux** (D-89): the conversion through
+  `btime` moves when the clock is set.
+- **Three tests were right on macOS by timing alone**, and Linux, which starts
+  a process faster, failed them. `list --all` read `sessions/` and then
+  `ended/`, so a record filed between the two was listed twice; core now keeps
+  the higher sequence of the two, which is how `Read` settles them. The test of
+  a fast exit waited for a kernel of `ended`, which `list` shows for a dead
+  process with no session-watcher at all; it now waits for the record to be
+  filed. And the lock test retried so tightly that the holder it spawned could
+  not get in, one run in two; it now lets go for 10ms between tries.
+- **Not done here**: running a real agent on a Linux desktop. Nothing in the
+  agent-integrations is platform-specific, but nobody has watched one.
 
 ## B7. Distribution
 

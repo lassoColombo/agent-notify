@@ -66,9 +66,11 @@ func TestAKilledAgentIsEndedInMilliseconds(t *testing.T) {
 	}
 
 	pretend.kill()
+	// Filed, not merely shown as ended: list judges a dead process as it reads,
+	// so a kernel of ended alone would pass with no session-watcher at all.
 	took := waitFor(t, 5*time.Second, "the record to be ended", func() bool {
 		records := pretend.recordsAll(t)
-		return len(records) == 1 && records[0].Kernel == session.Ended
+		return len(records) == 1 && records[0].Kernel == session.Ended && !records[0].EndedAt.IsZero()
 	})
 	t.Logf("ended %s after the kill, with the sweep five seconds away", took)
 

@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"os"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -113,7 +112,3 @@ func BootIdentity() (string, error) {
 	}
 	return identity, nil
 }
-
-// Self is the pid of this process, which is the one thing a working reader must
-// always be able to see (§A8.2).
-func Self() int { return os.Getpid() }
