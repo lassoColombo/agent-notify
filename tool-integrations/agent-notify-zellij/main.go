@@ -6,7 +6,6 @@ import (
 	"sync"
 
 	"github.com/lassoColombo/agent-notify/container"
-	"github.com/lassoColombo/agent-notify/logs"
 	"github.com/lassoColombo/agent-notify/session"
 	"github.com/lassoColombo/agent-notify/subscribe"
 )
@@ -23,9 +22,7 @@ func main() {
 			if err != nil {
 				return err
 			}
-			log, closeLog := logs.Open(Name)
-			defer closeLog.Close()
-			return (&Display{Zellij: settings.Zellij, Glyphs: settings.Glyphs, Logger: log}).Render(view)
+			return (&Display{Zellij: settings.Zellij, Glyphs: settings.Glyphs, Logger: me.Logger()}).Render(view)
 		},
 		Interpret: func(captured json.RawMessage, _ []session.Ancestor) (any, error) {
 			settings, err := resolved()

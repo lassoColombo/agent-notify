@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 
 	"github.com/lassoColombo/agent-notify/internal/config"
@@ -73,6 +74,19 @@ func (i Integration) core() (*core.Core, error) {
 	}
 	opened[key] = have
 	return have, nil
+}
+
+// Logger writes to the one log file every agent-notify process appends to,
+// tagged with this integration's name. It is the logger core opened for this
+// process, so nothing is opened twice (D-95). An integration whose files
+// cannot be found logs nowhere rather than failing: a diagnostic channel that
+// can fail is one that eventually fails the thing it diagnoses (R2).
+func (i Integration) Logger() *slog.Logger {
+	opened, err := i.core()
+	if err != nil {
+		return slog.New(slog.DiscardHandler)
+	}
+	return opened.Logger
 }
 
 // Settings decodes this integration's own `settings` table into whatever shape

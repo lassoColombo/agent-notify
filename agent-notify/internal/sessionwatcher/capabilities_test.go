@@ -90,6 +90,7 @@ func TestAnIntegrationThatCannotBeAskedSaysSoInTheReport(t *testing.T) {
 // report to read. Answering "you have no containers" then would be a lie told
 // at exactly the wrong moment.
 func TestWithNoReportItAsksRatherThanSayingThereIsNoContainer(t *testing.T) {
+	atATestablePace(t, 100*time.Millisecond)
 	root := shortRoot(t)
 	binary := answersCapabilities(t, root, "placer",
 		`{"version":"0.0.0-dev","methods":["interpret-environment","focus","focused"]}`)

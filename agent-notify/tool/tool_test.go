@@ -89,7 +89,7 @@ func TestAProgramThatIsNotThereIsNotAProgramThatRefused(t *testing.T) {
 // TestARefusalCarriesTheCodeAndTheToolsOwnWords.
 func TestARefusalCarriesTheCodeAndTheToolsOwnWords(t *testing.T) {
 	_, err := tool.Run(program(t, "echo 'window id 34 is not known' >&2; exit 3"),
-		time.Second, "focus", "--window-id", "34")
+		10*time.Second, "focus", "--window-id", "34")
 
 	var refused *tool.SaidNo
 	if !errors.As(err, &refused) {
@@ -175,7 +175,7 @@ func TestAProgramThatFailedInSilenceIsSaidToHave(t *testing.T) {
 	if got := tool.Summarise(nil); got != "nothing" {
 		t.Errorf("Summarise(nil) = %q, want %q", got, "nothing")
 	}
-	_, err := tool.Run(program(t, "exit 2"), time.Second, "--set", "missing")
+	_, err := tool.Run(program(t, "exit 2"), 10*time.Second, "--set", "missing")
 	if !strings.HasSuffix(err.Error(), "nothing") {
 		t.Errorf("err = %q, want it to end by saying it said nothing", err)
 	}
@@ -190,8 +190,14 @@ func TestSummariseIsBounded(t *testing.T) {
 }
 
 // TestStdinReachesTheProgram, which is the one thing RunWithInput adds.
+//
+// Ten seconds for a script that finishes in milliseconds, here and in the
+// other tests that only need a script to run: the bound is there so a broken
+// pipe cannot hang the test, not to measure anything, and a shell script
+// sharing the machine with a dozen packages' linkers has been seen to wait
+// more than a second to be scheduled.
 func TestStdinReachesTheProgram(t *testing.T) {
-	out, err := tool.RunWithInput(program(t, "cat"), time.Second, []byte(`{"pane":7}`))
+	out, err := tool.RunWithInput(program(t, "cat"), 10*time.Second, []byte(`{"pane":7}`))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}

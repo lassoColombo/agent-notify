@@ -9,7 +9,7 @@ import (
 	"github.com/lassoColombo/agent-notify/internal/config"
 	"github.com/lassoColombo/agent-notify/internal/paths"
 	"github.com/lassoColombo/agent-notify/internal/sessionstore"
-	"github.com/lassoColombo/agent-notify/logs"
+	"github.com/lassoColombo/agent-notify/internal/logs"
 )
 
 // core is everything a command needs before it can do anything: where things

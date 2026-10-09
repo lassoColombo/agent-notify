@@ -12,8 +12,11 @@ import (
 	"github.com/lassoColombo/agent-notify/tool"
 )
 
-// capabilitiesTimeout bounds one `capabilities` call, which prints a constant.
-const capabilitiesTimeout = 2 * time.Second
+// CapabilitiesTimeout bounds one `capabilities` call, which prints a constant.
+// A var so a test can lengthen it: on a machine running a dozen packages'
+// tests at once, a shell script that prints a constant can wait longer than
+// this to be scheduled, and the test is not about the timeout.
+var CapabilitiesTimeout = 2 * time.Second
 
 // CapabilitiesByIntegration is what each integration answers, for a command
 // that is not the session-watcher: read from the report, or asked when there
@@ -78,7 +81,7 @@ func (w *Watcher) askWhatEachIntegrationAnswers() {
 }
 
 func ask(binary string) (session.Capabilities, error) {
-	raw, err := tool.Ask(binary, session.CapabilitiesCommand, nil, capabilitiesTimeout)
+	raw, err := tool.Ask(binary, session.CapabilitiesCommand, nil, CapabilitiesTimeout)
 	if err != nil {
 		return session.Capabilities{}, err
 	}

@@ -48,7 +48,7 @@ func isASubcommand(path string) bool {
 func TestOnlyTheTopLevelIsImportable(t *testing.T) {
 	doors := map[string]bool{
 		"session": true, "hook": true, "subscribe": true,
-		"container": true, "tool": true, "logs": true,
+		"container": true, "tool": true,
 	}
 	for path := range whatEachPackageImports(t) {
 		if path == "." || strings.Contains(path, "internal/") || strings.HasPrefix(path, "command/") {

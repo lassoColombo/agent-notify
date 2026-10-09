@@ -989,9 +989,7 @@ All of them are under `github.com/lassoColombo/agent-notify/`.
 | `hook` | an agent-integration: one function, and a reverse reader for its agent's files |
 | `subscribe` | a tool-integration: answer the subcommands core runs, read the store, watch it |
 | `container` | the words a container answers in: outcomes and verdicts |
-| `capture` | the one subcommand that runs inside the agent |
 | `tool` | running the external program an integration drives, under a timeout |
-| `logs` | the one log file every agent-notify process appends to |
 
 A test keeps that list honest: `layering_test.go` fails if a new exported
 package appears at the top level, if a package lands in no floor of the

@@ -23,7 +23,7 @@ import (
 	"github.com/lassoColombo/agent-notify/internal/process"
 	"github.com/lassoColombo/agent-notify/internal/sessionstore"
 	"github.com/lassoColombo/agent-notify/internal/sessionwatcher"
-	"github.com/lassoColombo/agent-notify/logs"
+	"github.com/lassoColombo/agent-notify/internal/logs"
 	"github.com/lassoColombo/agent-notify/session"
 )
 

@@ -4805,7 +4805,9 @@ of this section is that it prevents re-litigating.
   found no fault with the bus and eighteen places where the code around it did
   the same thing twice or kept the scaffolding of a mechanism D-83 retired. All
   of them are closed; nothing was added and no module was merged. The working
-  plan is [simplification-plan.md](../simplification-plan.md). *Amends* §A9.1
+  plan was `simplification-plan.md` at the repository root, removed with the
+  other plans on 2026-10-09 (`2c3f843`); the bullets below are what it
+  listed. *Amends* §A9.1
   (the watcher keeps no picture of the world; it reads the store), §A10.4 (the
   SDK owns install, bundle install, an agent's main and the transcript reader),
   §A7.4.1 (an empty capture is stored). *Retires* the floor table of
@@ -5044,6 +5046,28 @@ of this section is that it prevents re-litigating.
     before; the other two methods are gone. A test in `session` pins the
     four outcomes — first world, nothing moved, a watched field moved, a
     departure — where the rule lives rather than through a shell script.
+
+- **D-95** (2026-10-09) — **An integration logs through the SDK, and `logs`
+  is not a door.** *Amends* D-80's list of doors, which named `logs` "because
+  three displays write to the shared file": there are five doors now —
+  `session`, `hook`, `subscribe`, `container`, `tool` — and `logs` lives
+  under `internal/`. Found by the architecture review of the same day.
+  - **What was wrong.** zellij's `render` and the notifier's `render` and
+    `hold` each called `logs.Open(Name)`, which resolved the layout from the
+    environment and opened the log file, while `subscribe.Integration.core()`
+    had already resolved the same layout and opened a logger on the same
+    file for the same component. Two opens per render, and a second path by
+    which an integration learned where core's files are — the thing §A10.4
+    says it never does for itself.
+  - **`Integration.Logger()`** returns the logger core opened for the
+    process, tagged with the integration's name. When core cannot be opened
+    it returns one that discards, because a diagnostic channel that can fail
+    is one that eventually fails the thing it diagnoses (R2). `logs.Open`
+    had no caller left and is gone; `OpenFile` and `File` remain for core,
+    the watcher's spawn and `doctor`.
+  - **The level variable** stays where it was documented, in the README's
+    environment table; no integration names it in code, and the watcher
+    hands it down the tree as before.
 
 **The payload discussion of 2026-09-17 is now ratified**
  in D-10 through D-18.

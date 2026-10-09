@@ -13,7 +13,6 @@ import (
 
 	"log/slog"
 
-	"github.com/lassoColombo/agent-notify/logs"
 	"github.com/lassoColombo/agent-notify/session"
 	"github.com/lassoColombo/agent-notify/subscribe"
 )
@@ -57,14 +56,12 @@ func paint(view session.View) error {
 	if err != nil {
 		return err
 	}
-	log, closeLog := logs.Open(Name)
-	defer closeLog.Close()
 	return (&Banners{
 		Notifier:    NewNotifier(settings.Preview, settings.Colours),
 		InvaderPNGs: &InvaderPNGs{},
 		Alerter:     settings.Alerter,
 		Sound:       settings.Sound,
-		Logger:      log,
+		Logger:      me.Logger(),
 	}).Post(view)
 }
 

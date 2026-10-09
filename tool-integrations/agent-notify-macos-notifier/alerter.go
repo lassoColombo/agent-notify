@@ -7,7 +7,6 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/lassoColombo/agent-notify/logs"
 )
 
 // This file is the whole of what this program knows about macOS, and it is an
@@ -128,8 +127,7 @@ func hold(arguments []string) int {
 			program, holdCommand)
 		return 2
 	}
-	log, closeLog := logs.Open(Name)
-	defer closeLog.Close()
+	log := me.Logger()
 
 	key, alerter := arguments[0], arguments[1]
 	said, err := exec.Command(alerter, arguments[2:]...).Output()

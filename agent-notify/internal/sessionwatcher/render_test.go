@@ -106,17 +106,27 @@ func write(t *testing.T, path, content string) {
 	}
 }
 
-// atATestablePace shortens the loop these tests watch go round.
+// atATestablePace shortens the loop these tests watch go round, and lengthens
+// the handshake they all go through.
 //
 // The sweep is five seconds in production, which is right for a safety net and
 // absurd for a test that has to see it fire three times. It is not
 // configuration — nobody has an opinion about how often a safety net checks —
 // so it is moved here, in the one place that needs it moved, and put back.
+//
+// The handshake timeout is two seconds in production, which is right for a
+// program that prints a constant and wrong for a shell script doing the same
+// while a dozen packages' tests link and spawn around it: measured, two
+// concurrent runs of this module's tests make it take longer than that, and
+// the watcher then records the problem and never asks again. None of these
+// tests is about that timeout.
 func atATestablePace(t *testing.T, sweep time.Duration) {
 	t.Helper()
-	was := sessionwatcher.SweepInterval
-	sessionwatcher.SweepInterval = sweep
-	t.Cleanup(func() { sessionwatcher.SweepInterval = was })
+	wasSweeping, wasAsking := sessionwatcher.SweepInterval, sessionwatcher.CapabilitiesTimeout
+	sessionwatcher.SweepInterval, sessionwatcher.CapabilitiesTimeout = sweep, 30*time.Second
+	t.Cleanup(func() {
+		sessionwatcher.SweepInterval, sessionwatcher.CapabilitiesTimeout = wasSweeping, wasAsking
+	})
 }
 
 // running starts a session-watcher against root and stops it with the test.

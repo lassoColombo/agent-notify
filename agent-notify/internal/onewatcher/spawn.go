@@ -8,7 +8,7 @@ import (
 	"syscall"
 
 	"github.com/lassoColombo/agent-notify/internal/paths"
-	"github.com/lassoColombo/agent-notify/logs"
+	"github.com/lassoColombo/agent-notify/internal/logs"
 )
 
 // Spawn starts a detached session-watcher and returns immediately.

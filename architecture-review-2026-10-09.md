@@ -45,6 +45,10 @@ a decision in `agent-notify/plan.md` §A19.
   swaps the world in and answers with the view to hand over, or nothing;
   `HasSeenAView` and `ViewOf` are gone, and both callers are one line. A
   test in `session` pins the four outcomes where the rule lives.
+- **Integrations opened the log twice** (D-95). `Integration.Logger()` on
+  the SDK returns the logger core already opened for the process; zellij and
+  the notifier use it, `logs.Open` is gone, and `logs` lives under
+  `internal/`, so the layering test's doors are five.
 - **Dead since D-87.** `JustArrived`, `Arrival`, `Announced`, `Same` and
   `moreRecent` in `session/display.go`, with `arrival_test.go`, had no caller
   once the menu bar went. `plural` in the notifier's `preview.go` likewise.
@@ -55,17 +59,7 @@ a decision in `agent-notify/plan.md` §A19.
 Ordered by what they cost, most first. Each names the code and the shape of
 the fix; none is started.
 
-### 1. Integrations open the log twice
-
-- zellij's `main.go` and the notifier's `main.go` and `alerter.go` call
-  `logs.Open(Name)` while `subscribe.Integration.core()` has already opened a
-  logger for the same component on the same file.
-- An `Integration.Logger()` on the SDK removes the second open, and `logs`
-  stops being a door: the layering test's list shrinks by one and the
-  variable that sets the level is reached through `subscribe` like everything
-  else.
-
-### 2. `session` carries three vocabularies
+### 1. `session` carries three vocabularies
 
 - The package is documented as the floor that "speaks nothing", and that is
   true of its imports. It now exports about 140 symbols of three kinds: the
@@ -81,7 +75,7 @@ the fix; none is started.
   its purpose is in its path. This is a relocation, not new weight, and it is
   the lowest-value item here.
 
-### 3. `hook.Main` asks for the payload twice
+### 2. `hook.Main` asks for the payload twice
 
 - `hook.Main(arguments, usage, named, payload any, translate func() (Report,
   bool))` takes a pointer to decode into and a closure that captures the same
@@ -89,20 +83,23 @@ the fix; none is started.
 - `Main[P any](arguments, usage, named, translate func(P) (session.Report,
   bool))` decodes into a fresh `P` and hands it over.
 
-### 4. Housekeeping
+### 3. Housekeeping
 
 - Four stale git worktrees under `.claude/worktrees/` and
   `agent-notify/.claude/worktrees/` hold older trees, including sketchybar and
   the menu bar that CLAUDE.md says are gone. They inflate a naive line count
   from 27k to 146k and mislead any tool that walks the directory.
   `git worktree remove` each, or `git worktree prune` after deleting them.
-- D-84 points at `simplification-plan.md` at the repository root, which no
-  longer exists.
-- `TestAnIntegrationIsAskedWhatItAnswers` in `internal/sessionwatcher` and
-  `TestStdinReachesTheProgram` in `tool` fail under load: two `go test ./...`
-  of core run at once make a stub program take longer than the 2s
-  `capabilitiesTimeout` and the test's 1s. The first now prints the report,
-  which says so. The timeouts are right for production; what the watcher does
-  with a timed-out `capabilities` is the design point — it records the
-  problem and never asks again until a reload, so a slow first start costs a
-  display until somebody runs `watcher reload`.
+- **Fixed:** D-84 pointed at `simplification-plan.md` at the repository root,
+  removed in `2c3f843`; it now says so and that its bullets are what the file
+  listed.
+- **Fixed:** `TestAnIntegrationIsAskedWhatItAnswers` in `internal/sessionwatcher`
+  and `TestStdinReachesTheProgram` in `tool` failed under load: two
+  `go test ./...` of core run at once made a stub shell script take longer
+  than the 2s `CapabilitiesTimeout` and the test's 1s. The watcher's timeout
+  is a var the tests' pace helper lengthens, as it already shortened the
+  sweep, and the tool tests that only need a script to run give it ten
+  seconds. Two concurrent runs of core's tests now pass. What the watcher
+  does with a timed-out `capabilities` in production is still the design
+  point: it records the problem and never asks again until a reload, so a
+  slow first start costs a display until somebody runs `watcher reload`.

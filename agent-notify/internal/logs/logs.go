@@ -34,25 +34,14 @@ import (
 // before starting anything sets it for the whole tree.
 const TheVariableThatSetsTheLevel = "AGENT_NOTIFY_LOG_LEVEL"
 
-// Open returns a logger on the shared log file, tagged with the component
-// writing through it, and the closer for the file behind it.
-//
-// This is the one an integration calls: it has no layout of its own and no way
-// to build one, because where things live is core's knowledge and resolving it
-// twice is how two processes come to disagree about it.
+// OpenFile returns a logger on the shared log file, tagged with the component
+// writing through it, and the closer for the file behind it. The caller is
+// handed its layout rather than resolving one here, because where things live
+// is core's knowledge and resolving it twice is how two processes come to
+// disagree about it: core opens this once per process, and an integration
+// reaches that logger through subscribe (D-95).
 //
 // The returned io.Closer is always non-nil and always safe to call.
-func Open(component string) (*slog.Logger, io.Closer) {
-	layout, err := paths.FromEnvironment()
-	if err != nil {
-		return slog.New(slog.DiscardHandler), discard{}
-	}
-	return OpenFile(layout.LogFile(), component)
-}
-
-// OpenFile is Open for a caller that already knows where everything is — the
-// session-watcher and the commands, which are handed their layout rather than
-// resolving it a second time (see core.OpenAt for why that matters).
 func OpenFile(path, component string) (*slog.Logger, io.Closer) {
 	file, err := File(path)
 	if err != nil {
