@@ -22,6 +22,17 @@ import (
 // `includeEnded` asks for the sessions that are over and still resumable, which
 // is the set a picker exists to offer (§A7.5) and the set a bar does not want.
 func (c *Core) WhatIsRunning(includeEnded bool) []session.Record {
+	records, _ := c.WhatIsRunningAndWhatEnded(includeEnded)
+	return records
+}
+
+// WhatIsRunningAndWhatEnded is WhatIsRunning with the verdicts beside the
+// records, for the one caller that files them. The session-watcher reads the
+// store once per wake, hands these records to every display it runs, and ends
+// what the verdicts name (D-92). It is the same read and the same decision —
+// process.Ended, superseded sessions included — so a display the watcher runs
+// and one reading cold through the SDK see one world.
+func (c *Core) WhatIsRunningAndWhatEnded(includeEnded bool) ([]session.Record, []process.Ending) {
 	records, err := c.Store.List()
 	if err != nil {
 		// One unreadable record costs its own row and nothing else.
@@ -53,19 +64,21 @@ func (c *Core) WhatIsRunning(includeEnded bool) []session.Record {
 
 	boot, err := process.BootIdentity()
 	if err != nil {
+		// Without it the reboot rule cannot apply and every session is judged
+		// by probing instead, which is slower and still correct.
 		c.Logger.Warn("cannot read this boot's identity", "problem", err.Error())
 	}
-	machine := process.ProcessesOnThisMachine{}
-	for i := range records {
-		if records[i].Kernel == session.Ended {
-			continue
-		}
-		if process.LivenessOf(records[i], boot, machine) == process.Gone {
+	ended := process.Ended(records, boot, process.Self(), process.ProcessesOnThisMachine{})
+	for _, end := range ended {
+		for i := range records {
+			if records[i].Key != end.Key {
+				continue
+			}
 			records[i].Kernel = session.Ended
-			records[i].Detail = process.ProcessGone
+			records[i].Detail = end.Detail
 			records[i].Rank = session.Ended.Rank()
 		}
 	}
 	session.ByUrgency(records)
-	return records
+	return records, ended
 }

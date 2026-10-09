@@ -41,8 +41,6 @@ type Watcher struct {
 	held   *onewatcher.Lock
 	exits  *Exits
 	store  *storewatch.Watch
-	boot   string
-	prober process.ReadsProcessFacts
 	logger *slog.Logger
 
 	mu sync.Mutex
@@ -106,16 +104,8 @@ func Start(layout paths.Layout, toTerminal bool) (*Watcher, error) {
 		return nil, err
 	}
 
-	boot, err := process.BootIdentity()
-	if err != nil {
-		// Without it the reboot rule cannot apply and every session is judged
-		// by probing instead, which is slower and still correct.
-		logger.Warn("cannot read this boot's identity", "problem", err.Error())
-	}
-
 	return &Watcher{
-		opened: opened, held: held, exits: exits, store: store,
-		boot: boot, prober: process.ProcessesOnThisMachine{}, logger: logger,
+		opened: opened, held: held, exits: exits, store: store, logger: logger,
 	}, nil
 }
 
@@ -226,10 +216,17 @@ func (w *Watcher) listenForExits(ctx context.Context, woken chan<- string) {
 // woke it, because the store is the truth (R4). A record it writes itself
 // wakes it once more, and that pass finds nothing to do.
 func (w *Watcher) reconcile(why string) {
-	live, err := w.opened.Store.List()
-	if err != nil {
-		w.logger.Warn("reading the store", "why", why, "problem", err.Error())
+	w.logger.Debug("reconciling", "why", why)
+
+	// One read and one judgement per wake, however many displays there are:
+	// the same read `list` and the SDK make, so every display is handed the
+	// world they would have read (D-92). Ended sessions come too when one
+	// display asked for them; the others drop them as they render.
+	wantEnded := false
+	for _, drawing := range w.renderers {
+		wantEnded = wantEnded || drawing.asked.WantEnded
 	}
+	world, ended := w.opened.WhatIsRunningAndWhatEnded(wantEnded)
 
 	// Derivation is asked for, not waited for; what it finds comes back as a
 	// store wake.
@@ -238,21 +235,23 @@ func (w *Watcher) reconcile(why string) {
 	default:
 	}
 
-	for _, record := range live {
-		if record.Process.PID > 0 {
+	for _, record := range world {
+		if record.Kernel != session.Ended && record.Process.PID > 0 {
 			// A pid that has already gone fails to register, and the sweep
 			// judges it anyway (R5).
 			_ = w.exits.Watch(record.Process.PID)
 		}
 	}
 
-	for _, end := range process.Ended(live, w.boot, process.Self(), w.prober) {
+	for _, end := range ended {
 		w.end(end)
 	}
 
 	// Once, at the end: every display is handed the whole world and decides
-	// for itself whether anything it watches moved.
-	w.drawEverythingAgain()
+	// for itself whether anything it watches moved. The world already says
+	// `ended` where the store is about to, so the write above costs one
+	// more pass that finds nothing to draw.
+	w.drawEverythingAgain(world)
 }
 
 // resolveContainers reads [container] order against what each integration
@@ -438,6 +437,9 @@ func (w *Watcher) reloadConfiguration(ctx context.Context) {
 
 	w.writeReport(w.opened.Settings)
 	w.logger.Info("configuration re-read")
+	// A display started just now has a world to draw and no change to be
+	// told about: the cold path (§A7.6).
+	w.reconcile("reload")
 }
 
 func (w *Watcher) close() {

@@ -4949,6 +4949,41 @@ of this section is that it prevents re-litigating.
   - **Shutdown waits for a derive in flight**, at most one `interpretTimeout`,
     before closing the store and the lock.
 
+- **D-92** (2026-10-09) — **The session-watcher reads and judges once per
+  wake, and hands that world to every display it runs.** *Amends* D-84's
+  "One world", whose renderers each read `Core.WhatIsRunning` for themselves,
+  and D-30's "`list` applies the liveness decision", which is now the same
+  decision the watcher files. Found by the architecture review of the same
+  day.
+
+  - **What was wrong.** `reconcile` listed the store and probed every live pid
+    through `process.Ended`; then each renderer, on its own goroutine, called
+    `WhatIsRunning`, which listed the store again, read the boot identity
+    again and probed every pid again through `LivenessOf`. N displays cost
+    N+1 reads and N+1 sweeps per wake, and two liveness functions existed:
+    the watcher's knew about superseded sessions and had the rail that
+    refuses to judge when it cannot see its own process; the readers' did
+    not.
+  - **One read, one decision.** `Core.WhatIsRunningAndWhatEnded` is the read
+    every display and `list` make, with the verdicts beside the records for
+    the one caller that files them. It judges with `process.Ended`, so
+    `list` and a display reading cold now show a superseded session as
+    ended, as the watcher was about to file it. `WhatIsRunning` is that read
+    without the verdicts, and `LivenessOf` has one caller.
+  - **The renderers are handed the world, not a function.** `reconcile`
+    reads once, ended sessions included when any renderer asked for them,
+    ends what the verdicts name, and wakes every renderer with the same
+    slice. A renderer keeps the newest it was given and paints that; one
+    that did not ask for ended sessions drops them as it renders. The
+    world already says `ended` where the store is about to, so the
+    watcher's own write costs one pass that draws nothing.
+  - **What went.** The watcher's cached boot identity and prober, read in
+    core per call as `list` always did; and the cold-path wake in
+    `startRenderers`, because the reconcile that follows a start or a reload
+    hands a new display its first world.
+  - **Not changed.** `subscribe.Run` reads for itself, once per wake: a
+    display that owns its process has nobody to be handed anything by.
+
 **The payload discussion of 2026-09-17 is now ratified**
  in D-10 through D-18.
 What is still marked [proposed] elsewhere — the field list of §A7.4, the event

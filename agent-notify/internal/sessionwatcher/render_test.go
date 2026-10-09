@@ -51,14 +51,23 @@ func answersCapabilities(t *testing.T, directory, name, answer string) string {
 // list, and appends every view it is handed to a file, one per line.
 func aDisplay(t *testing.T, directory, name string, wakeOn ...string) (binary, painted string) {
 	t.Helper()
+	return aDisplayAnswering(t, directory, name, session.Capabilities{
+		Version: "0.0.0-dev", Methods: []string{session.MethodRender}, WakeOn: wakeOn,
+	})
+}
+
+// aDisplayAnswering is aDisplay with the whole `capabilities` answer chosen.
+func aDisplayAnswering(
+	t *testing.T, directory, name string, asked session.Capabilities,
+) (binary, painted string) {
+	t.Helper()
 	binary = filepath.Join(directory, "agent-notify-"+name)
 	painted = filepath.Join(directory, name+".painted")
 
-	waking, err := json.Marshal(wakeOn)
+	answer, err := json.Marshal(asked)
 	if err != nil {
 		t.Fatal(err)
 	}
-	answer := fmt.Sprintf(`{"version":"0.0.0-dev","methods":["render"],"wake_on":%s}`, waking)
 
 	script := fmt.Sprintf("#!/bin/sh\ncase \"$1\" in\n  %s) printf '%%s\\n' '%s' ;;\n"+
 		"  %s) cat >> %s ; printf '\\n' >> %s ;;\n  *) exit 1 ;;\nesac\n",

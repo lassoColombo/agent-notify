@@ -2,7 +2,7 @@
 
 A read of all seven modules for separation of concerns, abstraction and
 correctness, after M17. The bus (D-83) and the layering (D-80) hold; what is
-left is two bugs, a handful of places that do one job twice, and one package
+left is three bugs, a handful of places that do one job twice, and one package
 that has become the default home for anything exported. Nothing here reverses
 a decision in `agent-notify/plan.md` §A19.
 
@@ -29,6 +29,12 @@ a decision in `agent-notify/plan.md` §A19.
   waited behind zellij. It now runs on its own goroutine with a one-slot ask
   channel, writes through the store, and the write wakes the loop.
   `TestASlowContainerDoesNotDelayADraw` fails on the old loop.
+- **Liveness was computed N+1 times per change** (D-92). `reconcile` probed
+  every pid, then each renderer read the store and probed again through
+  `WhatIsRunning`. `Core.WhatIsRunningAndWhatEnded` is now the one read and
+  the one decision, `process.Ended`, for the watcher, `list` and the SDK
+  alike; the watcher reads once per wake and hands the world to every
+  renderer, which drops ended sessions unless it asked for them.
 - **Dead since D-87.** `JustArrived`, `Arrival`, `Announced`, `Same` and
   `moreRecent` in `session/display.go`, with `arrival_test.go`, had no caller
   once the menu bar went. `plural` in the notifier's `preview.go` likewise.
@@ -39,17 +45,7 @@ a decision in `agent-notify/plan.md` §A19.
 Ordered by what they cost, most first. Each names the code and the shape of
 the fix; none is started.
 
-### 1. Liveness is computed N+1 times per change
-
-- `reconcile` judges every live pid through `process.Ended`, then each renderer
-  calls `Core.WhatIsRunning` (`internal/sessionwatcher/render.go`), which lists
-  the store again and probes every pid again. `subscribe.Run` does the same
-  for a display that owns its process, which is right for that one.
-- D-84 chose `WhatIsRunning` so that every reader sees one world. That stays
-  true if `reconcile` reads the world once (ended included) and hands it to the
-  renderers, each of which drops ended sessions unless it asked for them.
-
-### 2. Core captures a process chain nobody reads
+### 1. Core captures a process chain nobody reads
 
 - `hook.look` walks the ancestry and stores it as `captured_context.ancestry`
   (`session/record.go`). Outside tests the only reference to the field is
@@ -64,7 +60,7 @@ the fix; none is started.
   a chain on every record and let aerospace keep its own. The first keeps
   §A8.4's chain where `doctor` could one day show it; the second is less code.
 
-### 3. The render decision is written twice
+### 2. The render decision is written twice
 
 - `subscribe/run.go` and `internal/sessionwatcher/render.go` both do
   `LastShown.Replace`, then "first view, or something changed, or something
@@ -72,7 +68,7 @@ the fix; none is started.
 - One method on `LastShown` — replace the world and answer with the view to
   hand over, or nothing — serves both.
 
-### 4. Integrations open the log twice
+### 3. Integrations open the log twice
 
 - zellij's `main.go` and the notifier's `main.go` and `alerter.go` call
   `logs.Open(Name)` while `subscribe.Integration.core()` has already opened a
@@ -82,7 +78,7 @@ the fix; none is started.
   variable that sets the level is reached through `subscribe` like everything
   else.
 
-### 5. `session` carries three vocabularies
+### 4. `session` carries three vocabularies
 
 - The package is documented as the floor that "speaks nothing", and that is
   true of its imports. It now exports about 140 symbols of three kinds: the
@@ -98,7 +94,7 @@ the fix; none is started.
   its purpose is in its path. This is a relocation, not new weight, and it is
   the lowest-value item here.
 
-### 6. `hook.Main` asks for the payload twice
+### 5. `hook.Main` asks for the payload twice
 
 - `hook.Main(arguments, usage, named, payload any, translate func() (Report,
   bool))` takes a pointer to decode into and a closure that captures the same
@@ -106,7 +102,7 @@ the fix; none is started.
 - `Main[P any](arguments, usage, named, translate func(P) (session.Report,
   bool))` decodes into a fresh `P` and hands it over.
 
-### 7. Housekeeping
+### 6. Housekeeping
 
 - Four stale git worktrees under `.claude/worktrees/` and
   `agent-notify/.claude/worktrees/` hold older trees, including sketchybar and

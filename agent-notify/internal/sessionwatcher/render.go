@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/lassoColombo/agent-notify/session"
@@ -22,21 +23,26 @@ type renderer struct {
 	binary string
 	asked  session.Capabilities
 	logger *slog.Logger
-	// theWorldNow is read at the moment of rendering, so a render that waited
-	// paints what is true now.
-	theWorldNow func(wantEnded bool) []session.Record
 
 	// woken holds at most one: it coalesces, because a render paints the
 	// whole world, and it serialises, because two `zellij action rename-pane`
 	// in flight together is how a pane ends up wearing the wrong name.
 	woken chan struct{}
+	// handed is the world the last wake brought, the same one every other
+	// display was handed (D-92). It is taken at the moment of rendering, so a
+	// render that waited paints the newest it was given.
+	mu     sync.Mutex
+	handed []session.Record
 
 	// shown is what this display was last handed. Kept here because a process
 	// started fresh for one render remembers nothing.
 	shown session.LastShown
 }
 
-func (r *renderer) wake() {
+func (r *renderer) wake(world []session.Record) {
+	r.mu.Lock()
+	r.handed = world
+	r.mu.Unlock()
 	select {
 	case r.woken <- struct{}{}:
 	default:
@@ -55,8 +61,18 @@ func (r *renderer) serve(ctx context.Context) {
 }
 
 func (r *renderer) renderOnce() {
+	r.mu.Lock()
+	world := r.handed
+	r.mu.Unlock()
+	if !r.asked.WantEnded {
+		// The world is shared with every other display and not written.
+		world = slices.DeleteFunc(slices.Clone(world), func(record session.Record) bool {
+			return record.Kernel == session.Ended
+		})
+	}
+
 	first := !r.shown.HasSeenAView()
-	changed, departed := r.shown.Replace(r.theWorldNow(r.asked.WantEnded), r.asked.WakeOn)
+	changed, departed := r.shown.Replace(world, r.asked.WakeOn)
 	if !first && len(changed) == 0 && !departed {
 		return
 	}
@@ -74,7 +90,8 @@ func (r *renderer) renderOnce() {
 }
 
 // startRenderers is one renderer per display that answers `render`, rebuilt on
-// reload. One already running keeps its picture of what it was last shown.
+// reload. One already running keeps its picture of what it was last shown; a
+// new one is drawn by the reconcile that follows, with the world it hands over.
 func (w *Watcher) startRenderers(ctx context.Context) {
 	if w.renderers == nil {
 		w.renderers = map[string]*renderer{}
@@ -96,13 +113,10 @@ func (w *Watcher) startRenderers(ctx context.Context) {
 
 		drawing := &renderer{
 			name: name, binary: settings.Integration[name].Binary, asked: answers[name],
-			logger: w.logger, theWorldNow: w.opened.WhatIsRunning,
-			woken: make(chan struct{}, 1),
+			logger: w.logger, woken: make(chan struct{}, 1),
 		}
 		w.renderers[name] = drawing
 		go drawing.serve(ctx)
-		// The cold path: a world to draw and no change to be told about.
-		drawing.wake()
 		w.logger.Info("rendering on demand", "display", name,
 			"binary", drawing.binary, "wake on", drawing.asked.WakeOn)
 	}
@@ -115,8 +129,8 @@ func (w *Watcher) startRenderers(ctx context.Context) {
 	}
 }
 
-func (w *Watcher) drawEverythingAgain() {
+func (w *Watcher) drawEverythingAgain(world []session.Record) {
 	for _, drawing := range w.renderers {
-		drawing.wake()
+		drawing.wake(world)
 	}
 }
