@@ -64,6 +64,12 @@ type Watcher struct {
 // Start takes the lock and opens the watches. Losing the race for the lock is
 // not a failure: anyone may start a session-watcher (§A9.2).
 func Start(layout paths.Layout, toTerminal bool) (*Watcher, error) {
+	// The directories first, because the lock lives in one of them: on a
+	// fresh root `watcher run` otherwise fails to open a lock file in a
+	// directory nothing has created yet.
+	if err := layout.Create(); err != nil {
+		return nil, err
+	}
 	held, err := onewatcher.Take(layout)
 	if err != nil {
 		return nil, err
@@ -123,6 +129,9 @@ func (w *Watcher) Run(ctx context.Context) error {
 
 	w.askWhatEachIntegrationAnswers()
 	w.startRenderers(ctx)
+	// The answers are a property of the programs on disk, asked here and on
+	// reload, so the report is written at those two moments and no other.
+	w.writeReport(w.opened.Settings)
 	// Reconciling from the store at startup is what makes every missed wake-up
 	// harmless (§A9.1, R4).
 	w.reconcile("startup")
@@ -146,7 +155,6 @@ func (w *Watcher) Run(ctx context.Context) error {
 		case why := <-woken:
 			w.reconcile(why)
 		case <-tick.C:
-			w.writeReport(w.opened.Settings)
 			if w.worldIsGone() {
 				w.logger.Info("the state directory is gone; nothing left to watch",
 					"state", w.opened.Layout.State)

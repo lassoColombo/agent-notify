@@ -7,6 +7,7 @@ package main
 
 import (
 	"encoding/json"
+	"github.com/lassoColombo/agent-notify/hook"
 	"strings"
 
 	"github.com/lassoColombo/agent-notify/session"
@@ -239,28 +240,6 @@ func endedBecause(reason string) string {
 	case "other", "":
 		return "exited"
 	default:
-		return kebab(reason)
+		return hook.Detail(reason)
 	}
-}
-
-// kebab makes a detail out of whatever word the agent used. Details share one
-// unprefixed namespace across agents (§A5.8), so `permission-prompt` means the
-// same thing whoever wrote it; the spelling convention is enforced here, in the
-// adapter, rather than by core.
-func kebab(word string) string {
-	var out strings.Builder
-	for i, letter := range word {
-		switch {
-		case letter >= 'A' && letter <= 'Z':
-			if i > 0 {
-				out.WriteByte('-')
-			}
-			out.WriteRune(letter + 32)
-		case letter == '_' || letter == ' ':
-			out.WriteByte('-')
-		default:
-			out.WriteRune(letter)
-		}
-	}
-	return out.String()
 }

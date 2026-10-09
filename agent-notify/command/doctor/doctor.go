@@ -289,7 +289,7 @@ func reportIntegrations(
 			return
 		}
 		fmt.Printf("%-12s %-5s %s\n", "integrations", "--",
-			"no report yet — the session-watcher writes one on its first sweep")
+			"no report yet — the session-watcher writes one when it starts")
 		return
 	}
 

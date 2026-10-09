@@ -12,6 +12,7 @@ package main
 
 import (
 	"cmp"
+	"github.com/lassoColombo/agent-notify/hook"
 	"strings"
 
 	"github.com/lassoColombo/agent-notify/session"
@@ -229,7 +230,7 @@ func Translate(
 		// died before the assistant said anything, and then the raw detail is
 		// better than silence.
 		report.Event = session.TurnFailed
-		report.Detail = kebab(payload.Error)
+		report.Detail = hook.Detail(payload.Error)
 		report.Message = text(cmp.Or(payload.LastAssistantMessage, payload.ErrorDetails))
 		return report, true
 
@@ -243,7 +244,7 @@ func Translate(
 			return session.Report{}, false
 		}
 		report.Event = session.BlockedOnHuman
-		report.Detail = kebab(kind)
+		report.Detail = hook.Detail(kind)
 		report.Message = text(payload.Message)
 		return report, true
 
@@ -273,7 +274,7 @@ func endedBecause(reason string) string {
 	case "other", "prompt_input_exit", "":
 		return "exited"
 	default:
-		return kebab(reason)
+		return hook.Detail(reason)
 	}
 }
 
@@ -285,11 +286,4 @@ func text(message string) *string {
 		return nil
 	}
 	return &trimmed
-}
-
-// kebab puts an agent's own word into the shared detail namespace, which is
-// lowercase-kebab by convention (§A5.8). The convention is not enforced by
-// core, so it is enforced here.
-func kebab(word string) string {
-	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(word)), "_", "-")
 }

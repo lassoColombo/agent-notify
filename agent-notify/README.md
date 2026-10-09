@@ -1017,7 +1017,7 @@ even for an agent with no session-start hook at all.
 
 The rules every display would otherwise write for itself, and write slightly
 differently, are here once: `Record.DisplayName()`, `Record.State()`,
-`ByUrgency`, `MostUrgent`, `Differs`, `JustArrived`, `Ago`, and
+`ByUrgency`, `MostUrgent`, `Differs`, `Ago`, and
 `NewPalette` for the user's glyph table.
 
 ### Writing an agent-integration

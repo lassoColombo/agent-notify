@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/lassoColombo/agent-notify/session"
@@ -113,13 +112,4 @@ func truncate(text string, width int) string {
 		return ""
 	}
 	return string(runes[:width])
-}
-
-// plural is the difference between "and 1 more" and "and 2 more", which is the
-// kind of thing that looks like nothing and reads like a bug.
-func plural(n int, one, many string) string {
-	if n == 1 {
-		return fmt.Sprintf("%d %s", n, one)
-	}
-	return fmt.Sprintf("%d %s", n, many)
 }
