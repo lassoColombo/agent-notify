@@ -313,7 +313,7 @@ func (w *Watcher) derive(live []session.Record) {
 				continue
 			}
 
-			coordinates, err := containers.Interpret(one, captured, interpretTimeout)
+			coordinates, err := containers.Interpret(one, record.CapturedContext, interpretTimeout)
 			if err != nil {
 				failures := w.giveUpOn(record.Key.String(), one.Name)
 				level := w.logger.Warn

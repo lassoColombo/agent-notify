@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/lassoColombo/agent-notify/container"
+	"github.com/lassoColombo/agent-notify/session"
 	"github.com/lassoColombo/agent-notify/subscribe"
 	"github.com/lassoColombo/agent-notify/tool"
 )
@@ -71,12 +72,12 @@ func main() {
 	}
 	os.Exit(subscribe.Main(me, subscribe.Commands{
 		Named: map[string]func([]string) int{"install": install, "uninstall": uninstall},
-		Interpret: func(captured json.RawMessage) (any, error) {
+		Interpret: func(captured json.RawMessage, ancestry []session.Ancestor) (any, error) {
 			resolved, err := settings()
 			if err != nil {
 				return nil, err
 			}
-			return Interpret(resolved.Title, captured)
+			return Interpret(resolved.Title, captured, ancestry)
 		},
 		// The binary is looked up here and not before dispatch: capture and
 		// interpret do not touch aerospace, and a window manager that is not

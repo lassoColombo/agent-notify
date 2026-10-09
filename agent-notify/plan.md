@@ -1328,6 +1328,12 @@ If no ancestor matches — a shell wrapper that re-execs, a renamed binary — t
 chain is recorded anyway, the agent pid is marked unknown, and liveness falls
 back to the lease (§A8.5). The hook never fails over this.
 
+**[amended 2026-10-09 — D-93]** The recorded chain has a reader: it is handed
+to every container's `interpret-environment` beside the container's own entry,
+which is how a container that places by process — aerospace, whose window is
+the nearest ancestor that owns one — knows the process without walking the
+tree a second time.
+
 - **The nearest match wins**, which is what makes a claude session running
   inside a claude session resolve to the inner one: the session you are in.
 - **[decided 2026-09-17 — D-29]** A configured `binary` matches three
@@ -1663,6 +1669,7 @@ reason.
 | Where it runs | as a child of the hook, inside the agent's process tree | in the connected daemon, off the hot path |
 | Why there | the agent's environment exists only inside the agent's process, so only a descendant can read it | because it is allowed to block |
 | Contract | gather local, immediately available state: variables, a file, cwd. **Never talk to your tool, never open a socket, never wait.** | ask zellij which tab holds pane 7, ask aerospace which workspace the window is on |
+| Receives | nothing | **[amended 2026-10-09 — D-93]** the record's `captured_context`, narrowed to this integration: its own entry under `by`, and the chain core walked as `ancestry` |
 | Returns | an opaque blob, stored under `captured_context.by.<name>` | coordinates, stored under `derived_context.<name>` |
 | On failure | after `hook.captureTimeout` it contributes nothing, the hook writes and exits, the next hook tries again | that integration has no coordinates; everything else is unaffected (R13) |
 
@@ -4983,6 +4990,42 @@ of this section is that it prevents re-litigating.
     hands a new display its first world.
   - **Not changed.** `subscribe.Run` reads for itself, once per wake: a
     display that owns its process has nobody to be handed anything by.
+
+- **D-93** (2026-10-09) — **The chain core walks is handed to
+  `interpret-environment`, and aerospace walks nothing.** *Amends* §A10.3's
+  table (what `interpret-environment` receives) and §A8.4 (what the recorded
+  chain is for). Found by the architecture review of the same day.
+
+  - **What was wrong.** The hook walked the process tree to find the agent
+    and stored the chain as `captured_context.ancestry`, which nothing then
+    read. aerospace walked the same tree again inside its own
+    `capture-environment`, with its own sysctl reader, its own `commandName`,
+    a bound of twelve against core's ten and its own `x/sys` dependency,
+    because `interpret-environment` was handed only the integration's own
+    blob. One fact, stored twice on every record, read from the copy that
+    cost a second walker.
+  - **What a container is handed now** is the record's `captured_context`
+    narrowed to itself: `captured_at`, `ancestry`, and `by` holding its own
+    entry and nobody else's, since the others are as opaque to it as to core
+    (R7). `subscribe.Commands.Interpret` takes the entry and the chain as two
+    arguments; zellij ignores the second. Replaying a stored record through a
+    container by hand is `jq .captured_context <record> | <container>
+    interpret-environment`, which is the test §A7.4 promised.
+  - **The chain is core's and starts at the hook.** It is one rung nearer
+    the agent than aerospace's was, so core's bound of ten reaches as far as
+    aerospace's eleven did. aerospace copies pid and name into its
+    coordinates and drops the start time, which is core's business and would
+    otherwise ride in every delta (§A13.1).
+  - **What went from aerospace.** `ancestry.go`, its `!darwin` stub and its
+    walk test, `Self`, and `golang.org/x/sys` as a direct dependency; its
+    capture is the template's variables and nothing else. Off darwin it no
+    longer captures an empty chain; the chain is wherever core runs.
+  - **The other way out was to stop storing the chain** and let aerospace
+    keep its walker. Rejected because aerospace cannot share core's walker
+    any other way — `internal/process` is internal, and will stay so when
+    M18 publishes — and because the stored chain was designed for exactly
+    this reader (D-44: "what is stored instead is two keys: the process
+    chain…"). Storing it once and reading it is the shape that was intended.
 
 **The payload discussion of 2026-09-17 is now ratified**
  in D-10 through D-18.

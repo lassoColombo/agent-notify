@@ -35,6 +35,12 @@ a decision in `agent-notify/plan.md` §A19.
   the one decision, `process.Ended`, for the watcher, `list` and the SDK
   alike; the watcher reads once per wake and hands the world to every
   renderer, which drops ended sessions unless it asked for them.
+- **Core captured a process chain nobody read** (D-93). The chain now has
+  its reader: `interpret-environment` is handed the record's
+  `captured_context` narrowed to the container, its own entry and core's
+  `ancestry`, and aerospace's walker, its `!darwin` stub, its walk test and
+  its direct `x/sys` dependency are gone. `TestAContainerIsHandedItsOwnEntryAndTheChain`
+  pins the shape, including that another integration's entry is not handed over.
 - **Dead since D-87.** `JustArrived`, `Arrival`, `Announced`, `Same` and
   `moreRecent` in `session/display.go`, with `arrival_test.go`, had no caller
   once the menu bar went. `plural` in the notifier's `preview.go` likewise.
@@ -45,22 +51,7 @@ a decision in `agent-notify/plan.md` §A19.
 Ordered by what they cost, most first. Each names the code and the shape of
 the fix; none is started.
 
-### 1. Core captures a process chain nobody reads
-
-- `hook.look` walks the ancestry and stores it as `captured_context.ancestry`
-  (`session/record.go`). Outside tests the only reference to the field is
-  `Record.Clone`.
-- aerospace walks the tree a second time in its own capture
-  (`tool-integrations/agent-notify-aerospace-container/ancestry.go`), with its
-  own `commandName`, a bound of 12 against core's 10, and its own `x/sys`
-  dependency, because `interpret-environment` is handed only the integration's
-  own blob.
-- Two ways out, and either is better than both walkers: hand core's chain to
-  `Interpret` beside the blob and delete the aerospace walker; or stop storing
-  a chain on every record and let aerospace keep its own. The first keeps
-  §A8.4's chain where `doctor` could one day show it; the second is less code.
-
-### 2. The render decision is written twice
+### 1. The render decision is written twice
 
 - `subscribe/run.go` and `internal/sessionwatcher/render.go` both do
   `LastShown.Replace`, then "first view, or something changed, or something
@@ -68,7 +59,7 @@ the fix; none is started.
 - One method on `LastShown` — replace the world and answer with the view to
   hand over, or nothing — serves both.
 
-### 3. Integrations open the log twice
+### 2. Integrations open the log twice
 
 - zellij's `main.go` and the notifier's `main.go` and `alerter.go` call
   `logs.Open(Name)` while `subscribe.Integration.core()` has already opened a
@@ -78,7 +69,7 @@ the fix; none is started.
   variable that sets the level is reached through `subscribe` like everything
   else.
 
-### 4. `session` carries three vocabularies
+### 3. `session` carries three vocabularies
 
 - The package is documented as the floor that "speaks nothing", and that is
   true of its imports. It now exports about 140 symbols of three kinds: the
@@ -94,7 +85,7 @@ the fix; none is started.
   its purpose is in its path. This is a relocation, not new weight, and it is
   the lowest-value item here.
 
-### 5. `hook.Main` asks for the payload twice
+### 4. `hook.Main` asks for the payload twice
 
 - `hook.Main(arguments, usage, named, payload any, translate func() (Report,
   bool))` takes a pointer to decode into and a closure that captures the same
@@ -102,7 +93,7 @@ the fix; none is started.
 - `Main[P any](arguments, usage, named, translate func(P) (session.Report,
   bool))` decodes into a fresh `P` and hands it over.
 
-### 6. Housekeeping
+### 5. Housekeeping
 
 - Four stale git worktrees under `.claude/worktrees/` and
   `agent-notify/.claude/worktrees/` hold older trees, including sketchybar and

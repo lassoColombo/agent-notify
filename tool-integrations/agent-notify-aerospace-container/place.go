@@ -3,11 +3,12 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/lassoColombo/agent-notify/subscribe"
 	"os"
 	"strings"
 
 	"github.com/lassoColombo/agent-notify/container"
+	"github.com/lassoColombo/agent-notify/session"
+	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
 // Name is what this integration calls itself: its config table, its entry in
@@ -54,10 +55,12 @@ var me = subscribe.Integration{Name: Name}
 // So the window is found rather than known, and it is found from two keys,
 // neither of which is sufficient alone:
 //
-//   - **The process chain**, captured inside the agent. The nearest ancestor
-//     that owns any window is the terminal, and when it owns exactly one the
-//     answer is exact. This is the whole of the no-multiplexer case, and it is
-//     the only key that is exact.
+//   - **The process chain**, walked by core inside the agent when it looks
+//     for the agent's own process (§A8.4), and handed to `interpret-environment`
+//     beside what this program captured (D-93). The nearest ancestor that owns
+//     any window is the terminal, and when it owns exactly one the answer is
+//     exact. This is the whole of the no-multiplexer case, and it is the only
+//     key that is exact.
 //   - **A window-title prefix**, built from the agent's environment by a
 //     template. It is what survives a multiplexer: zellij titles its terminal
 //     window `<session> | <active tab>`, so the session name the agent already
@@ -91,14 +94,14 @@ type Ancestor struct {
 	Command string `json:"command,omitempty"`
 }
 
-// Captured is what `capture-environment` returns: the process chain, and the
-// values of whatever variables the title template names.
+// Captured is what `capture-environment` returns: the values of whatever
+// variables the title template names. The process chain is not here because
+// core walks it, once, when it looks for the agent (D-93).
 //
 // Nothing here asks aerospace anything. That is the rule for this half and it
 // is not a style preference: this runs inside the agent's process tree, on the
 // path the agent waits on (R1, R3).
 type Captured struct {
-	Chain  []Ancestor        `json:"chain,omitempty"`
 	Values map[string]string `json:"values,omitempty"`
 }
 
@@ -117,11 +120,11 @@ type Coordinates struct {
 // still be usable (R12).
 func (c Coordinates) ours() bool { return len(c.Chain) > 0 || c.Title != "" }
 
-// Capture reads the process chain and the variables the template names.
+// Capture reads the variables the template names.
 //
 // It cannot fail in a way worth reporting. A session whose template variables
-// are all unset returns a chain and no values, which is the ordinary case for
-// an agent in a bare terminal rather than an error anybody should see.
+// are all unset returns no values, which is the ordinary case for an agent in
+// a bare terminal rather than an error anybody should see.
 func Capture(template string) (any, error) {
 	values := map[string]string{}
 	for _, name := range placeholders(template) {
@@ -132,22 +135,28 @@ func Capture(template string) (any, error) {
 	if len(values) == 0 {
 		values = nil
 	}
-	return Captured{Chain: Ancestry(Self()), Values: values}, nil
+	return Captured{Values: values}, nil
 }
 
-// Interpret shapes what Capture returned into the two keys.
+// Interpret shapes what Capture returned, and the chain core walked, into the
+// two keys.
 //
 // It is pure, and the header says why: there is nothing about a window that is
 // worth remembering. What it does do is decide, once, whether this session has
 // any key at all — and answer `null` when it has none, which core reads as
 // "this layer has nothing to do for this session" and steps past (D-45).
-func Interpret(template string, captured json.RawMessage) (any, error) {
+func Interpret(template string, captured json.RawMessage, ancestry []session.Ancestor) (any, error) {
 	var given Captured
 	if err := json.Unmarshal(captured, &given); err != nil {
 		return nil, fmt.Errorf("what was captured is not this container's: %w", err)
 	}
 
-	coordinates := Coordinates{Chain: given.Chain}
+	var coordinates Coordinates
+	for _, rung := range ancestry {
+		// The pid and the name: a start time is core's business, and a
+		// coordinate rides in every delta (§A13.1).
+		coordinates.Chain = append(coordinates.Chain, Ancestor{PID: rung.PID, Command: rung.Command})
+	}
 	if title, complete := substitute(template, given.Values); complete {
 		coordinates.Title = title
 	}

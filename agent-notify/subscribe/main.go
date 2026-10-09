@@ -21,8 +21,10 @@ type Commands struct {
 	// owns its process.
 	Render func(session.View) error
 	// Interpret turns what Reads captured into coordinates. It runs in the
-	// session-watcher and may ask the tool (D-27).
-	Interpret func(captured json.RawMessage) (any, error)
+	// session-watcher and may ask the tool (D-27). Beside the capture comes
+	// core's own: the process chain from the hook upward, nearest first, for
+	// a container that places by process (§A8.4, D-93).
+	Interpret func(captured json.RawMessage, ancestry []session.Ancestor) (any, error)
 	// Focus brings one place to the front, validating the coordinates at the
 	// moment of use (R17).
 	Focus func(coordinates json.RawMessage) (container.Outcome, error)
@@ -136,7 +138,13 @@ func (c Commands) answer(i Integration, command string, stdin io.Reader) (any, e
 		if err != nil {
 			return nil, err
 		}
-		return c.Interpret(given)
+		// Core hands the record's captured_context narrowed to this
+		// integration: its own entry, and the chain core walked (D-93).
+		var captured session.CapturedContext
+		if err := json.Unmarshal(given, &captured); err != nil {
+			return nil, fmt.Errorf("what arrived on stdin is not a captured context: %w", err)
+		}
+		return c.Interpret(captured.By[i.Name], captured.Ancestry)
 	case session.MethodFocus:
 		if c.Focus == nil {
 			return nil, nil

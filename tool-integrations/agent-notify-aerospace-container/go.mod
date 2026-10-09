@@ -2,10 +2,11 @@ module github.com/lassoColombo/agent-notify-aerospace-container
 
 go 1.26.0
 
+require github.com/lassoColombo/agent-notify v0.0.0
+
 require (
-	github.com/lassoColombo/agent-notify v0.0.0
-	github.com/pelletier/go-toml/v2 v2.4.3
-	golang.org/x/sys v0.48.0
+	github.com/pelletier/go-toml/v2 v2.4.3 // indirect
+	golang.org/x/sys v0.48.0 // indirect
 )
 
 // Core is not published yet. This line comes out in M18, when it is; until

@@ -103,9 +103,21 @@ func Configured(settings config.Config, answers map[string]session.Capabilities)
 	return found, problems
 }
 
-// Interpret turns a captured blob into coordinates.
-func Interpret(c Container, captured json.RawMessage, timeout time.Duration) (json.RawMessage, error) {
-	return tool.Ask(c.Binary, session.MethodInterpret, captured, timeout)
+// Interpret turns what was captured into coordinates. The container is handed
+// the record's captured_context narrowed to itself: its own entry, since the
+// others are opaque to it as to core (R7), and the chain core walked from the
+// hook upward, which is how a container that places by process knows the
+// process (§A8.4, D-93).
+func Interpret(c Container, captured session.CapturedContext, timeout time.Duration) (json.RawMessage, error) {
+	handed, err := json.Marshal(session.CapturedContext{
+		CapturedAt: captured.CapturedAt,
+		Ancestry:   captured.Ancestry,
+		By:         map[string]json.RawMessage{c.Name: captured.By[c.Name]},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return tool.Ask(c.Binary, session.MethodInterpret, handed, timeout)
 }
 
 // Focus brings one container's place to the front.

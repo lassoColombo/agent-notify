@@ -66,14 +66,18 @@ running them by hand is the fastest way to see what this thinks:
 
 ```
 $ agent-notify-aerospace-container capture-environment
-{"chain":[{"pid":67317,"command":"agent-notify-aer"},{"pid":67315,"command":"zsh"},
-{"pid":30426,"command":"claude"},{"pid":29604,"command":"nu"},{"pid":29601,"command":"zellij"}],
-"values":{"ZELLIJ_SESSION_NAME":"agent-notify"}}
+{"values":{"ZELLIJ_SESSION_NAME":"agent-notify"}}
 ```
 
+`interpret-environment` is handed the record's `captured_context`: this
+program's entry, and the process chain core walked from the hook upward when it
+looked for the agent (D-93). The quickest way to hand it one by hand is to
+replay a stored record:
+
 ```
-$ agent-notify-aerospace-container capture-environment | agent-notify-aerospace-container interpret-environment
-{"chain":[…],"title":"agent-notify | "}
+$ jq .captured_context "$AGENT_NOTIFY_ROOT"/state/sessions/<key>.json | agent-notify-aerospace-container interpret-environment
+{"chain":[{"pid":67315,"command":"agent-notify-cla"},{"pid":30426,"command":"claude"},
+{"pid":29604,"command":"nu"},{"pid":29601,"command":"zellij"}],"title":"agent-notify | "}
 ```
 
 ```
@@ -82,7 +86,7 @@ $ … | agent-notify-aerospace-container focused
 ```
 
 The command names in a chain are truncated to sixteen characters, which is why
-this program appears as `agent-notify-aer`: they come from the kernel's
+the hook appears as `agent-notify-cla`: core reads them from the kernel's
 seventeen-byte `p_comm`, and that buffer is not cleared between uses, so the
 name is cut at the first NUL rather than trimmed from the right.
 
@@ -125,7 +129,7 @@ which is sufficient on its own:
 
 | key | where it comes from | when it is exact |
 | --- | --- | --- |
-| the process chain | walked inside the agent by `capture-environment`, up to twelve rungs | when the nearest ancestor that owns a window owns exactly one |
+| the process chain | walked inside the agent by core's hook, which climbs up to ten rungs looking for the agent, and handed to `interpret-environment` (D-93) | when the nearest ancestor that owns a window owns exactly one |
 | a window-title prefix | a template, filled in from the agent's environment | when the title is specific to this session |
 
 The chain is walked nearest-first, and the answer is every window belonging to
@@ -192,8 +196,8 @@ speak anyway.
 ### Prerequisites
 
 - **macOS.** aerospace is a macOS window manager. This program builds and its
-  pure half still tests everywhere else, but off darwin it captures an empty
-  chain and places nothing.
+  pure half still tests everywhere else, but off darwin there is nothing for
+  it to place.
 - **[AeroSpace](https://github.com/nikitabobko/AeroSpace) itself**, running.
   `brew install --cask nikitabobko/tap/aerospace`. Verified against 0.20.3;
   `aerospace --version` prints the CLI and the app server separately and both
@@ -271,7 +275,7 @@ checked by using it.
 The direct checks are these:
 
 ```sh
-agent-notify-aerospace-container capture-environment          # a chain, and your session name
+agent-notify-aerospace-container capture-environment          # your session name, if the template names it
 agent-notify focus-session <session>                          # the real thing
 agent-notify focused <session>                                # yes / no / cannot-tell
 ```
@@ -408,12 +412,12 @@ exported one, is a build-time hazard rather than a runtime one — see
   behaviour on expiry, which is what the rule actually asks for: the subcommand
   answers "I could not", core reads that as a container that did not run, and
   nothing waits.
-- **How far the process walk climbs is 12 rungs**, likewise. The distance from
-  here to the terminal is not fixed — this program, the hook, the agent, a
-  shell, a login, and whatever wrapper somebody put in between — so it climbs to
-  the top rather than counting steps, and the bound only exists because "a
-  process tree cannot contain a cycle" is not the same sentence as "a process
-  tree does not contain a cycle".
+- **How far the process walk climbs is core's to say**, and it is ten rungs
+  from the hook (§A8.4). The distance from there to the terminal is not fixed —
+  the agent, a shell, a login, and whatever wrapper somebody put in between —
+  so core climbs to the top rather than counting steps, and the bound only
+  exists because "a process tree cannot contain a cycle" is not the same
+  sentence as "a process tree does not contain a cycle".
 - **Which window wins when several match.** That order is specificity, argued
   above, and not a preference.
 - **The environment variables to capture.** They come out of the title template,
@@ -452,8 +456,8 @@ env -u GOROOT go test ./...
 The whole of the interesting behaviour — which window, and whether there is an
 answer at all — is a pure function of a window list, so it is tested on a machine
 with no window manager on it. The subprocess half runs against a stand-in that
-answers the way aerospace answers. The process walk asks the real kernel,
-because the point of it is that it agrees with the kernel.
+answers the way aerospace answers. The process walk is core's, and core tests
+it against the real kernel.
 
 What no test covers is whether a focus actually **moved** anybody. See
 [Prove it moved something](#prove-it-moved-something).
@@ -473,8 +477,9 @@ What no test covers is whether a focus actually **moved** anybody. See
 - **`doctor` cannot say anything useful about a container** beyond that its
   table parses, because a container never connects to the session-watcher. A
   fuller `doctor` is also M18.
-- **Off macOS this is a stub.** The non-darwin build captures an empty chain and
-  therefore places nothing. It exists so the pure half still builds and tests
-  everywhere; a Linux window manager would be a different integration.
+- **Off macOS there is nothing to place.** This program has no platform code
+  of its own since D-93 — the process walk is core's — so it builds and its
+  pure half tests everywhere, and `aerospace` is simply not there to ask. A
+  Linux window manager would be a different integration.
 - **tmux is not supported by the default template**, and cannot be by any
   template, because it puts nothing nameable in an agent's environment.

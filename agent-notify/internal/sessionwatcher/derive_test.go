@@ -79,3 +79,54 @@ func TestASlowContainerDoesNotDelayADraw(t *testing.T) {
 	})
 }
 
+// TestAContainerIsHandedItsOwnEntryAndTheChain is the shape of what arrives
+// on `interpret-environment`'s stdin (D-93): the record's captured_context
+// with this container's entry and nobody else's, and the chain core walked.
+func TestAContainerIsHandedItsOwnEntryAndTheChain(t *testing.T) {
+	atATestablePace(t, 200*time.Millisecond)
+	root := shortRoot(t)
+	placer := filepath.Join(root, "agent-notify-placer")
+	handed := filepath.Join(root, "placer.handed")
+	write(t, placer, fmt.Sprintf("#!/bin/sh\ncase \"$1\" in\n"+
+		"  %s) printf '%%s\\n' '{\"version\":\"0.0.0-dev\",\"methods\":[\"interpret-environment\",\"focus\",\"focused\"]}' ;;\n"+
+		"  %s) cat > %s; printf '%%s\\n' '{\"placed\":true}' ;;\n  *) exit 1 ;;\nesac\n",
+		session.CapabilitiesCommand, session.MethodInterpret, handed))
+	if err := os.Chmod(placer, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	write(t, root+"/config.toml", fmt.Sprintf(
+		"[integration.placer]\nbinary = %q\n\n[container]\norder = [\"placer\"]\n", placer))
+
+	layout := running(t, root)
+	applyToTheStore(t, layout, session.Report{
+		Key:     session.Key{Host: "mac", Agent: "fake", SessionID: "placed"},
+		Event:   session.TurnFinished,
+		Process: session.Process{PID: os.Getpid()},
+		CapturedContext: &session.CapturedContext{
+			Ancestry: []session.Ancestor{{PID: 7, Command: "claude"}, {PID: 3, Command: "ghostty"}},
+			By: map[string]json.RawMessage{
+				"placer": json.RawMessage(`{"pane":"1"}`),
+				"other":  json.RawMessage(`{"secret":"not for the placer"}`),
+			},
+		},
+	})
+
+	var given session.CapturedContext
+	waitFor(t, "the placer to be asked", func() bool {
+		content, err := os.ReadFile(handed)
+		return err == nil && json.Unmarshal(content, &given) == nil
+	})
+	if len(given.Ancestry) != 2 || given.Ancestry[1].Command != "ghostty" {
+		t.Errorf("the placer was handed the chain %+v, want the two rungs that were captured", given.Ancestry)
+	}
+	if string(given.By["placer"]) != `{"pane":"1"}` {
+		t.Errorf("the placer was handed %s as its own entry, want what it captured", given.By["placer"])
+	}
+	if _, leaked := given.By["other"]; leaked || len(given.By) != 1 {
+		t.Errorf("the placer was handed %d entries %v, want only its own", len(given.By), given.By)
+	}
+	if given.CapturedAt.IsZero() {
+		t.Error("the placer was handed no captured_at, want the one the store stamped")
+	}
+}
+

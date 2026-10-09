@@ -27,7 +27,7 @@ func main() {
 			defer closeLog.Close()
 			return (&Display{Zellij: settings.Zellij, Glyphs: settings.Glyphs, Logger: log}).Render(view)
 		},
-		Interpret: func(captured json.RawMessage) (any, error) {
+		Interpret: func(captured json.RawMessage, _ []session.Ancestor) (any, error) {
 			settings, err := resolved()
 			if err != nil {
 				return nil, err

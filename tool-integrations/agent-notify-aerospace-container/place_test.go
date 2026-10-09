@@ -2,10 +2,13 @@ package main
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lassoColombo/agent-notify/container"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // The two setups every test here is one of.
@@ -214,9 +217,13 @@ func TestCaptureReadsOnlyWhatTheTemplateNames(t *testing.T) {
 	}
 }
 
+// TestInterpretBuildsTheKey: the title from what this program captured, the
+// chain from what core walked (D-93), with a start time core keeps and a
+// coordinate does not.
 func TestInterpretBuildsTheKey(t *testing.T) {
-	captured := []byte(`{"chain":[{"pid":3655,"command":"zellij"}],"values":{"ZELLIJ_SESSION_NAME":"home"}}`)
-	answer, err := Interpret("{ZELLIJ_SESSION_NAME} | ", captured)
+	captured := []byte(`{"values":{"ZELLIJ_SESSION_NAME":"home"}}`)
+	walked := []session.Ancestor{{PID: 3655, Command: "zellij", StartedAt: time.Unix(1, 0)}}
+	answer, err := Interpret("{ZELLIJ_SESSION_NAME} | ", captured, walked)
 	if err != nil {
 		t.Fatalf("Interpret: %v", err)
 	}
@@ -227,16 +234,16 @@ func TestInterpretBuildsTheKey(t *testing.T) {
 	if coordinates.Title != "home | " {
 		t.Errorf("title = %q, want %q", coordinates.Title, "home | ")
 	}
-	if len(coordinates.Chain) != 1 {
-		t.Errorf("chain = %+v, want the one that was captured", coordinates.Chain)
+	if want := []Ancestor{{PID: 3655, Command: "zellij"}}; !reflect.DeepEqual(coordinates.Chain, want) {
+		t.Errorf("chain = %+v, want %+v: the one core walked, pid and name only", coordinates.Chain, want)
 	}
 }
 
 // TestAHalfBuiltKeyIsNoKey: a template with a hole in it matches windows that
 // have nothing to do with this session.
 func TestAHalfBuiltKeyIsNoKey(t *testing.T) {
-	captured := []byte(`{"chain":[{"pid":3434,"command":"ghostty"}]}`)
-	answer, err := Interpret("{ZELLIJ_SESSION_NAME} | ", captured)
+	answer, err := Interpret("{ZELLIJ_SESSION_NAME} | ", []byte(`{}`),
+		[]session.Ancestor{{PID: 3434, Command: "ghostty"}})
 	if err != nil {
 		t.Fatalf("Interpret: %v", err)
 	}
@@ -250,7 +257,7 @@ func TestAHalfBuiltKeyIsNoKey(t *testing.T) {
 // layer has nothing to do for this session" and steps past it, so the pane
 // inside still gets focused.
 func TestNothingToPlaceAnswersNull(t *testing.T) {
-	answer, err := Interpret("{ZELLIJ_SESSION_NAME} | ", []byte(`{}`))
+	answer, err := Interpret("{ZELLIJ_SESSION_NAME} | ", []byte(`{}`), nil)
 	if err != nil {
 		t.Fatalf("Interpret: %v", err)
 	}

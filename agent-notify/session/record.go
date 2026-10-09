@@ -144,8 +144,10 @@ type CapturedContext struct {
 	// answer the first time, leaves it alone: it dates the snapshot, and a
 	// top-up is of the same environment (D-90).
 	CapturedAt time.Time `json:"captured_at,omitzero"`
-	// Ancestry is core's own capture, used to recognise which agent this is
-	// (§A8.4) and to resolve the ambient session (§A7.4.2).
+	// Ancestry is core's own capture: the process chain from the hook upward,
+	// nearest first, walked to find the agent (§A8.4) and handed to each
+	// container's interpret-environment beside its own entry, which is how
+	// one that places by process knows the process (D-93).
 	Ancestry []Ancestor `json:"ancestry,omitempty"`
 	// By maps an integration's name to whatever its capture-environment
 	// returned. Opaque to core, in both directions (R7).
