@@ -1023,8 +1023,7 @@ differently, are here once: `Record.DisplayName()`, `Record.State()`,
 A translation and one call.
 
 ```go
-var payload Payload
-os.Exit(hook.Main(os.Args[1:], usage, install, &payload, func() (session.Report, bool) {
+os.Exit(hook.Main(os.Args[1:], usage, install, func(payload Payload) (session.Report, bool) {
     return session.Report{
         Key:     session.Key{Agent: "claude", SessionID: payload.SessionID},
         Event:   session.TurnFinished,
@@ -1034,8 +1033,8 @@ os.Exit(hook.Main(os.Args[1:], usage, install, &payload, func() (session.Report,
 ```
 
 `Main` hands `install` its arguments, refuses any other word with the usage,
-and otherwise decodes the payload on stdin, calls the translation and records
-what it returns. It never exits non-zero and never writes to stdout, because
+and otherwise decodes the payload on stdin into a fresh `Payload`, hands it
+to the translation and records what it returns. It never exits non-zero and never writes to stdout, because
 an agent reads both as verdicts. `LastResponses` reads the agent's transcript
 backwards for what the newest responses cost, given the one function that
 knows what a line of that transcript looks like.

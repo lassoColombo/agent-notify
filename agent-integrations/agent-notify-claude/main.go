@@ -8,13 +8,12 @@ import (
 )
 
 func main() {
-	var payload Payload
 	os.Exit(hook.Main(os.Args[1:],
 		"agent-notify-claude reads one hook payload on stdin.\n"+
 			"  agent-notify-claude install [--print] [--settings PATH]\n"+
 			"  agent-notify-claude uninstall [--settings PATH]\n",
 		map[string]func([]string) int{"install": install, "uninstall": uninstall},
-		&payload, func() (session.Report, bool) {
+		func(payload Payload) (session.Report, bool) {
 			return Translate(payload.HookEventName, payload,
 				WhatClaudeKnowsAboutThisSession(payload.SessionID),
 				WhatTheTranscriptSays(payload.TranscriptPath),

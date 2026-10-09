@@ -13,16 +13,17 @@ import (
 // Main is an agent-integration's main. `named` are the program's own
 // subcommands, `install` and `uninstall`, which a person runs and which may
 // speak and fail; any other word on the command line is refused with the
-// usage. Otherwise this is a hook: the payload on stdin is decoded into
-// `payload`, handed to translate, and what comes back is recorded.
+// usage. Otherwise this is a hook: the payload on stdin is decoded into a
+// fresh P, handed to translate, and what comes back is recorded (D-97).
 //
 // A hook never exits non-zero and never writes to stdout. Claude and codex
 // both read exit code 2 as "block this" and stdout as a verdict, and a
 // notifier that stops an agent working is far worse than one that does not
 // notify (R2). A payload that does not parse is not an error either: an
-// agent sends a different shape per hook and adds fields between releases.
-func Main(arguments []string, usage string, named map[string]func([]string) int,
-	payload any, translate func() (session.Report, bool)) int {
+// agent sends a different shape per hook and adds fields between releases,
+// so translate is handed whatever did decode, down to the zero value.
+func Main[P any](arguments []string, usage string, named map[string]func([]string) int,
+	translate func(payload P) (session.Report, bool)) int {
 	if len(arguments) > 0 {
 		if run, known := named[arguments[0]]; known {
 			return run(arguments[1:])
@@ -30,8 +31,9 @@ func Main(arguments []string, usage string, named map[string]func([]string) int,
 		fmt.Fprint(os.Stderr, usage)
 		return 1
 	}
-	_ = json.NewDecoder(os.Stdin).Decode(payload)
-	if report, worth := translate(); worth {
+	var payload P
+	_ = json.NewDecoder(os.Stdin).Decode(&payload)
+	if report, worth := translate(payload); worth {
 		Record(report)
 	}
 	return 0

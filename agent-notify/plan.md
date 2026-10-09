@@ -5096,6 +5096,25 @@ of this section is that it prevents re-litigating.
     reader outside and is `maxKeyBytes`. Those were the only two exports
     nothing outside the package referenced.
 
+- **D-97** (2026-10-09) — **`hook.Main` decodes into a fresh payload and
+  hands it to the translation.** The last code point of the architecture
+  review of the same day.
+  - **What was wrong.** `Main(arguments, usage, named, payload any,
+    translate func() (Report, bool))` took a pointer to decode into and a
+    closure that reached back for the same variable, so both adapters
+    declared the variable, passed its address and captured it — three
+    mentions of one thing, and a shape in which the payload could be read
+    before it was decoded, or a different variable passed than captured,
+    with nothing to say so.
+  - **Now `Main[P any](arguments, usage, named, translate func(P) (Report,
+    bool))`** decodes into a fresh P and hands it over; P is inferred from
+    the translation's parameter, so an adapter's main is one call with no
+    variable in it. A payload that does not parse still reaches the
+    translation, as the zero value, because a hook never fails over an
+    agent's shape (R2). `Main` gained the tests it never had: the payload
+    arrives, a payload that is not JSON is still translated, and a word on
+    the command line is a subcommand or the usage.
+
 **The payload discussion of 2026-09-17 is now ratified**
  in D-10 through D-18.
 What is still marked [proposed] elsewhere — the field list of §A7.4, the event

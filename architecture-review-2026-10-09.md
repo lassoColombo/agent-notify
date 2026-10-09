@@ -56,6 +56,10 @@ a decision in `agent-notify/plan.md` §A19.
   package doc now names its three kinds and why. The two exports nothing
   outside the package used, `EachFieldMoved` and `MaxKeyBytes`, are private;
   a display reaches the sweep through `FieldsRenderedButNotWokenFor` alone.
+- **`hook.Main` asked for the payload twice** (D-97). It is generic over the
+  payload now: it decodes into a fresh one and hands it to the translation,
+  so each adapter's main is one call with no variable in it. `Main` gained
+  the tests it never had.
 - **Dead since D-87.** `JustArrived`, `Arrival`, `Announced`, `Same` and
   `moreRecent` in `session/display.go`, with `arrival_test.go`, had no caller
   once the menu bar went. `plural` in the notifier's `preview.go` likewise.
@@ -63,18 +67,10 @@ a decision in `agent-notify/plan.md` §A19.
 
 ## Remaining
 
-Ordered by what they cost, most first. Each names the code and the shape of
-the fix; none is started.
+What is left is housekeeping, and the one part of it that is a decision
+rather than a chore.
 
-### 1. `hook.Main` asks for the payload twice
-
-- `hook.Main(arguments, usage, named, payload any, translate func() (Report,
-  bool))` takes a pointer to decode into and a closure that captures the same
-  variable. Both adapters' `main` do the dance.
-- `Main[P any](arguments, usage, named, translate func(P) (session.Report,
-  bool))` decodes into a fresh `P` and hands it over.
-
-### 2. Housekeeping
+### 1. Housekeeping
 
 - Four stale git worktrees under `.claude/worktrees/` and
   `agent-notify/.claude/worktrees/` hold older trees, including sketchybar and
