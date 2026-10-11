@@ -20,7 +20,9 @@
 // [Change] and [LastShown]. The last could read as the SDK's, but the
 // session-watcher and the commands speak them too, and the SDK imports core's
 // internals, so putting them under subscribe would have an internal package
-// import a door. The one place both sides can reach is here.
+// import a door that imports internals — the doors an internal may import are
+// the ones that import nothing of ours. The one place both sides can reach is
+// here.
 //
 // Nothing here is promised to survive [D-77]. Every integration in this system
 // is built from this source and released with it, so a symbol that stops being

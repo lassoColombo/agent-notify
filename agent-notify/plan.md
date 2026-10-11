@@ -5115,6 +5115,72 @@ of this section is that it prevents re-litigating.
     arrives, a payload that is not JSON is still translated, and a word on
     the command line is a subcommand or the usage.
 
+- **D-98** (2026-10-11) — **Every reader of the store goes through the one
+  cold read, and the store settles a session that is in two files.** *Amends*
+  D-92, whose "`WhatIsRunning` is that read without the verdicts" one reader
+  had bypassed, and M17's "core now keeps the higher sequence of the two",
+  which is the store's rule now. Found by the architecture review of the same
+  day, the one behaviour change it found.
+  - **What was wrong.** `command/internal/find` listed `sessions/` and
+    `ended/` raw, so `focus-session <TAB>` offered a killed agent glossed
+    `blocked-on-you` while `list` beside it said `ended`, and a session
+    caught between the two directories matched twice and `focus-session`
+    refused it as ambiguous. `running.go`'s own comment named that drift as
+    the reason `WhatIsRunning` exists.
+  - **Now `find.Session` reads `WhatIsRunning(true)`**, ended sessions
+    included, because one that is over can still be focused and annotated;
+    **and the completion reads `WhatIsRunning(false)`**, which is what `list`
+    prints. `doctor` keeps `List` and `ListEnded` apart on purpose: it counts
+    the two directories as two checks and judges liveness itself.
+  - **`SessionStore.ListIncludingEnded` settles the pair in one place**, by
+    the rule `Read` already kept for the same two files: the higher sequence
+    is the later write. `WhatIsRunningAndWhatEnded` calls it and dropped its
+    own copy of the rule. Named after `subscribe.ReadIncludingEnded`, so the
+    vocabulary stays one.
+  - **The test stops the session-watcher before the kill.** With one running
+    the record is filed into `ended/` in under a millisecond and the
+    completion never has to judge; as first written the test passed against
+    the old code for that reason.
+
+- **D-99** (2026-10-11) — **The handshake is a package, and the
+  session-watcher exports only itself.** *Amends* D-80's tree with one more
+  package under `internal/`, and names where D-81's "what core knows is
+  written down" lives. Found by the architecture review of the same day.
+  - **What was wrong.** `focus` and `doctor` imported `sessionwatcher` to
+    reach `CapabilitiesByIntegration` and `ReadReport`: two commands
+    depending on the daemon's package for a JSON file it writes, and the one
+    arrow in `command/` that pointed at a process rather than at what the
+    command uses.
+  - **`internal/handshake` is the watcher's `capabilities.go` and `report.go`
+    moved whole**: `Ask`, `Timeout`, `ByIntegration`, `Report`,
+    `Integration`, `Write` and `Read`. The watcher keeps the method that logs
+    and stores the answers under its mutex, and its `writeReport` is a call.
+    The name is the one `session/capabilities.go` already uses for the
+    exchange; `capabilities` would have read `capabilities.Capabilities`.
+  - **What the watcher exports afterwards** is `Start`, `Run`,
+    `SweepInterval`, `WatchExits` and `Exits`: the process, and
+    `command/watcher` is its only importer. The no-report test moved with
+    the code, since it never started a watcher.
+
+- **D-100** (2026-10-11) — **The deriving goroutine is handed the world the
+  loop read.** *Amends* D-91's "the goroutine reads the store". Found by the
+  architecture review of the same day.
+  - **What was wrong.** `reconcile` read the store once (D-92) and asked the
+    goroutine to look, and the goroutine listed the store again for itself:
+    a second `ReadDir` and N `ReadFile`s per wake, for the same world.
+  - **Now it has the renderers' shape** (D-92): the newest world under the
+    mutex, the one-slot ask to say it moved, and the goroutine taking
+    whatever is newest when it gets there. `derive` skips a record that is
+    not live: ended sessions ride along when a display asked for them, which
+    a listing of `sessions/` never showed it, and a dead agent the judgement
+    just corrected is about to be filed, so neither is worth asking a
+    container about.
+  - **D-91's guarantees hold unchanged.** A capture replaced while a derive
+    ran is still refused by the `Update` closure, which compares under the
+    record's lock; and the write that replaced it woke the loop, which hands
+    over a newer world next. The watcher's tests pass three times over and
+    under the race detector.
+
 **The payload discussion of 2026-09-17 is now ratified**
  in D-10 through D-18.
 What is still marked [proposed] elsewhere — the field list of §A7.4, the event
