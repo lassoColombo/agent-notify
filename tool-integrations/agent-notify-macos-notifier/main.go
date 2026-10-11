@@ -11,8 +11,6 @@ import (
 	"fmt"
 	"os"
 
-	"log/slog"
-
 	"github.com/lassoColombo/agent-notify/session"
 	"github.com/lassoColombo/agent-notify/subscribe"
 )
@@ -49,6 +47,12 @@ to sit beside this one was deleted (D-87).
 // paint is one render: core hands over the world and what moved to reach it,
 // and whatever is worth interrupting somebody about becomes a banner.
 //
+// A renderer reads view.Sessions and ignores the rest, which is R22 working as
+// intended. This is the one display in the system that does the opposite: a
+// banner is an edge, so it reads view.Changed and nothing else. It used to read
+// the sessions and reconstruct the edges itself, which is the weaker version of
+// this that D-63 was built to replace (D-71).
+//
 // A render is a process that posts and exits. Nothing here waits for anybody to
 // tap anything — see alerter.go, where a detached child does the waiting.
 func paint(view session.View) error {
@@ -56,13 +60,16 @@ func paint(view session.View) error {
 	if err != nil {
 		return err
 	}
-	return (&Banners{
-		Notifier:    NewNotifier(settings.Preview, settings.Colours),
-		InvaderPNGs: &InvaderPNGs{},
-		Alerter:     settings.Alerter,
-		Sound:       settings.Sound,
-		Logger:      me.Logger(),
-	}).Post(view)
+	notifier := &Notifier{Preview: settings.Preview, Colours: settings.Colours}
+	invaderPNGs := &InvaderPNGs{}
+	logger := me.Logger()
+	for _, notice := range notifier.Fresh(view.Changed) {
+		if err := Post(settings.Alerter, notice,
+			invaderPNGs.PathOfTheInvaderDrawnIn(notice.Colour), settings.Sound); err != nil {
+			logger.Warn("posting", "session", notice.Key, "problem", err.Error())
+		}
+	}
+	return nil
 }
 
 // check says what would carry a banner, and posts one.
@@ -120,34 +127,4 @@ func check(arguments []string) int {
 // something not named here (D-73).
 func WhatToWakeFor() []string {
 	return []string{"kernel", "detail", "rank", "name", "cwd", "message"}
-}
-
-// Banners is the notifier and what it needs.
-type Banners struct {
-	Notifier    *Notifier
-	InvaderPNGs *InvaderPNGs
-	// Alerter is the program that puts a banner on the screen.
-	Alerter string
-	// Sound is what a banner plays. Held here rather than on the Notifier
-	// because it is not part of deciding what is worth saying — notify.go's
-	// answer is the same either way — only of how it is said.
-	Sound  Sound
-	Logger *slog.Logger
-}
-
-// Post is called with the current state, and with what moved to get to it.
-//
-// A renderer reads view.Sessions and ignores the rest, which is R22 working as
-// intended. This is the one display in the system that does the opposite: a
-// banner is an edge, so it reads view.Changed and nothing else. It used to read
-// the sessions and reconstruct the edges itself, which is the weaker version of
-// this that D-63 was built to replace (D-71).
-func (b *Banners) Post(view session.View) error {
-	for _, notice := range b.Notifier.Fresh(view.Changed) {
-		if err := Post(b.Alerter, notice,
-			b.InvaderPNGs.PathOfTheInvaderDrawnIn(notice.Colour), b.Sound); err != nil {
-			b.Logger.Warn("posting", "session", notice.Key, "problem", err.Error())
-		}
-	}
-	return nil
 }

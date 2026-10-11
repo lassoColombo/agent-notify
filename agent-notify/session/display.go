@@ -182,10 +182,6 @@ var optInFields = map[string]bool{"usage": true}
 // Record is compared automatically and this cannot quietly fall behind the
 // thing it is comparing.
 func Differs(previous, next Record, fields []string) bool {
-	if len(fields) == 0 {
-		return moved(previous, next, stampFields, optInFields)
-	}
-
 	was, err := fieldsOf(previous)
 	if err != nil {
 		return true
@@ -193,37 +189,19 @@ func Differs(previous, next Record, fields []string) bool {
 	now, err := fieldsOf(next)
 	if err != nil {
 		return true
+	}
+	if len(fields) == 0 {
+		// Every field on either side but the stamps and the opt-ins.
+		for _, side := range []map[string]json.RawMessage{was, now} {
+			for name := range side {
+				if !stampFields[name] && !optInFields[name] {
+					fields = append(fields, name)
+				}
+			}
+		}
 	}
 	for _, name := range fields {
 		if string(was[name]) != string(now[name]) {
-			return true
-		}
-	}
-	return false
-}
-
-// moved compares two records while ignoring whole classes of field.
-func moved(previous, next Record, ignoring ...map[string]bool) bool {
-	was, err := fieldsOf(previous)
-	if err != nil {
-		return true
-	}
-	now, err := fieldsOf(next)
-	if err != nil {
-		return true
-	}
-	for _, class := range ignoring {
-		for name := range class {
-			delete(was, name)
-			delete(now, name)
-		}
-	}
-
-	if len(was) != len(now) {
-		return true
-	}
-	for name, value := range now {
-		if string(was[name]) != string(value) {
 			return true
 		}
 	}

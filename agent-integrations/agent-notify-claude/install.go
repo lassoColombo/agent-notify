@@ -131,6 +131,10 @@ func unmerge(settings map[string]json.RawMessage, program string) (map[string]js
 		_ = json.Unmarshal(raw, &hooks)
 	}
 	name := filepath.Base(program)
+	ours := func(rawCommand json.RawMessage) bool {
+		var existing command
+		return json.Unmarshal(rawCommand, &existing) == nil && namesUs(existing.Command, name)
+	}
 	removed := 0
 	for event, groups := range hooks {
 		var kept []json.RawMessage
@@ -140,25 +144,16 @@ func unmerge(settings map[string]json.RawMessage, program string) (map[string]js
 				kept = append(kept, raw)
 				continue
 			}
-			var ours []int
-			for j, rawCommand := range parsed.Hooks {
-				var existing command
-				if err := json.Unmarshal(rawCommand, &existing); err == nil && namesUs(existing.Command, name) {
-					ours = append(ours, j)
-				}
-			}
-			if len(ours) == 0 {
+			remaining := slices.DeleteFunc(parsed.Hooks, ours)
+			if len(remaining) == len(parsed.Hooks) {
 				kept = append(kept, raw)
 				continue
 			}
-			removed += len(ours)
-			parsed.Hooks = slices.DeleteFunc(parsed.Hooks, func(rawCommand json.RawMessage) bool {
-				var existing command
-				return json.Unmarshal(rawCommand, &existing) == nil && namesUs(existing.Command, name)
-			})
-			if len(parsed.Hooks) == 0 {
+			removed += len(parsed.Hooks) - len(remaining)
+			if len(remaining) == 0 {
 				continue
 			}
+			parsed.Hooks = remaining
 			if regrouped, err := json.Marshal(parsed); err == nil {
 				kept = append(kept, regrouped)
 			}

@@ -26,7 +26,7 @@ func previewOf(arguments []string) int {
 		if err != nil {
 			history = session.History{}
 		}
-		return Preview(record, history, now(), previewWidth())
+		return Preview(record, history, time.Now().UTC(), previewWidth())
 	})
 }
 
@@ -41,7 +41,7 @@ func previewOf(arguments []string) int {
 // twice where the cursor is.
 func labelOf(arguments []string) int {
 	return oneSession(arguments, func(record session.Record) string {
-		return " " + Label(record, now()) + " "
+		return " " + Label(record, time.Now().UTC()) + " "
 	})
 }
 

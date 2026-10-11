@@ -18,12 +18,12 @@ import (
 	"github.com/lassoColombo/agent-notify/command/internal/onpath"
 	"github.com/lassoColombo/agent-notify/internal/config"
 	"github.com/lassoColombo/agent-notify/internal/containers"
+	"github.com/lassoColombo/agent-notify/internal/logs"
 	"github.com/lassoColombo/agent-notify/internal/onewatcher"
 	"github.com/lassoColombo/agent-notify/internal/paths"
 	"github.com/lassoColombo/agent-notify/internal/process"
 	"github.com/lassoColombo/agent-notify/internal/sessionstore"
 	"github.com/lassoColombo/agent-notify/internal/sessionwatcher"
-	"github.com/lassoColombo/agent-notify/internal/logs"
 	"github.com/lassoColombo/agent-notify/session"
 )
 
@@ -72,10 +72,10 @@ func doctor() int {
 	fmt.Println()
 
 	if err := layout.Create(); err != nil {
-		report("directories", false, err.Error())
+		report("directories", "FAIL", err.Error())
 		healthy = false
 	} else {
-		report("directories", true, fmt.Sprintf("present, mode %o", paths.DirMode))
+		report("directories", "ok", fmt.Sprintf("present, mode %o", paths.DirMode))
 	}
 
 	// The log is opened before the configuration is read, so that complaints
@@ -98,12 +98,12 @@ func doctor() int {
 			lines = append(lines, problem.Error())
 		}
 		lines = append(lines, "running with: "+summary)
-		report("config", false, strings.Join(lines, "\n"))
+		report("config", "FAIL", strings.Join(lines, "\n"))
 		healthy = false
 	case fileMissing(layout.ConfigFile):
-		report("config", true, "no file, using defaults — "+summary)
+		report("config", "ok", "no file, using defaults — "+summary)
 	default:
-		report("config", true, summary)
+		report("config", "ok", summary)
 	}
 
 	reportCoreBinary(settings, &healthy)
@@ -111,16 +111,16 @@ func doctor() int {
 	openedStore, err := sessionstore.Open(layout, settings)
 	switch {
 	case err != nil:
-		report("store", false, err.Error())
+		report("store", "FAIL", err.Error())
 		healthy = false
 	default:
 		live, liveErr := openedStore.List()
 		ended, endedErr := openedStore.ListEnded()
 		if problem := errors.Join(liveErr, endedErr); problem != nil {
-			report("store", false, problem.Error())
+			report("store", "FAIL", problem.Error())
 			healthy = false
 		} else {
-			report("store", true, fmt.Sprintf("%d live session(s), %d ended and still "+
+			report("store", "ok", fmt.Sprintf("%d live session(s), %d ended and still "+
 				"resumable, %d forgotten this run", len(live), len(ended), pruned(openedStore, logger)))
 			reportLiveness(live, &healthy)
 			reportAgents(append(live, ended...), settings, &healthy)
@@ -142,15 +142,14 @@ func doctor() int {
 	return 1
 }
 
-func report(label string, ok bool, detail string) {
-	mark := "ok  "
-	if !ok {
-		mark = "FAIL"
-	}
+// report is one line of the check-up, with the rest of a detail that runs on
+// under it. The mark is `ok`, `FAIL`, or `--` for a check with nothing to
+// judge yet.
+func report(label, mark, detail string) {
 	lines := strings.Split(detail, "\n")
-	fmt.Printf("%-12s %s  %s\n", label, mark, lines[0])
+	fmt.Printf("%-12s %-4s  %s\n", label, mark, lines[0])
 	for _, line := range lines[1:] {
-		fmt.Printf("%-12s      %s\n", "", strings.TrimRight(line, " "))
+		fmt.Printf("%-12s       %s\n", "", strings.TrimRight(line, " "))
 	}
 }
 
@@ -177,11 +176,11 @@ func pruned(openedStore *sessionstore.SessionStore, logger *slog.Logger) int {
 func reportCoreBinary(settings config.Config, healthy *bool) {
 	found, err := onewatcher.CoreBinary(settings.AgentNotifyBinary)
 	if err != nil {
-		report("binary", false, err.Error()+"\n`agent-notify install` files it")
+		report("binary", "FAIL", err.Error()+"\n`agent-notify install` files it")
 		*healthy = false
 		return
 	}
-	report("binary", true, found)
+	report("binary", "ok", found)
 }
 
 // reportAgents: a session from an agent with no [agent.<name>] table has no
@@ -195,10 +194,10 @@ func reportAgents(records []session.Record, settings config.Config, healthy *boo
 	}
 	slices.Sort(unknown)
 	if len(unknown) == 0 {
-		report("agents", true, fmt.Sprintf("%d configured", len(settings.Agent)))
+		report("agents", "ok", fmt.Sprintf("%d configured", len(settings.Agent)))
 		return
 	}
-	report("agents", false, fmt.Sprintf("sessions from %s and no [agent.<name>] table for them, so "+
+	report("agents", "FAIL", fmt.Sprintf("sessions from %s and no [agent.<name>] table for them, so "+
 		"their liveness cannot be judged;\n`agent-notify install %s` files it",
 		strings.Join(unknown, ", "), strings.Join(unknown, " ")))
 	*healthy = false
@@ -208,7 +207,7 @@ func reportAgents(records []session.Record, settings config.Config, healthy *boo
 // log, here where a person is looking.
 func reportContainers(layout paths.Layout, settings config.Config, healthy *bool) {
 	if len(settings.Container.Order) == 0 {
-		report("containers", true, "none in [container] order; nothing can be focused, everything else works")
+		report("containers", "ok", "none in [container] order; nothing can be focused, everything else works")
 		return
 	}
 	configured, problems := containers.Configured(settings, sessionwatcher.CapabilitiesByIntegration(layout, settings))
@@ -217,14 +216,14 @@ func reportContainers(layout paths.Layout, settings config.Config, healthy *bool
 		for _, one := range configured {
 			names = append(names, one.Name)
 		}
-		report("containers", true, "outermost first: "+strings.Join(names, ", "))
+		report("containers", "ok", "outermost first: "+strings.Join(names, ", "))
 		return
 	}
 	lines := make([]string, 0, len(problems))
 	for _, problem := range problems {
 		lines = append(lines, problem.Error())
 	}
-	report("containers", false, strings.Join(lines, "\n"))
+	report("containers", "FAIL", strings.Join(lines, "\n"))
 	*healthy = false
 }
 
@@ -232,7 +231,7 @@ func reportContainers(layout paths.Layout, settings config.Config, healthy *bool
 func reportLiveness(live []session.Record, healthy *bool) {
 	boot, err := process.BootIdentity()
 	if err != nil {
-		report("liveness", false, err.Error())
+		report("liveness", "FAIL", err.Error())
 		*healthy = false
 		return
 	}
@@ -252,18 +251,18 @@ func reportLiveness(live []session.Record, healthy *bool) {
 		detail += fmt.Sprintf("\n%d session(s) have ended without saying so; the "+
 			"session-watcher will file them", len(ending))
 	}
-	report("liveness", true, detail)
+	report("liveness", "ok", detail)
 }
 
 // reportWatcher never kills and never starts anything (§A9.2).
 func reportWatcher(layout paths.Layout, healthy *bool) {
 	if !onewatcher.Running(layout) {
-		report("watcher", true, "not running — the next hook will start one")
+		report("watcher", "ok", "not running — the next hook will start one")
 		return
 	}
 	held, err := onewatcher.WhoHolds(layout)
 	if err != nil {
-		report("watcher", false, "something holds the lock but did not say who: "+err.Error())
+		report("watcher", "FAIL", "something holds the lock but did not say who: "+err.Error())
 		*healthy = false
 		return
 	}
@@ -274,7 +273,7 @@ func reportWatcher(layout paths.Layout, healthy *bool) {
 		detail += fmt.Sprintf("\nthis binary is %s — `agent-notify watcher restart` when you are ready",
 			session.Version)
 	}
-	report("watcher", true, detail)
+	report("watcher", "ok", detail)
 }
 
 // reportIntegrations reads the file the session-watcher writes, which works
@@ -282,33 +281,31 @@ func reportWatcher(layout paths.Layout, healthy *bool) {
 func reportIntegrations(
 	layout paths.Layout, settings config.Config, healthy *bool,
 ) {
-	report, found := sessionwatcher.ReadReport(layout)
+	written, found := sessionwatcher.ReadReport(layout)
 	if !found {
 		if len(settings.Integration) == 0 {
-			fmt.Printf("%-12s %-5s %s\n", "integrations", "ok", "none configured")
+			report("integrations", "ok", "none configured")
 			return
 		}
-		fmt.Printf("%-12s %-5s %s\n", "integrations", "--",
-			"no report yet — the session-watcher writes one when it starts")
+		report("integrations", "--", "no report yet — the session-watcher writes one when it starts")
 		return
 	}
 
-	if len(report.Integrations) == 0 {
-		fmt.Printf("%-12s %-5s %s\n", "integrations", "ok", "none configured")
+	if len(written.Integrations) == 0 {
+		report("integrations", "ok", "none configured")
 		return
 	}
 
 	worst := "ok"
-	for _, one := range report.Integrations {
+	for _, one := range written.Integrations {
 		if one.Problem != "" {
-			worst = "fail"
+			worst = "FAIL"
 			*healthy = false
 		}
 	}
-	fmt.Printf("%-12s %-5s %s\n", "integrations", worst,
-		fmt.Sprintf("reported by pid %d at %s", report.PID, report.Written))
+	report("integrations", worst, fmt.Sprintf("reported by pid %d at %s", written.PID, written.Written))
 
-	for _, one := range report.Integrations {
+	for _, one := range written.Integrations {
 		fmt.Printf("             %-22s %s\n", one.Name, one.State)
 		if one.Binary != "" {
 			fmt.Printf("             %-22s %s\n", "", whatItAnswers(one))
@@ -349,9 +346,6 @@ func reportWhatIsInstalledAndNotAskedFor(settings config.Config) {
 		return
 	}
 
-	fmt.Printf("%-12s %-5s %s\n", "installed", "--",
-		fmt.Sprintf("%d on your PATH and not mentioned here: %s",
-			len(unasked), strings.Join(unasked, ", ")))
-	fmt.Printf("%-12s %-5s %s\n", "", "",
-		"`agent-notify install` sets each of them up.")
+	report("installed", "--", fmt.Sprintf("%d on your PATH and not mentioned here: %s\n"+
+		"`agent-notify install` sets each of them up.", len(unasked), strings.Join(unasked, ", ")))
 }

@@ -184,14 +184,8 @@ func Focused(zellij Zellij, coordinates json.RawMessage) (container.Verdict, err
 // two focused panes at once, tiled and floating; which is in front depends on
 // whether the tab is showing its floating panes.
 func Verdict(panes []Pane, tabs []Tab, pane int) container.Verdict {
-	var found *Pane
-	for i := range panes {
-		if !panes[i].Plugin && panes[i].ID == pane {
-			found = &panes[i]
-			break
-		}
-	}
-	if found == nil {
+	found, there := paneOf(panes, pane)
+	if !there {
 		return container.Verdict{Answer: container.No,
 			Detail: fmt.Sprintf("pane %d is not there", pane)}
 	}

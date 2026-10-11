@@ -31,8 +31,6 @@ var me = subscribe.Integration{Name: Name}
 // is somebody else's string and may contain anything else.
 const separator = "\t"
 
-func now() time.Time { return time.Now().UTC() }
-
 func main() {
 	// The config is read once per process, and each of the three jobs — the
 	// list, a preview fzf runs per row, a label per move of the cursor — is a
@@ -101,13 +99,13 @@ func run(arguments []string, complaints []string) int {
 func chooseOne(
 	sessions []session.Record, all bool, complaints []string,
 ) (*session.Record, int) {
-	me, err := os.Executable()
+	program, err := os.Executable()
 	if err != nil {
-		me = "agent-notify-picker"
+		program = "agent-notify-picker"
 	}
 
 	told := func() []string {
-		return Arguments(me,
+		return Arguments(program,
 			PreviewWindow(len(sessions), terminalHeight()), Ghost(all), Complaint(complaints))
 	}
 
@@ -129,7 +127,7 @@ func chooseOne(
 	options.Input, options.Output = input, output
 	columns := Measure(sessions)
 	for _, record := range sessions {
-		input <- record.Key.String() + separator + Row(record, now(), columns)
+		input <- record.Key.String() + separator + Row(record, time.Now().UTC(), columns)
 	}
 	close(input)
 
@@ -258,7 +256,7 @@ Type to filter. Enter goes there; escape and ctrl+c leave.
 // used, so that a test can hand them to fzf's own parser: a mistyped colour key
 // or a preview-window spec fzf does not accept is then a failing test rather
 // than a picker that refuses to open on the one keypress somebody makes.
-func Arguments(me, previewWindow, ghost, complaint string) []string {
+func Arguments(program, previewWindow, ghost, complaint string) []string {
 	arguments := []string{
 		"--ansi",
 		// Top-down, so the most urgent session is the first line read rather
@@ -275,7 +273,7 @@ func Arguments(me, previewWindow, ghost, complaint string) []string {
 		// fzf keeps the original line for placeholders, so {1} is still the key
 		// even though the row on screen starts at field two.
 		"--with-nth=2..",
-		"--preview", me + " --preview {1}",
+		"--preview", program + " --preview {1}",
 		// HORIZONTAL SPLIT: the preview underneath, not beside. An agent's
 		// message is prose and a paragraph in a half-width column is a column
 		// of words; the full width is what makes it readable. The size is
@@ -290,7 +288,7 @@ func Arguments(me, previewWindow, ghost, complaint string) []string {
 		// decided on rather than a copy of the highlighted row. `bg-` because
 		// it must not make moving the cursor wait on a process.
 		"--preview-label-pos=3",
-		"--bind=focus:bg-transform-preview-label:" + me + " --label {1}",
+		"--bind=focus:bg-transform-preview-label:" + program + " --label {1}",
 		// THE SELECTED ROW. Every row arrives pre-coloured under --ansi, so
 		// there is nothing left for fzf's fg+ to repaint: the lift has to be
 		// the background across the whole row, and the mark has to be a solid

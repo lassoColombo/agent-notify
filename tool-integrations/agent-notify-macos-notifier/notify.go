@@ -54,10 +54,6 @@ type Notifier struct {
 	Colours session.Palette
 }
 
-func NewNotifier(preview Preview, colours session.Palette) *Notifier {
-	return &Notifier{Preview: preview, Colours: colours}
-}
-
 // Fresh is what to say about what just moved.
 //
 // Three rules, and every one of them is about the record in hand rather than

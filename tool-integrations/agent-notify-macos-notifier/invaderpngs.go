@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 )
 
 // InvaderPNGs is the picture on a banner: this program's sprite, in the colour of the
@@ -36,9 +35,6 @@ type InvaderPNGs struct {
 	// after a day of restarting a display. Tests set it to keep out of each
 	// other's way.
 	Directory string
-
-	mu                      sync.Mutex
-	theDirectoryHasBeenMade bool
 }
 
 // whereTheInvaderPNGsGo is the directory an InvaderPNGs uses when it is not
@@ -61,16 +57,11 @@ func (m *InvaderPNGs) PathOfTheInvaderDrawnIn(colour string) string {
 		return ""
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	if m.Directory == "" {
 		m.Directory = whereTheInvaderPNGsGo()
 	}
-	if !m.theDirectoryHasBeenMade {
-		if err := os.MkdirAll(m.Directory, 0o700); err != nil {
-			return ""
-		}
-		m.theDirectoryHasBeenMade = true
+	if err := os.MkdirAll(m.Directory, 0o700); err != nil {
+		return ""
 	}
 	size := m.Size
 	if size <= 0 {

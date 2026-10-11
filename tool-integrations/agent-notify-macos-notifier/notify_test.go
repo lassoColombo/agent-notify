@@ -28,7 +28,7 @@ func moved(from session.Kernel, record session.Record) session.Change {
 }
 
 func notifier() *Notifier {
-	return NewNotifier(Preview{Lines: 4, Width: 40}, session.NewPalette(DefaultColours, nil))
+	return &Notifier{Preview: Preview{Lines: 4, Width: 40}, Colours: session.NewPalette(DefaultColours, nil)}
 }
 
 // TestNothingMovedIsNothingToSay.
