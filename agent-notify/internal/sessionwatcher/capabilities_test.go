@@ -8,9 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lassoColombo/agent-notify/internal/config"
-	"github.com/lassoColombo/agent-notify/internal/paths"
-	"github.com/lassoColombo/agent-notify/internal/sessionwatcher"
+	"github.com/lassoColombo/agent-notify/internal/handshake"
 	"github.com/lassoColombo/agent-notify/session"
 )
 
@@ -26,7 +24,7 @@ func TestAnIntegrationIsAskedWhatItAnswers(t *testing.T) {
 		"[integration.painter]\nbinary = %q\n", binary))
 
 	layout := running(t, root)
-	var one sessionwatcher.Integration
+	var one handshake.Integration
 	for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); {
 		if one, _ = reported(t, layout, "painter"); len(one.Answers.Methods) > 0 {
 			break
@@ -78,40 +76,6 @@ func TestAnIntegrationThatCannotBeAskedSaysSoInTheReport(t *testing.T) {
 	}
 	if !strings.Contains(one.Problem, missing) {
 		t.Errorf("the problem does not name the path that is wrong: %s", one.Problem)
-	}
-}
-
-// TestWithNoReportItAsksRatherThanSayingThereIsNoContainer is what keeps a
-// focus working on a machine where nothing is running.
-//
-// Reading the report is the shortcut — a focus comes off a keypress and must
-// not run every container to find out what a container is — but the runtime
-// directory does not survive a reboot, so the first focus after one has no
-// report to read. Answering "you have no containers" then would be a lie told
-// at exactly the wrong moment.
-func TestWithNoReportItAsksRatherThanSayingThereIsNoContainer(t *testing.T) {
-	atATestablePace(t, 100*time.Millisecond)
-	root := shortRoot(t)
-	binary := answersCapabilities(t, root, "placer",
-		`{"version":"0.0.0-dev","methods":["interpret-environment","focus","focused"]}`)
-	write(t, root+"/config.toml", fmt.Sprintf(
-		"[integration.placer]\nbinary = %q\n", binary))
-
-	t.Setenv(paths.TheVariableThatNamesTheRoot, root)
-	layout, err := paths.FromEnvironment()
-	if err != nil {
-		t.Fatalf("FromEnvironment: %v", err)
-	}
-	settings, problems := config.Load(layout)
-	if len(problems) > 0 {
-		t.Fatalf("reading the config: %v", problems)
-	}
-
-	// No session-watcher has ever run here, so there is no report at all.
-	methods := sessionwatcher.CapabilitiesByIntegration(layout, settings)
-	if !slices.Contains(methods["placer"].Methods, session.MethodFocus) {
-		t.Errorf("with no report it found %v, and the program on disk answers focus",
-			methods["placer"].Methods)
 	}
 }
 

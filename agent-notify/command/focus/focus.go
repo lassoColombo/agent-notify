@@ -22,7 +22,7 @@ import (
 	"github.com/lassoColombo/agent-notify/container"
 	"github.com/lassoColombo/agent-notify/internal/containers"
 	"github.com/lassoColombo/agent-notify/internal/core"
-	"github.com/lassoColombo/agent-notify/internal/sessionwatcher"
+	"github.com/lassoColombo/agent-notify/internal/handshake"
 )
 
 // FocusSession brings one session to the front.
@@ -63,7 +63,7 @@ func focusSession(wanted string, quiet bool) int {
 	}
 
 	steps, outcome := containers.FocusSession(openedCore.Settings,
-		sessionwatcher.CapabilitiesByIntegration(openedCore.Layout, openedCore.Settings), record)
+		handshake.ByIntegration(openedCore.Layout, openedCore.Settings), record)
 	if !quiet {
 		for _, step := range steps {
 			switch {
@@ -141,7 +141,7 @@ func focused(wanted string) int {
 	}
 
 	verdict := containers.IsFocused(openedCore.Settings,
-		sessionwatcher.CapabilitiesByIntegration(openedCore.Layout, openedCore.Settings), record)
+		handshake.ByIntegration(openedCore.Layout, openedCore.Settings), record)
 	fmt.Println(verdict.Answer)
 	if verdict.Detail != "" {
 		fmt.Fprintln(os.Stderr, verdict.Detail)

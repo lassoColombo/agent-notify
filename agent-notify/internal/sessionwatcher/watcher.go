@@ -17,6 +17,7 @@ import (
 	"github.com/lassoColombo/agent-notify/internal/config"
 	"github.com/lassoColombo/agent-notify/internal/containers"
 	"github.com/lassoColombo/agent-notify/internal/core"
+	"github.com/lassoColombo/agent-notify/internal/handshake"
 	"github.com/lassoColombo/agent-notify/internal/onewatcher"
 	"github.com/lassoColombo/agent-notify/internal/paths"
 	"github.com/lassoColombo/agent-notify/internal/process"
@@ -129,7 +130,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 	w.startRenderers(ctx)
 	// The answers are a property of the programs on disk, asked here and on
 	// reload, so the report is written at those two moments and no other.
-	w.writeReport(w.opened.Settings)
+	w.writeReport()
 
 	// Interpretation talks to the tool under its own timeout (D-38), so it
 	// runs beside the loop rather than on it: an exit or a store wake is never
@@ -252,6 +253,37 @@ func (w *Watcher) reconcile(why string) {
 	// `ended` where the store is about to, so the write above costs one
 	// more pass that finds nothing to draw.
 	w.drawEverythingAgain(world)
+}
+
+// askWhatEachIntegrationAnswers is the handshake, at startup and on reload:
+// what came back is logged and kept under the mutex for the renderers, the
+// containers and the report.
+func (w *Watcher) askWhatEachIntegrationAnswers() {
+	settings := w.opened.Settings
+	answers, unanswered := handshake.Ask(settings)
+
+	for _, name := range settings.Runnable() {
+		if problem, failed := unanswered[name]; failed {
+			w.logger.Warn("an integration did not say what it answers",
+				"integration", name, "problem", problem,
+				"until", "it is fixed and `agent-notify watcher reload` is run")
+			continue
+		}
+		w.logger.Debug("asked what it answers", "integration", name,
+			"methods", answers[name].Methods, "version", answers[name].Version)
+	}
+
+	w.mu.Lock()
+	w.answers, w.unanswered = answers, unanswered
+	w.mu.Unlock()
+}
+
+// writeReport files what was answered where `doctor` and a focus read it.
+func (w *Watcher) writeReport() {
+	w.mu.Lock()
+	answers, unanswered := w.answers, w.unanswered
+	w.mu.Unlock()
+	handshake.Write(w.opened.Layout, w.opened.Settings, answers, unanswered)
 }
 
 // resolveContainers reads [container] order against what each integration
@@ -435,7 +467,7 @@ func (w *Watcher) reloadConfiguration(ctx context.Context) {
 	w.resolveContainers()
 	w.startRenderers(ctx)
 
-	w.writeReport(w.opened.Settings)
+	w.writeReport()
 	w.logger.Info("configuration re-read")
 	// A display started just now has a world to draw and no change to be
 	// told about: the cold path (§A7.6).

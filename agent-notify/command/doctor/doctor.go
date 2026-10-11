@@ -18,12 +18,12 @@ import (
 	"github.com/lassoColombo/agent-notify/command/internal/onpath"
 	"github.com/lassoColombo/agent-notify/internal/config"
 	"github.com/lassoColombo/agent-notify/internal/containers"
+	"github.com/lassoColombo/agent-notify/internal/handshake"
 	"github.com/lassoColombo/agent-notify/internal/logs"
 	"github.com/lassoColombo/agent-notify/internal/onewatcher"
 	"github.com/lassoColombo/agent-notify/internal/paths"
 	"github.com/lassoColombo/agent-notify/internal/process"
 	"github.com/lassoColombo/agent-notify/internal/sessionstore"
-	"github.com/lassoColombo/agent-notify/internal/sessionwatcher"
 	"github.com/lassoColombo/agent-notify/session"
 )
 
@@ -210,7 +210,7 @@ func reportContainers(layout paths.Layout, settings config.Config, healthy *bool
 		report("containers", "ok", "none in [container] order; nothing can be focused, everything else works")
 		return
 	}
-	configured, problems := containers.Configured(settings, sessionwatcher.CapabilitiesByIntegration(layout, settings))
+	configured, problems := containers.Configured(settings, handshake.ByIntegration(layout, settings))
 	if len(problems) == 0 {
 		names := make([]string, 0, len(configured))
 		for _, one := range configured {
@@ -281,7 +281,7 @@ func reportWatcher(layout paths.Layout, healthy *bool) {
 func reportIntegrations(
 	layout paths.Layout, settings config.Config, healthy *bool,
 ) {
-	written, found := sessionwatcher.ReadReport(layout)
+	written, found := handshake.Read(layout)
 	if !found {
 		if len(settings.Integration) == 0 {
 			report("integrations", "ok", "none configured")
@@ -317,7 +317,7 @@ func reportIntegrations(
 	}
 }
 
-func whatItAnswers(one sessionwatcher.Integration) string {
+func whatItAnswers(one handshake.Integration) string {
 	switch {
 	case one.Problem != "":
 		return "did not say what it answers: " + one.Problem

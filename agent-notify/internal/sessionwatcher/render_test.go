@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/lassoColombo/agent-notify/internal/config"
+	"github.com/lassoColombo/agent-notify/internal/handshake"
 	"github.com/lassoColombo/agent-notify/internal/paths"
 	"github.com/lassoColombo/agent-notify/internal/sessionstore"
 	"github.com/lassoColombo/agent-notify/internal/sessionwatcher"
@@ -122,10 +123,10 @@ func write(t *testing.T, path, content string) {
 // tests is about that timeout.
 func atATestablePace(t *testing.T, sweep time.Duration) {
 	t.Helper()
-	wasSweeping, wasAsking := sessionwatcher.SweepInterval, sessionwatcher.CapabilitiesTimeout
-	sessionwatcher.SweepInterval, sessionwatcher.CapabilitiesTimeout = sweep, 30*time.Second
+	wasSweeping, wasAsking := sessionwatcher.SweepInterval, handshake.Timeout
+	sessionwatcher.SweepInterval, handshake.Timeout = sweep, 30*time.Second
 	t.Cleanup(func() {
-		sessionwatcher.SweepInterval, sessionwatcher.CapabilitiesTimeout = wasSweeping, wasAsking
+		sessionwatcher.SweepInterval, handshake.Timeout = wasSweeping, wasAsking
 	})
 }
 
@@ -176,18 +177,18 @@ func waitFor(t *testing.T, what string, ready func() bool) {
 
 func reported(
 	t *testing.T, layout paths.Layout, name string,
-) (sessionwatcher.Integration, bool) {
+) (handshake.Integration, bool) {
 	t.Helper()
-	report, found := sessionwatcher.ReadReport(layout)
+	report, found := handshake.Read(layout)
 	if !found {
-		return sessionwatcher.Integration{}, false
+		return handshake.Integration{}, false
 	}
 	for _, one := range report.Integrations {
 		if one.Name == name {
 			return one, true
 		}
 	}
-	return sessionwatcher.Integration{}, false
+	return handshake.Integration{}, false
 }
 
 // TestADisplayIsDrawnOnceWithNothingHavingChanged is the cold path (§A7.6).

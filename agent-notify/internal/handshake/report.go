@@ -1,4 +1,4 @@
-package sessionwatcher
+package handshake
 
 import (
 	"encoding/json"
@@ -33,7 +33,10 @@ type Report struct {
 	Integrations []Integration `json:"integrations"`
 }
 
-func (w *Watcher) writeReport(settings config.Config) {
+// Write files the report: every enabled integration, with what the runnable
+// ones answered and why any of them did not.
+func Write(layout paths.Layout, settings config.Config,
+	answers map[string]session.Capabilities, unanswered map[string]string) {
 	report := Report{PID: os.Getpid(), Written: time.Now().UTC().Format(time.RFC3339)}
 
 	runnable := settings.Runnable()
@@ -41,9 +44,7 @@ func (w *Watcher) writeReport(settings config.Config) {
 		line := Integration{Name: name, State: "yours to start; core never runs it"}
 		if slices.Contains(runnable, name) {
 			line.Binary = settings.Integration[name].Binary
-			w.mu.Lock()
-			line.Answers, line.Problem = w.answers[name], w.unanswered[name]
-			w.mu.Unlock()
+			line.Answers, line.Problem = answers[name], unanswered[name]
 			line.State = "run when core needs it"
 			if slices.Contains(line.Answers.Methods, session.MethodRender) {
 				line.State = "drawn when something it watches moves"
@@ -56,14 +57,15 @@ func (w *Watcher) writeReport(settings config.Config) {
 	if err != nil {
 		return
 	}
-	temporary := w.opened.Layout.IntegrationsFile() + ".tmp"
+	temporary := layout.IntegrationsFile() + ".tmp"
 	if err := os.WriteFile(temporary, encoded, paths.FileMode); err != nil {
 		return
 	}
-	_ = os.Rename(temporary, w.opened.Layout.IntegrationsFile())
+	_ = os.Rename(temporary, layout.IntegrationsFile())
 }
 
-func ReadReport(layout paths.Layout) (Report, bool) {
+// Read is the report back, or false when no session-watcher has written one.
+func Read(layout paths.Layout) (Report, bool) {
 	content, err := os.ReadFile(layout.IntegrationsFile())
 	if err != nil {
 		return Report{}, false
