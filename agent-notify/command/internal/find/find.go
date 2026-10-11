@@ -25,18 +25,12 @@ import (
 // pastes a session id out of a log. Ambiguity is an error that lists the
 // candidates rather than a guess, because the whole point of focus is going
 // somewhere on purpose.
+//
+// It reads through the one cold read, ended sessions included: a session that
+// is over can still be focused, since its pane may be there, and annotated.
 func Session(openedCore *core.Core, wanted string) (session.Record, error) {
-	sessions, err := openedCore.Store.List()
-	if err != nil {
-		return session.Record{}, err
-	}
-	ended, err := openedCore.Store.ListEnded()
-	if err == nil {
-		sessions = append(sessions, ended...)
-	}
-
 	var matched []session.Record
-	for _, record := range sessions {
+	for _, record := range openedCore.WhatIsRunning(true) {
 		switch {
 		case record.Key.String() == wanted,
 			record.Key.SessionID == wanted,
@@ -79,12 +73,7 @@ func TheSessionsThatAreRunning(
 	}
 	defer openedCore.Close()
 
-	records, err := openedCore.Store.List()
-	if err != nil {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
-	session.ByUrgency(records)
-
+	records := openedCore.WhatIsRunning(false)
 	offered := make([]string, 0, len(records))
 	for _, record := range records {
 		// `name<TAB>description` is cobra's spelling for a completion with a

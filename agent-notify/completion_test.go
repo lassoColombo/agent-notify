@@ -3,6 +3,7 @@ package main_test
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // The command line is cobra, and these are the things that came with it that
@@ -45,6 +46,38 @@ func TestCompletingASessionOffersTheOnesThatAreRunning(t *testing.T) {
 	// falling back to one would offer the whole directory.
 	if directive != ":4" {
 		t.Errorf("the directive is %q, want no file completion", directive)
+	}
+}
+
+// TestCompletingAfterAKillNeverOffersBlockedOnYou: the completion reads
+// through the same liveness judgement as `list`, so a killed agent is glossed
+// `ended` and never `blocked-on-you`. The session-watcher is stopped first,
+// because with one running the record is filed into ended/ before the
+// completion looks, and the judgement is never exercised.
+func TestCompletingAfterAKillNeverOffersBlockedOnYou(t *testing.T) {
+	pretend := start(t)
+	name := pretend.records(t)[0].DisplayName()
+	waitFor(t, 5*time.Second, "a session-watcher to take the lock", func() bool {
+		_, running := watching(t, pretend.root)
+		return running
+	})
+	if _, stderr, code := pretend.run(t, "watcher", "stop"); code != 0 {
+		t.Fatalf("stopping the session-watcher exited %d: %s", code, stderr)
+	}
+	pretend.kill()
+
+	stdout, stderr, code := pretend.run(t, "__complete", "focus-session", "")
+	if code != 0 {
+		t.Fatalf("completing exited %d: %s", code, stderr)
+	}
+	glossed := ""
+	for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {
+		if offered, gloss, _ := strings.Cut(line, "\t"); offered == name {
+			glossed = gloss
+		}
+	}
+	if glossed != "ended" {
+		t.Errorf("after the kill the session is glossed %q, want ended:\n%s", glossed, stdout)
 	}
 }
 

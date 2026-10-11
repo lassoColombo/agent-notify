@@ -227,6 +227,29 @@ func (s *SessionStore) ListEnded() ([]session.Record, error) {
 	return s.listDir(s.layout.Ended())
 }
 
+// ListIncludingEnded returns both, each session once. A session being filed
+// is written into ended/ before it leaves sessions/, so a read that falls
+// between the two directories sees it twice; the higher sequence is the newer,
+// which is how Read settles the same two files.
+func (s *SessionStore) ListIncludingEnded() ([]session.Record, error) {
+	records, liveErr := s.List()
+	ended, endedErr := s.ListEnded()
+	at := make(map[session.Key]int, len(records))
+	for i, record := range records {
+		at[record.Key] = i
+	}
+	for _, record := range ended {
+		if i, seen := at[record.Key]; seen {
+			if record.Sequence > records[i].Sequence {
+				records[i] = record
+			}
+			continue
+		}
+		records = append(records, record)
+	}
+	return records, errors.Join(liveErr, endedErr)
+}
+
 func (s *SessionStore) listDir(dir string) ([]session.Record, error) {
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {

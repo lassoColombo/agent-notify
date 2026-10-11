@@ -161,6 +161,43 @@ func TestDuplicateFilesResolveBySequence(t *testing.T) {
 	}
 }
 
+// TestListIncludingEndedSettlesTheSameTwoFiles: a session caught between the
+// two directories is listed once, and the later write is the one listed.
+func TestListIncludingEndedSettlesTheSameTwoFiles(t *testing.T) {
+	opened, layout := open(t)
+
+	if _, err := opened.Apply(session.Report{Key: key, Event: session.UserSentPrompt}, when); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	stale, err := os.ReadFile(layout.SessionFile(key.String()))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if _, err := opened.Apply(session.Report{Key: key, Event: session.SessionEnded}, when); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if err := os.WriteFile(layout.SessionFile(key.String()), stale, 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	other := session.Key{Host: "mac", Agent: "claude", SessionID: "other"}
+	if _, err := opened.Apply(session.Report{Key: other, Event: session.UserSentPrompt}, when); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	listed, err := opened.ListIncludingEnded()
+	if err != nil {
+		t.Fatalf("ListIncludingEnded: %v", err)
+	}
+	if len(listed) != 2 {
+		t.Fatalf("listed %d records, want the two sessions once each", len(listed))
+	}
+	for _, record := range listed {
+		if record.Key == key && (record.Kernel != session.Ended || record.Sequence != 2) {
+			t.Errorf("listed %q at sequence %d, want the later write to win", record.Kernel, record.Sequence)
+		}
+	}
+}
+
 func TestHistoryRecordsWhatChangedAndNothingElse(t *testing.T) {
 	opened, _ := open(t)
 

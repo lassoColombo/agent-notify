@@ -33,33 +33,14 @@ func (c *Core) WhatIsRunning(includeEnded bool) []session.Record {
 // process.Ended, superseded sessions included — so a display the watcher runs
 // and one reading cold through the SDK see one world.
 func (c *Core) WhatIsRunningAndWhatEnded(includeEnded bool) ([]session.Record, []process.Ending) {
-	records, err := c.Store.List()
+	list := c.Store.List
+	if includeEnded {
+		list = c.Store.ListIncludingEnded
+	}
+	records, err := list()
 	if err != nil {
 		// One unreadable record costs its own row and nothing else.
 		c.Logger.Warn("reading sessions", "problem", err.Error())
-	}
-	if includeEnded {
-		ended, err := c.Store.ListEnded()
-		if err != nil {
-			c.Logger.Warn("reading ended sessions", "problem", err.Error())
-		}
-		// A session being filed is written into ended/ before it leaves
-		// sessions/, so a read that falls between the two lists sees it twice.
-		// The higher sequence is the newer, which is how Read settles the same
-		// two files.
-		var both []session.Record
-		at := map[session.Key]int{}
-		for _, record := range append(records, ended...) {
-			if i, seen := at[record.Key]; seen {
-				if record.Sequence > both[i].Sequence {
-					both[i] = record
-				}
-				continue
-			}
-			at[record.Key] = len(both)
-			both = append(both, record)
-		}
-		records = both
 	}
 
 	boot, err := process.BootIdentity()
