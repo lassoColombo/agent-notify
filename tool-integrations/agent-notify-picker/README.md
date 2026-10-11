@@ -40,13 +40,12 @@
 - [Installation](#installation)
   - [Prerequisites](#prerequisites)
   - [1. Clone the monorepo and build](#1-clone-the-monorepo-and-build)
-  - [2. Put the binary somewhere, by replacing it](#2-put-the-binary-somewhere-by-replacing-it)
-  - [3. Register it with agent-notify](#3-register-it-with-agent-notify)
-  - [4. Bind it to a key](#4-bind-it-to-a-key)
-  - [5. Check it worked](#5-check-it-worked)
+  - [2. Nothing: it is on PATH](#2-nothing-it-is-on-path)
+  - [3. Bind it to a key](#3-bind-it-to-a-key)
+  - [4. Check it worked](#4-check-it-worked)
 - [Configuration](#configuration)
   - [Where the file is](#where-the-file-is)
-  - [The table core reads](#the-table-core-reads)
+  - [`integrations.picker`: what core reads](#integrationspicker-what-core-reads)
   - [Keys: a key is yours, an action is not](#keys-a-key-is-yours-an-action-is-not)
   - [Colours: the hues are yours, where they go is not](#colours-the-hues-are-yours-where-they-go-is-not)
   - [Environment variables](#environment-variables)
@@ -70,16 +69,19 @@ filter, press enter, and you are in that agent's pane.
 
 ### A display that is not a daemon
 
-It reads through the SDK, declares itself in the config, and renders the answer
-core computed — exactly like the menu bar and the zellij pane titles. What
+It reads through the SDK, is found on PATH like every other integration, and
+renders the answer core computed — exactly like the zellij pane titles. What
 differs is that it needs a terminal, so it is run when you press a key and it
 goes away when you have chosen.
 
-That is why **its table has no `binary`**, and the absence is the statement.
-Naming one means "core may run this" — the hook runs it on the path an agent is
-waiting on, the session-watcher runs it to render or to focus — and every one of
-those is a picker with nowhere to draw. The path lives in the keybinding
-instead, which is the only thing that runs this and where you would look for it.
+That is why **it answers no methods in its handshake**: no `render`, no
+`interpret`, no `focus`, no `focused`, no `reads`. Being on PATH is what puts
+an integration in core's set (D-102), and core then asks it `capabilities` and
+runs it only for a method it declared — the hook runs it on the path an agent
+is waiting on, the session-watcher runs it to render or to focus — and every
+one of those is a picker with nowhere to draw. So core never runs this; the
+keybinding is the only thing that does, and it is where you would look for the
+path (D-101).
 
 ### fzf owns the screen, as a library
 
@@ -122,10 +124,9 @@ the screen away and still leaves everything that is actually agent-notify's:
 
 ## Installation
 
-Four things have to be true before a keypress opens a picker: the binary exists
-somewhere a keybinding can reach, agent-notify's config file names it, something
-binds a key to it, and core itself is installed and finding sessions. This
-section does all four.
+Three things have to be true before a keypress opens a picker: the binary exists
+somewhere a keybinding can reach, something binds a key to it, and core itself
+is installed and finding sessions. This section does all three.
 
 ### Prerequisites
 
@@ -154,8 +155,9 @@ section does all four.
 
 Core and every integration live in one repository, and `make install` at the
 root builds every module into `$(go env GOPATH)/bin`. That directory has to be
-on `PATH`: `agent-notify install picker` finds this program there by name, and
-the keybinding it prints names the absolute path.
+on `PATH`, because that is how everything here finds everything else — and
+`make install` prints where it put each program, which is the path the
+keybinding below names.
 
 ```sh
 git clone git@github.com:lassoColombo/agent-notify.git ~/projects/agent-notify
@@ -168,48 +170,28 @@ macOS: `cp` over a running path reuses the inode, and the signature macOS
 cached no longer matches, so the next exec is killed with SIGKILL and no
 message. The symptom is a keybinding that opens a pane which closes instantly.
 
-### 2. Register it with agent-notify
+### 2. Nothing: it is on PATH
 
-```sh
-agent-notify install picker
-```
-
-`install` writes `conf.d/picker.toml` beside your `config.toml` and prints the
-keybinding, which is KDL and belongs in a different file of yours:
-
-```
-$ agent-notify install picker
-wrote /Users/you/.config/agent-notify/conf.d/picker.toml
-
-And this in zellij's config.kdl to open it with a key:
-
-    bind "Alt a" {
-        Run "/Users/you/go/bin/agent-notify-picker" {
-            name "agents"
-            floating true
-            close_on_exit true
-            width "90%"
-            height "90%"
-            x "5%"
-            y 1
-        }
-    }
-```
-
-The table has no `binary`, and that is what says core must never run this: a
-picker needs a terminal, and nothing core runs has one. `install` takes no
-options. `agent-notify uninstall picker` removes the drop-in.
+`make install` put `agent-notify-picker` on PATH, and **what is on PATH is
+what runs** (D-102): that is the whole of registering it. Nothing is written to
+agent-notify's configuration, by you or by anything in this repository, and
+`~/.config/agent-notify/config.yaml` need not exist. Being on PATH is what makes
+`agent-notify doctor` report on it and what hands this program its `settings`;
+it is not what starts it. Core asks it `capabilities`, it answers no methods
+core calls, so core never runs it — a picker needs a terminal, and nothing core
+runs has one. To uninstall, delete the binary.
 
 ### 3. Bind it to a key
 
-The keybinding is printed rather than written, and for the same reason the table
-is: a zellij config is KDL, full of your own comments and your own key choices,
-and an integration that rewrote it would be guessing at both. Paste it into
-`~/.config/zellij/config.kdl`, inside your keybindings block:
+The keybinding is yours to write: a zellij config is KDL, full of your own
+comments and your own key choices, and an integration that rewrote it would be
+guessing at both. Put this in
+`~/.config/zellij/config.kdl`, inside your keybindings block, with the path
+`make install` printed for this program:
 
 ```kdl
 bind "Alt a" {
-    Run "/opt/homebrew/bin/agent-notify-picker" {
+    Run "/Users/you/go/bin/agent-notify-picker" {
         name "agents"
         floating true
         close_on_exit true
@@ -225,8 +207,9 @@ bind "Alt a" {
 starting a program: focusing a pane hides the floating layer by itself, and the
 picker exits a moment later, so the pane it was in goes away behind you.
 
-The absolute path is not decoration. A keybinding's `PATH` is not your shell's,
-which is why every integration here writes one.
+The absolute path is not decoration. zellij's `Run` takes one because zellij's
+`PATH` is the one it was started with, which is not necessarily the one `make
+install` put this program on.
 
 **Not in zellij?** The picker is an ordinary terminal program that wants a
 terminal and exits when it is done, so anything that can open one works. In tmux
@@ -254,8 +237,21 @@ $env.config.keybindings ++= [{
 
 ```sh
 agent-notify list              # there are sessions to pick from at all
-agent-notify doctor            # the picker's table is seen, its binary resolves
+agent-notify doctor            # the picker is seen on PATH
 agent-notify-picker --print    # opens the window, prints the key you chose
+```
+
+`doctor` counts it on its `config` line and says what it is on its
+`integrations` line:
+
+```console
+$ agent-notify doctor
+...
+config       ok    3 integration(s) on PATH, 3 enabled, keep-ended-sessions 168h0m0s
+...
+integrations ok    reported by pid 1670 at 2026-10-11T09:12:44Z
+             picker                 yours to start; core never runs it
+                                    answers nothing core calls
 ```
 
 `--print` is the one to reach for while setting up: it exercises the whole
@@ -281,31 +277,37 @@ One file, and it is core's:
 
 | | path |
 | --- | --- |
-| default | `~/.config/agent-notify/config.toml` |
-| with `XDG_CONFIG_HOME` set | `$XDG_CONFIG_HOME/agent-notify/config.toml` |
-| with `AGENT_NOTIFY_ROOT` set | `$AGENT_NOTIFY_ROOT/config.toml` |
+| default | `~/.config/agent-notify/config.yaml` |
+| with `XDG_CONFIG_HOME` set | `$XDG_CONFIG_HOME/agent-notify/config.yaml` |
+| with `AGENT_NOTIFY_ROOT` set | `$AGENT_NOTIFY_ROOT/config.yaml` |
 
-The picker never locates, reads or parses that file itself — it asks the SDK,
-which is what keeps the layout core's to change (§A10.4). `agent-notify-picker
-install` prints the resolved path in its explanation, and `agent-notify doctor`
-prints it too, so there is no need to work it out by hand.
+It is YAML (D-103). The picker never locates, reads or parses that file itself
+— it asks the SDK, which is what keeps the layout core's to change (§A10.4).
+`agent-notify doctor` prints the resolved path, so there is no need to work it
+out by hand.
 
-### The table core reads
+### `integrations.picker`: what core reads
 
-Two keys, and both are core's rather than this program's:
+Nothing in the file makes this program run: it is on PATH, and that is what
+puts it in core's set (D-102). One key is core's rather than this program's:
 
-```toml
-[integration.picker]
+```yaml
+integrations:
+  picker:
+    enabled: false
 ```
 
 | key | type | default | what it changes |
 | --- | --- | --- | --- |
-| `binary` | — | absent, deliberately | Do not add one. It means "core may run this", and a picker run by core is a picker with nowhere to draw. The path belongs in your keybinding. |
-| `enabled` | bool | `true` when absent | `false` turns the picker off — which now means what it says, since nothing was ever going to start it. |
+| `integrations.picker.enabled` | bool | `true` when absent | `false` takes it out of what core considers on — which, for a program core never starts, means `doctor` stops reporting on it. Your keybinding still opens it. |
+
+There is no path here and no key for one. A program is found on PATH; what
+keeps core from running this one is its handshake, which answers no methods
+(D-101). The path belongs in your keybinding.
 
 Everything else this program understands is under
-`[integration.picker.settings]`, which core hands over verbatim and never reads
-(§A17 R7). There are exactly two tables in it, `keys` and `colors`, and **a key
+`integrations.picker.settings`, which core hands over verbatim and never reads
+(§A17 R7). There are exactly two maps in it, `keys` and `colors`, and **a key
 nobody declared is refused by name** — because a misspelled setting that changes
 nothing and says nothing is the config bug people give up on.
 
@@ -334,39 +336,46 @@ The middle column is the table, and it is the colours table the other way round:
 a hue is yours and where it is spent is this program's, while a **key is yours
 and what there is to ask for is this program's**.
 
-```toml
-[integration.picker.settings.keys]
-down              = ["down", "ctrl-n"]
-up                = ["up", "ctrl-p"]
-preview-down      = "ctrl-j"
-preview-up        = "ctrl-k"
-preview-page-down = "ctrl-d"
-preview-page-up   = "ctrl-u"
-choose            = "enter"
-leave             = ["esc", "ctrl-c"]
+```yaml
+integrations:
+  picker:
+    settings:
+      keys:
+        down: [down, ctrl-n]
+        up: [up, ctrl-p]
+        preview-down: ctrl-j
+        preview-up: ctrl-k
+        preview-page-down: ctrl-d
+        preview-page-up: ctrl-u
+        choose: enter
+        leave: [esc, ctrl-c]
 ```
 
-Every key is optional and every value is either one key or a list of them:
+Every key is optional and every value is either one key or a list of them,
+under `integrations.picker.settings.keys`:
 
 | key | type | default | binds fzf's |
 | --- | --- | --- | --- |
-| `down` | string or list of strings | `["down", "ctrl-n"]` | `down` |
-| `up` | string or list of strings | `["up", "ctrl-p"]` | `up` |
-| `preview-down` | string or list of strings | `"ctrl-j"` | `preview-down` |
-| `preview-up` | string or list of strings | `"ctrl-k"` | `preview-up` |
-| `preview-page-down` | string or list of strings | `"ctrl-d"` | `preview-half-page-down` |
-| `preview-page-up` | string or list of strings | `"ctrl-u"` | `preview-half-page-up` |
-| `choose` | string or list of strings | `"enter"` | `accept` |
-| `leave` | string or list of strings | `["esc", "ctrl-c"]` | `abort` |
+| `down` | string or list of strings | `[down, ctrl-n]` | `down` |
+| `up` | string or list of strings | `[up, ctrl-p]` | `up` |
+| `preview-down` | string or list of strings | `ctrl-j` | `preview-down` |
+| `preview-up` | string or list of strings | `ctrl-k` | `preview-up` |
+| `preview-page-down` | string or list of strings | `ctrl-d` | `preview-half-page-down` |
+| `preview-page-up` | string or list of strings | `ctrl-u` | `preview-half-page-up` |
+| `choose` | string or list of strings | `enter` | `accept` |
+| `leave` | string or list of strings | `[esc, ctrl-c]` | `abort` |
 
 Something small, to see the shape of it — vim keys for the preview and a second
 way out:
 
-```toml
-[integration.picker.settings.keys]
-preview-down = ["ctrl-j", "ctrl-e"]
-preview-up   = ["ctrl-k", "ctrl-y"]
-leave        = ["esc", "ctrl-c", "ctrl-g"]
+```yaml
+integrations:
+  picker:
+    settings:
+      keys:
+        preview-down: [ctrl-j, ctrl-e]
+        preview-up: [ctrl-k, ctrl-y]
+        leave: [esc, ctrl-c, ctrl-g]
 ```
 
 - **Keyed on the action, never on the key.** The eight are declared, so a
@@ -377,9 +386,9 @@ leave        = ["esc", "ctrl-c", "ctrl-g"]
   one rule this picker keeps.
 - **A value replaces the default rather than adding to it**, and `""` or `[]`
   gives the key back. Only what *this program* binds is yours to move: fzf's own
-  defaults stand underneath, so `preview-page-down = []` is ctrl-d quitting on
+  defaults stand underneath, so `preview-page-down: []` is ctrl-d quitting on
   an empty query again.
-- **A key asked to do two things refuses the whole table**, with the two actions
+- **A key asked to do two things refuses the whole map**, with the two actions
   named, and the keys this program shipped with are the ones in force. Half a
   keymap — the half that did not collide — is a window where some keys do what
   you asked and some do what this program asked, which is worse to sit in front
@@ -404,25 +413,29 @@ The twelve slots this program paints with are a table, and nothing else about
 the palette is configurable. The asymmetry is the whole design: you say what a
 slot **is**, `theme.go` says what a slot is **for**.
 
-```toml
-[integration.picker.settings.colors]
-base02 = "#26233a"  # overlay     — the row you are on, the chip behind inline code
-base03 = "#6e6a86"  # muted       — rules, borders, scrollbars, the marks between words
-base04 = "#8c88a6"  # subtle      — ages, fact names, earlier messages, unmatched rows, idle
-base05 = "#e0def4"  # text        — names and prose
-base08 = "#eb6f92"  # love        — blocked-on-you
-base09 = "#f6c177"  # gold        — broke, a string in a fenced block, the complaint header
-base0A = "#ebbcba"  # rose        — branches, matched characters
-base0B = "#31748f"  # pine        — a keyword, inside a fenced code block and nowhere else
-base0C = "#9ccfd8"  # foam        — finished-a-turn
-base0D = "#c4a7e7"  # iris        — paths, the prompt, the pane label, links in a message
-base13 = "#fff0ee"  # bright rose — the pointer rail, headings in a message
-base14 = "#609fbb"  # bright pine — working
+```yaml
+integrations:
+  picker:
+    settings:
+      colors:
+        base02: "#26233a"  # overlay     — the row you are on, the chip behind inline code
+        base03: "#6e6a86"  # muted       — rules, borders, scrollbars, the marks between words
+        base04: "#8c88a6"  # subtle      — ages, fact names, earlier messages, unmatched rows, idle
+        base05: "#e0def4"  # text        — names and prose
+        base08: "#eb6f92"  # love        — blocked-on-you
+        base09: "#f6c177"  # gold        — broke, a string in a fenced block, the complaint header
+        base0A: "#ebbcba"  # rose        — branches, matched characters
+        base0B: "#31748f"  # pine        — a keyword, inside a fenced code block and nowhere else
+        base0C: "#9ccfd8"  # foam        — finished-a-turn
+        base0D: "#c4a7e7"  # iris        — paths, the prompt, the pane label, links in a message
+        base13: "#fff0ee"  # bright rose — the pointer rail, headings in a message
+        base14: "#609fbb"  # bright pine — working
 ```
 
-Every key is optional, every value is a string, and **the only accepted spelling
-is `#rrggbb`**. Write one line or none: an absent key keeps the default, which
-is the Rosé Pine above.
+Every key is optional, every value is a quoted string — a bare `#` starts a
+YAML comment — and **the only accepted spelling is `#rrggbb`**. Write one line
+or none: an absent key keeps the default, which is the Rosé Pine above. The
+keys are under `integrations.picker.settings.colors`:
 
 | key | default | what it paints |
 | --- | --- | --- |
@@ -441,20 +454,23 @@ is the Rosé Pine above.
 
 A whole palette, pasted from the file you already keep:
 
-```toml
-[integration.picker.settings.colors]
-base02 = "#303446"
-base03 = "#51576d"
-base04 = "#626880"
-base05 = "#c6d0f5"
-base08 = "#e78284"
-base09 = "#ef9f76"
-base0A = "#e5c890"
-base0B = "#a6d189"
-base0C = "#81c8be"
-base0D = "#8caaee"
-base13 = "#f2d5cf"
-base14 = "#99d1db"
+```yaml
+integrations:
+  picker:
+    settings:
+      colors:
+        base02: "#303446"
+        base03: "#51576d"
+        base04: "#626880"
+        base05: "#c6d0f5"
+        base08: "#e78284"
+        base09: "#ef9f76"
+        base0A: "#e5c890"
+        base0B: "#a6d189"
+        base0C: "#81c8be"
+        base0D: "#8caaee"
+        base13: "#f2d5cf"
+        base14: "#99d1db"
 ```
 
 - **The comments are also the list of what moves together.** Change `base09` and
@@ -465,8 +481,8 @@ base14 = "#99d1db"
 - **The slots are named rather than hue-worded** — no `blue`, no `red` — because
   the hue words lie on this machine: the "blue" slot is iris, which is purple,
   and `base0A` is annotated ANSI yellow while being rose. A slot name is what
-  `scheme.yaml` is written in, so this table is a paste from a file you already
-  have.
+  `scheme.yaml` is written in, and this file is YAML too, so the table is a
+  paste from a file you already have.
 - **Twelve, because twelve is what gets painted.** A slot nothing spends is not
   offered, since a key that changes nothing is the same silence the strictness
   exists to break. `base00` is absent for a different reason: the canvas is
@@ -489,21 +505,14 @@ and through fzf:
 | variable | read by | effect |
 | --- | --- | --- |
 | `AGENT_NOTIFY_ROOT` | core's SDK | moves the config file, the state directory and the runtime directory beneath one root — the one override the design allows (D-20). Set it and this picker lists that instance's sessions. |
-| `XDG_CONFIG_HOME` | core's SDK | where `agent-notify/config.toml` is looked for, when `AGENT_NOTIFY_ROOT` is unset. |
+| `XDG_CONFIG_HOME` | core's SDK | where `agent-notify/config.yaml` is looked for, when `AGENT_NOTIFY_ROOT` is unset. |
 | `XDG_STATE_HOME` | core's SDK | where session records are read from on Linux. macOS uses `~/Library/Application Support/agent-notify` and ignores it. |
-| `PATH` | core's SDK | how `agent-notify` is found for the jump, unless `agent-notify-binary` names it in the config file. |
+| `PATH` | core's SDK | how `agent-notify` is found for the jump (D-101). |
 | `FZF_PREVIEW_COLUMNS` | this program's `--preview` child | how wide to wrap the message. fzf sets it; the fallback is 80, narrow on purpose, because text that is too narrow is readable and text that is too wide is a staircase. |
 
-One core-level key matters here and is not in this integration's table, because
-it is not this integration's business:
-
-```toml
-agent-notify-binary = "/opt/homebrew/bin/agent-notify"
-```
-
-That is what enter runs. A keybinding's `PATH` is not your shell's (D-33), so if
-`agent-notify` is somewhere unusual, name it there once and every integration
-finds it.
+Enter runs `agent-notify`, found on that `PATH` — the one zellij was started
+with, since this program is zellij's child. If the jump says it cannot find
+core, that is the PATH to put `make install`'s directory on.
 
 `keep-ended-sessions` — core's, seven days by default — is what bounds the set
 `--all` shows you.
@@ -517,7 +526,7 @@ start is a floating pane which appears and vanishes, indistinguishable from a
 crash, and the thing you file a bug about rather than fix.
 
 ```
- [integration.picker.settings.colors] base09 = "gold" is not a colour, so base09 is still #f6c177 (and 2 more)
+ integrations.picker.settings.colors base09 = "gold" is not a colour, so base09 is still #f6c177 (and 2 more)
   ⌕  filter sessions…                                                          5/5
 ```
 
@@ -528,7 +537,7 @@ is the picker refusing to open by another route.
 | what is wrong | what happens |
 | --- | --- |
 | a colour that is not `#rrggbb` | that slot keeps its default, the others still apply, complaint in the header |
-| a key nobody declared, anywhere under `settings` | the whole `settings` table fails to decode: every default stands, and the offending key is named in the header |
+| a key nobody declared, anywhere under `settings` | the whole `settings` section fails to decode: every default stands, and the offending key is named in the header |
 | a key bound to two actions | the whole keymap is refused, this program's own keys are in force, both actions named in the header |
 | a key name fzf does not know | fzf refuses the binds, this program's own keys are in force, fzf's own words in the header |
 | a config file core refuses whole | every default stands, complaint in the header |
@@ -563,7 +572,6 @@ agent-notify-picker --all      the ended-but-resumable ones too — the set boun
 agent-notify-picker --print    answer with the session's key on stdout instead of
                                going to it, for binding it to something of your own
 agent-notify-picker --help     the above
-agent-notify install picker    print the table to add and the keybinding to bind
 ```
 
 ```
@@ -726,9 +734,10 @@ Nothing here walks agent-notify's directory layout or drives a container:
   by urgency and with the liveness decision already applied — a session whose
   process was killed is not offered as working (D-30).
 - `History` for the preview of the one under the cursor.
-- `Settings` for this integration's own table, and `ConfigFile` for the one line
-  of `install` that says where to put the table.
-- `CoreBinary`, then `agent-notify focus-session <key>` for the jump. Which
+- `Settings` for this integration's own `settings` section, which core read
+  and handed over without looking inside (D-103).
+- `CoreBinary`, which is `agent-notify` on PATH (D-101), then
+  `agent-notify focus-session <key>` for the jump. Which
   containers there are, what order they nest in and what each one answers are
   core's business (§A11.2) — a display that learned any of that would be one
   that disagrees with the bar beside it. Its output is left on the terminal on
@@ -764,10 +773,9 @@ somebody makes.
   a session that changes state while you are reading its preview keeps the row
   it had. The preview under the cursor is re-read per row, so it is current; the
   row above it may not be.
-- **`install` files its table and prints the keybinding** (D-85), so one
-  manual paste stays, into a KDL file in a language a TOML writer cannot edit.
-- **zellij is the only multiplexer with a printed keybinding.** The tmux and
-  shell-widget snippets above work, and they are not generated by `install`.
+- **One paste by hand, and it carries a path.** The keybinding is yours to
+  write (D-101), and it names an absolute path because zellij's `Run` wants
+  one; a `make install` to a different `GOBIN` is a keybinding to edit.
 - **The glyphs assume a Nerd Font**, and there is no ASCII fallback. A terminal
   without one draws boxes in the badge column; every badge still carries its
   word, so nothing becomes unreadable.

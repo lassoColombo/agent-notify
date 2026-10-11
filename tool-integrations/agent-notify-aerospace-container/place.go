@@ -12,7 +12,7 @@ import (
 )
 
 // Name is what this integration calls itself: its config table, its entry in
-// `[container] order`, and its section of a record.
+// `containers`, and its section of a record.
 //
 // The role is in the name for the same reason zellij's is (D-37), even though
 // aerospace is a container and nothing else. A person reading

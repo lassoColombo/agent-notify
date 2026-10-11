@@ -15,12 +15,13 @@ import (
 	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
+// program is the executable's name.
+const program = "agent-notify-macos-notifier"
+
 func main() {
 	help := func([]string) int { usage(os.Stdout); return 0 }
 	os.Exit(subscribe.Main(me, subscribe.Commands{
 		Named: map[string]func([]string) int{
-			"install":   install,
-			"uninstall": uninstall,
 			"check":     check,
 			holdCommand: hold,
 			"help":      help, "-h": help, "--help": help,
@@ -33,15 +34,14 @@ func usage(to *os.File) {
 	fmt.Fprintf(to, `%s — a macOS notification when an agent wants you
 
   %s check      post a test banner and say what would carry it
-  %s install    file the [integration.%s] table
-  %s uninstall  remove it
 
-Core runs this; you do not. The banner is posted by alerter, which has to be on
-PATH: brew install vjeantet/tap/alerter.
+Core runs this; you do not. Being on PATH is the whole of installing it. The
+banner is posted by alerter, which has to be on PATH too:
+brew install vjeantet/tap/alerter.
 
 A banner is the whole of what macOS will tell you: the menu bar display that used
 to sit beside this one was deleted (D-87).
-`, program, program, program, Name, program)
+`, program, program)
 }
 
 // paint is one render: core hands over the world and what moved to reach it,

@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -26,39 +27,30 @@ func TestMissingFileIsNotAComplaint(t *testing.T) {
 // TestMalformedFileIsRefusedWhole is the other half of M2's "done when":
 // defaults, one complaint, and nothing that breaks the caller.
 func TestMalformedFileIsRefusedWhole(t *testing.T) {
-	settings, problems := config.Parse([]byte("keep-ended-sessions = \nthis is not toml ]]"), "broken.toml")
+	settings, problems := config.Parse([]byte("keep-ended-sessions: [\nthis is not yaml ]]"), "broken.yaml")
 	if len(problems) != 1 {
 		t.Fatalf("got %d complaints, want exactly 1: %v", len(problems), problems)
 	}
 	if !reflect.DeepEqual(settings, config.Defaults()) {
 		t.Errorf("a malformed file did not fall back to defaults")
 	}
-	if !strings.Contains(problems[0].Error(), "broken.toml") {
+	if !strings.Contains(problems[0].Error(), "broken.yaml") {
 		t.Errorf("the complaint does not name the file:\n%v", problems[0])
 	}
 }
 
 func TestAWholeFileIsRead(t *testing.T) {
 	settings, problems := config.Parse([]byte(`
-keep-ended-sessions = "72h"
-
-[agent.claude]
-binary = "claude"
-
-[integration.zellij]
-binary = "agent-notify-zellij"
-settings = { glyphs = { working = "*" } }
-
-[integration.sketchybar]
-enabled = false
-binary  = "agent-notify-sketchybar"
-
-[integration.aerospace]
-binary = "agent-notify-aerospace-container"
-
-[container]
-order = ["aerospace", "zellij"]
-`), "config.toml")
+keep-ended-sessions: 72h
+integrations:
+  zellij:
+    settings:
+      glyphs: { working: "*" }
+  sketchybar:
+    enabled: false
+  aerospace: {}
+containers: [aerospace, zellij]
+`), "config.yaml")
 
 	for _, problem := range problems {
 		t.Errorf("unexpected complaint: %v", problem)
@@ -66,24 +58,21 @@ order = ["aerospace", "zellij"]
 	if got := settings.KeepEndedSessions.Duration(); got != 3*24*time.Hour {
 		t.Errorf("KeepEndedSessions = %s, want 72h", got)
 	}
-	if settings.Agent["claude"].Binary != "claude" {
-		t.Errorf("agent.claude.binary = %q", settings.Agent["claude"].Binary)
-	}
-	if !settings.Integration["zellij"].IsEnabled() {
+	if !settings.Integrations["zellij"].IsEnabled() {
 		t.Errorf("an integration with no enabled key should be enabled")
 	}
-	if settings.Integration["sketchybar"].IsEnabled() {
+	if settings.Integrations["sketchybar"].IsEnabled() {
 		t.Errorf("enabled = false was ignored")
 	}
-	if got := settings.Container.Order; len(got) != 2 || got[0] != "aerospace" {
-		t.Errorf("container.order = %q", got)
+	if got := settings.Containers; len(got) != 2 || got[0] != "aerospace" {
+		t.Errorf("containers = %q", got)
 	}
 
 	// Settings reach the integration verbatim and core never looks inside
 	// (plan.md §A17 R7) — but they must survive the trip.
-	glyphs, ok := settings.Integration["zellij"].Settings["glyphs"].(map[string]any)
+	glyphs, ok := settings.Integrations["zellij"].Settings["glyphs"].(map[string]any)
 	if !ok {
-		t.Fatalf("settings.glyphs did not survive decoding: %#v", settings.Integration["zellij"].Settings)
+		t.Fatalf("settings.glyphs did not survive decoding: %#v", settings.Integrations["zellij"].Settings)
 	}
 	if glyphs["working"] != "*" {
 		t.Errorf("settings.glyphs.working = %v", glyphs["working"])
@@ -92,13 +81,12 @@ order = ["aerospace", "zellij"]
 
 func TestUnknownKeysAreReportedAndTheRestSurvives(t *testing.T) {
 	settings, problems := config.Parse([]byte(`
-keep-ended-sessions = "48h"
-retention-visible   = "1m"
-
-[integration.zellij]
-binary = "agent-notify-zellij"
-colour = "blue"
-`), "typo.toml")
+keep-ended-sessions: 48h
+retention-visible: 1m
+integrations:
+  zellij:
+    colour: blue
+`), "typo.yaml")
 
 	if len(problems) != 1 {
 		t.Fatalf("got %d complaints, want 1: %v", len(problems), problems)
@@ -112,19 +100,18 @@ colour = "blue"
 	if got := settings.KeepEndedSessions.Duration(); got != 2*24*time.Hour {
 		t.Errorf("a typo elsewhere cost us keep-ended-sessions: %s", got)
 	}
-	if settings.Integration["zellij"].Binary != "agent-notify-zellij" {
-		t.Errorf("a typo in a table cost us the rest of the table")
+	if _, kept := settings.Integrations["zellij"]; !kept {
+		t.Errorf("a typo in a table cost us the table")
 	}
 }
 
 func TestBadValuesFallBackIndividually(t *testing.T) {
 	settings, problems := config.Parse([]byte(`
-keep-ended-sessions = 0
-history-messages    = -1
-
-[agent.claude]
-binary = "claude"
-`), "values.toml")
+keep-ended-sessions: 0
+history-messages: -1
+integrations:
+  zellij: {}
+`), "values.yaml")
 
 	if len(problems) != 2 {
 		t.Fatalf("got %d complaints, want 2: %v", len(problems), problems)
@@ -138,7 +125,7 @@ binary = "claude"
 	if settings.HistoryMessages != 0 {
 		t.Errorf("HistoryMessages = %d, want 0", settings.HistoryMessages)
 	}
-	if settings.Agent["claude"].Binary != "claude" {
+	if _, kept := settings.Integrations["zellij"]; !kept {
 		t.Errorf("a good value was thrown away with the bad ones")
 	}
 }
@@ -150,7 +137,7 @@ func durationKeys() []string {
 	for i := range structure.NumField() {
 		field := structure.Field(i)
 		if field.Type == reflect.TypeOf(session.Duration{}) {
-			keys = append(keys, field.Tag.Get("toml"))
+			keys = append(keys, field.Tag.Get("yaml"))
 		}
 	}
 	return keys
@@ -182,7 +169,7 @@ func TestOneRetentionDuration(t *testing.T) {
 func TestEveryDurationIsValidated(t *testing.T) {
 	defaults := config.Defaults()
 	for _, key := range durationKeys() {
-		settings, problems := config.Parse([]byte(key+" = 0\n"), "zeroed.toml")
+		settings, problems := config.Parse([]byte(key+": 0\n"), "zeroed.yaml")
 		named := false
 		for _, problem := range problems {
 			if strings.Contains(problem.Error(), key) {
@@ -198,53 +185,61 @@ func TestEveryDurationIsValidated(t *testing.T) {
 	}
 }
 
-// TestATableWithNoBinaryIsAccepted: the absence is a declaration, not an
-// omission (D-81).
-//
-// It is how a client says core must not run it — both macOS displays and the
-// picker say exactly this, and `install` prints exactly this table for all
-// three. Complaining here meant complaining about our own printed output, which
-// is what it did: three FAILs on a correct config file.
-//
-// Where running one IS required, the requirement belongs to whatever needs to
-// run it. [container] order still refuses a container with no binary, because a
-// container that cannot be run cannot answer `focus`
-// (containers.TestAContainerWithNoBinaryIsRefusedAndNamed).
-func TestATableWithNoBinaryIsAccepted(t *testing.T) {
-	settings, problems := config.Parse([]byte("[integration.macos-notifier]\n"), "client.toml")
+// TestAnEntryAloneIsKept: a name with nothing under it is a complete entry,
+// kept so that its settings can be asked for (D-102).
+func TestAnEntryAloneIsKept(t *testing.T) {
+	settings, problems := config.Parse([]byte("integrations:\n  macos-notifier:\n"), "client.yaml")
 	if len(problems) != 0 {
-		t.Fatalf("a client's settings table was complained about: %v", problems)
+		t.Fatalf("an entry with nothing under it was complained about: %v", problems)
 	}
-	if _, present := settings.Integration["macos-notifier"]; !present {
-		t.Error("the table was accepted and then not kept, so nothing can read its settings")
+	if _, present := settings.Integrations["macos-notifier"]; !present {
+		t.Error("the entry was accepted and then not kept, so nothing can read its settings")
 	}
 }
 
-// The two keys that used to describe a container written entirely in
-// configuration get a sentence rather than the generic "not recognised", because
-// the generic one says a key was ignored and not that the mechanism has gone
-// (D-57).
-
-// A file that still carries them is otherwise used. Losing the rest of somebody's
-// configuration over a line that no longer does anything would be a worse answer
-// than the one it replaced.
+// TestARemovedKeyDoesNotCostTheRestOfTheFile: losing the rest of somebody's
+// configuration over a line that no longer does anything would be a worse
+// answer than the one it replaced.
 func TestARemovedKeyDoesNotCostTheRestOfTheFile(t *testing.T) {
 	settings, _ := config.Parse([]byte(`
-sweep-interval = "250ms"
+sweep-interval: 250ms
+integrations:
+  tmux:
+    enabled: true
+    capture: [TMUX, TMUX_PANE]
+`), "old.yaml")
 
-[integration.tmux]
-binary  = "agent-notify-tmux"
-capture = ["TMUX", "TMUX_PANE"]
-focus   = ["tmux", "switch-client", "-t", "{TMUX_PANE}"]
-`), "old.toml")
+	if !settings.Integrations["tmux"].IsEnabled() {
+		t.Errorf("a removed key cost us the rest of the entry")
+	}
+}
 
-	if got := settings.Integration["tmux"].Binary; got != "agent-notify-tmux" {
-		t.Errorf("integration.tmux.binary = %q; a removed key cost us the rest", got)
+// TestWhatIsOnPATHIsWhatRuns is D-102: the set is PATH, the file turns one
+// off, and a name in the file with no program behind it is a complaint.
+func TestWhatIsOnPATHIsWhatRuns(t *testing.T) {
+	bin := t.TempDir()
+	for _, name := range []string{"agent-notify-painter", "agent-notify-placer"} {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", bin)
+	root := t.TempDir()
+	layout, _ := paths.Under(root)
+	if err := os.WriteFile(layout.ConfigFile, []byte("integrations:\n  placer:\n    enabled: false\n  ghost:\n    enabled: false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings, problems := config.Load(layout)
+	if got := settings.Enabled(); !reflect.DeepEqual(got, []string{"painter"}) {
+		t.Errorf("Enabled = %v, want painter alone: placer is turned off and ghost is not there", got)
+	}
+	if len(problems) != 1 || !strings.Contains(problems[0].Error(), "ghost") {
+		t.Errorf("problems = %v, want one naming ghost, which is written and not on PATH", problems)
 	}
 }
 
 func TestDisabledIntegrationsAreNotNagged(t *testing.T) {
-	_, problems := config.Parse([]byte("[integration.zellij]\nenabled = false\n"), "off.toml")
+	_, problems := config.Parse([]byte("integrations:\n  zellij:\n    enabled: false\n"), "off.yaml")
 	if len(problems) != 0 {
 		t.Errorf("a disabled integration was complained about: %v", problems)
 	}
@@ -258,6 +253,7 @@ func TestUnreadableFileIsAComplaintNotACrash(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root reads anything")
 	}
+	t.Setenv("PATH", t.TempDir())
 	settings, problems := config.Load(layout)
 	if len(problems) != 1 {
 		t.Fatalf("got %d complaints, want 1: %v", len(problems), problems)

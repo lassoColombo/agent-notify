@@ -1,45 +1,50 @@
-// Package install sets integrations up, by handing the job to each of them.
+// Package install sets the agents up, by handing the job to each of them.
 //
-// Core does not know where Claude keeps its settings, what its hooks are
-// called, or which environment variables zellij puts in a pane, and must not
-// (R10). What it knows is the naming convention and where its own binary is,
-// so it files the second and runs `agent-notify-<name> install` for the rest.
+// Core does not know where Claude keeps its settings or what its hooks are
+// called, and must not (R10). What it knows is the naming convention, so it
+// asks every agent-notify-<name> on PATH what it answers and runs `install`
+// on the ones that answer it: the agent-integrations, which write the hook
+// into their agent's file. Nothing here writes any configuration (D-101).
 package install
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 
 	"github.com/spf13/cobra"
 
-	"github.com/lassoColombo/agent-notify/command/internal/onpath"
 	"github.com/lassoColombo/agent-notify/internal/config"
-	"github.com/lassoColombo/agent-notify/internal/paths"
+	"github.com/lassoColombo/agent-notify/internal/handshake"
+	"github.com/lassoColombo/agent-notify/internal/onpath"
+	"github.com/lassoColombo/agent-notify/session"
+	"github.com/lassoColombo/agent-notify/tool"
 )
 
 // Command is `agent-notify install`.
 func Command() *cobra.Command {
 	return &cobra.Command{
 		Use:   "install [integration ...] [options]",
-		Short: "set up every integration on your PATH, or the ones named",
-		Long: `Files where agent-notify itself is, then runs agent-notify-<name> install for
-every agent-notify-* program on your PATH, or for the ones named. Each writes
-what only it knows into its own file under conf.d; your config.toml is never
-touched. Options after one name belong to that program.
+		Short: "wire every agent on your PATH up, or the ones named",
+		Long: `Runs agent-notify-<name> install for every agent-notify-* program on your PATH
+that has one, or for the ones named. An agent-integration writes the hook into
+its agent's own settings; nothing writes agent-notify's configuration, which is
+yours. A tool-integration has nothing to install: it is on PATH, so it runs.
+Options after one name belong to that program.
 
   agent-notify install
   agent-notify install claude --print
-  agent-notify install macos-notifier
 
 Press TAB for the integrations that are on your PATH.`,
 		DisableFlagParsing: true,
-		ValidArgsFunction:  onpath.CompleteThem,
+		ValidArgsFunction:  completeThem,
 		RunE: func(command *cobra.Command, arguments []string) error {
 			if len(arguments) > 0 && (arguments[0] == "--help" || arguments[0] == "-h") {
 				return command.Help()
 			}
-			if code := run("install", arguments, true); code != 0 {
+			if code := run("install", arguments); code != 0 {
 				os.Exit(code)
 			}
 			return nil
@@ -51,17 +56,17 @@ Press TAB for the integrations that are on your PATH.`,
 func Uninstall() *cobra.Command {
 	return &cobra.Command{
 		Use:   "uninstall [integration ...] [options]",
-		Short: "take every integration on your PATH down, or the ones named",
+		Short: "take every agent on your PATH out of its hooks, or the ones named",
 		Long: `Runs agent-notify-<name> uninstall for every agent-notify-* program on your
-PATH, or for the ones named, then removes what agent-notify filed about
-itself. Each takes back what its install wrote and nothing else.`,
+PATH that has one, or for the ones named. Each takes back what its install
+wrote and nothing else.`,
 		DisableFlagParsing: true,
-		ValidArgsFunction:  onpath.CompleteThem,
+		ValidArgsFunction:  completeThem,
 		RunE: func(command *cobra.Command, arguments []string) error {
 			if len(arguments) > 0 && (arguments[0] == "--help" || arguments[0] == "-h") {
 				return command.Help()
 			}
-			if code := run("uninstall", arguments, false); code != 0 {
+			if code := run("uninstall", arguments); code != 0 {
 				os.Exit(code)
 			}
 			return nil
@@ -69,27 +74,25 @@ itself. Each takes back what its install wrote and nothing else.`,
 	}
 }
 
-// run files core's own drop-in, then hands the verb to each integration in
-// turn as a child that owns the terminal. With one name, everything after it
-// is that program's; with none, every program on PATH is run with nothing.
-func run(verb string, arguments []string, installing bool) int {
-	layout, err := paths.FromEnvironment()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "agent-notify %s: %v\n", verb, err)
-		return 1
-	}
-	if installing {
-		if code := fileWhereCoreIs(layout); code != 0 {
-			return code
-		}
-	}
-
+// run hands the verb to each program in turn as a child that owns the
+// terminal. With one name, everything after it is that program's and the
+// program is run whether or not it says it answers; with none, every program
+// on PATH that answers the verb is run with nothing.
+func run(verb string, arguments []string) int {
 	names, rest := arguments, []string(nil)
 	if len(arguments) > 1 && arguments[1][0] == '-' {
 		names, rest = arguments[:1], arguments[1:]
 	}
 	if len(names) == 0 {
-		names = onpath.Integrations()
+		for _, name := range onpath.Integrations() {
+			if answers(name, verb) {
+				names = append(names, name)
+			}
+		}
+		if len(names) == 0 {
+			fmt.Printf("nothing on PATH answers `%s`; a tool-integration is set up by its table alone\n", verb)
+			return 0
+		}
 	}
 
 	code := 0
@@ -98,37 +101,33 @@ func run(verb string, arguments []string, installing bool) int {
 			code = one
 		}
 	}
-	if !installing {
-		if err := config.RemoveDropIn(layout, "agent-notify"); err != nil {
-			fmt.Fprintf(os.Stderr, "agent-notify uninstall: %v\n", err)
-			return 1
-		}
-		fmt.Printf("removed %s\n", layout.DropIn("agent-notify"))
-	}
 	return code
 }
 
-// fileWhereCoreIs writes `agent-notify-binary` into core's own drop-in, so
-// that a hook and a launchd child find this program without a PATH (D-85).
-func fileWhereCoreIs(layout paths.Layout) int {
-	self, err := os.Executable()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "agent-notify install: cannot find my own path: %v\n", err)
-		return 1
+// completeThem offers the programs that are actually there, which is the same
+// question `install` asks a moment later.
+func completeThem(
+	command *cobra.Command, arguments []string, whatHasBeenTypedSoFar string,
+) ([]string, cobra.ShellCompDirective) {
+	if len(arguments) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	written, err := config.WriteDropIn(layout, "agent-notify",
-		fmt.Sprintf("# Written by `agent-notify install`: where agent-notify is, for a hook\n"+
-			"# and a launchd child, whose PATH is not yours.\nagent-notify-binary = %q\n", self))
+	return onpath.Integrations(), cobra.ShellCompDirectiveNoFileComp
+}
+
+// answers is whether the program lists the verb among its methods. One that
+// cannot be asked does not.
+func answers(name, verb string) bool {
+	raw, err := tool.Ask(config.Program(name), session.CapabilitiesCommand, nil, handshake.Timeout)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "agent-notify install: %v\n", err)
-		return 1
+		return false
 	}
-	fmt.Printf("wrote %s\n", written)
-	return 0
+	var answered session.Capabilities
+	return json.Unmarshal(raw, &answered) == nil && slices.Contains(answered.Methods, verb)
 }
 
 func handOver(name, verb string, arguments []string) int {
-	program := "agent-notify-" + name
+	program := config.Program(name)
 	found, err := exec.LookPath(program)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "agent-notify %s: cannot find %s on PATH.\n"+

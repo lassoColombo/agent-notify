@@ -30,15 +30,13 @@ func TestEachAnswerLandsUnderItsOwnName(t *testing.T) {
 	t.Cleanup(func() { captureTimeout = was })
 
 	dir := t.TempDir()
-	settings := config.Defaults()
-	settings.Integration = map[string]config.Integration{
-		"pane":   {Binary: program(t, dir, "pane", `{"PANE":"7"}`, 0)},
-		"window": {Binary: program(t, dir, "window", `{"WINDOW":"left"}`, 0)},
-		"broken": {Binary: program(t, dir, "broken", `nonsense`, 1)},
-		"bar":    {Binary: program(t, dir, "bar", `{}`, 0)},
-	}
+	t.Setenv("PATH", dir+":/usr/bin:/bin")
+	program(t, dir, "pane", `{"PANE":"7"}`, 0)
+	program(t, dir, "window", `{"WINDOW":"left"}`, 0)
+	program(t, dir, "broken", `nonsense`, 1)
+	program(t, dir, "bar", `{}`, 0)
 
-	captured := askEveryoneWhoCaptures(settings,
+	captured := askEveryoneWhoCaptures(
 		[]string{"bar", "broken", "pane", "window"}, slog.New(slog.DiscardHandler), nil)
 
 	if got := owners(captured.By); !slices.Equal(got, []string{"bar", "pane", "window"}) {
@@ -61,8 +59,7 @@ func TestEachAnswerLandsUnderItsOwnName(t *testing.T) {
 func TestTheAncestryIsCarriedWithNothingToCapture(t *testing.T) {
 	chain := []session.Ancestor{{PID: 7, Command: "claude"}}
 
-	captured := askEveryoneWhoCaptures(
-		config.Defaults(), nil, slog.New(slog.DiscardHandler), chain)
+	captured := askEveryoneWhoCaptures(nil, slog.New(slog.DiscardHandler), chain)
 
 	if len(captured.Ancestry) != 1 || captured.Ancestry[0].Command != "claude" {
 		t.Errorf("ancestry = %+v, want the chain it was handed", captured.Ancestry)
@@ -73,10 +70,10 @@ func TestTheAncestryIsCarriedWithNothingToCapture(t *testing.T) {
 }
 
 // program writes one capture-environment that prints what it is told and exits
-// with the code it is given, and returns its path.
+// with the code it is given, under the name core will look for on PATH.
 func program(t *testing.T, dir, name, prints string, exit int) string {
 	t.Helper()
-	path := filepath.Join(dir, name)
+	path := filepath.Join(dir, config.Program(name))
 	script := fmt.Sprintf("#!/bin/sh\necho '%s'\nexit %d\n", prints, exit)
 	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
 		t.Fatalf("writing %s: %v", path, err)

@@ -31,6 +31,10 @@ func shortRoot(t *testing.T) string {
 		t.Fatalf("MkdirTemp: %v", err)
 	}
 	t.Cleanup(func() { os.RemoveAll(root) })
+	// The scripts written into it are found by name (D-101), and what is on
+	// PATH is what runs (D-102): the real integrations on this machine must
+	// not be, so PATH is the root and the system's own directories.
+	t.Setenv("PATH", root+":/usr/bin:/bin")
 	return root
 }
 
@@ -199,9 +203,7 @@ func reported(
 func TestADisplayIsDrawnOnceWithNothingHavingChanged(t *testing.T) {
 	atATestablePace(t, 200*time.Millisecond)
 	root := shortRoot(t)
-	binary, painted := aDisplay(t, root, "painter", "kernel")
-	write(t, root+"/config.toml", fmt.Sprintf(
-		"[integration.painter]\nbinary = %q\n", binary))
+	_, painted := aDisplay(t, root, "painter", "kernel")
 
 	running(t, root)
 	waitFor(t, "the first render", func() bool {
@@ -221,9 +223,7 @@ func TestADisplayIsDrawnOnceWithNothingHavingChanged(t *testing.T) {
 func TestADisplayIsHandedTheViewOnStdin(t *testing.T) {
 	atATestablePace(t, 200*time.Millisecond)
 	root := shortRoot(t)
-	binary, painted := aDisplay(t, root, "painter", "kernel")
-	write(t, root+"/config.toml", fmt.Sprintf(
-		"[integration.painter]\nbinary = %q\n", binary))
+	_, painted := aDisplay(t, root, "painter", "kernel")
 
 	layout := running(t, root)
 	waitFor(t, "the first render", func() bool {
@@ -268,9 +268,7 @@ func TestADisplayIsDrawnAgainWhenASessionLeaves(t *testing.T) {
 	root := shortRoot(t)
 	// It watches the kernel, and the kernel of what leaves is not in the view
 	// it is given: this display never asked for ended sessions.
-	binary, painted := aDisplay(t, root, "painter", "kernel")
-	write(t, root+"/config.toml", fmt.Sprintf(
-		"[integration.painter]\nbinary = %q\n", binary))
+	_, painted := aDisplay(t, root, "painter", "kernel")
 
 	layout := running(t, root)
 	aTurnFinished(t, layout, "one")
@@ -300,9 +298,7 @@ func TestADisplayIsNotRunForSomethingItDoesNotWatch(t *testing.T) {
 	atATestablePace(t, 200*time.Millisecond)
 	root := shortRoot(t)
 	// It watches the kernel and nothing else. A new message is not a kernel.
-	binary, painted := aDisplay(t, root, "painter", "kernel")
-	write(t, root+"/config.toml", fmt.Sprintf(
-		"[integration.painter]\nbinary = %q\n", binary))
+	_, painted := aDisplay(t, root, "painter", "kernel")
 
 	layout := running(t, root)
 	aTurnFinished(t, layout, "one")
@@ -332,10 +328,8 @@ func TestADisplayIsNotRunForSomethingItDoesNotWatch(t *testing.T) {
 func TestAContainerIsNeverDrawn(t *testing.T) {
 	atATestablePace(t, 100*time.Millisecond)
 	root := shortRoot(t)
-	binary := answersCapabilities(t, root, "placer",
+	answersCapabilities(t, root, "placer",
 		`{"version":"0.0.0-dev","methods":["interpret-environment","focus","focused"]}`)
-	write(t, root+"/config.toml", fmt.Sprintf(
-		"[integration.placer]\nbinary = %q\n\n[container]\norder = [\"placer\"]\n", binary))
 
 	layout := running(t, root)
 	waitFor(t, "the container to be reported", func() bool {

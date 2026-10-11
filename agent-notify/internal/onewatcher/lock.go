@@ -108,11 +108,11 @@ func Running(layout paths.Layout) bool {
 
 // StartIfNobodyIs starts a detached session-watcher unless one holds the lock.
 // Several callers may race; the lock means exactly one survives.
-func StartIfNobodyIs(layout paths.Layout, configured string) error {
+func StartIfNobodyIs(layout paths.Layout) error {
 	if Running(layout) {
 		return nil
 	}
-	return Spawn(layout, configured)
+	return Spawn(layout)
 }
 
 // Stop asks a running session-watcher to shut down: SIGTERM to the pid the

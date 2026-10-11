@@ -15,8 +15,8 @@ package containers
 import (
 	"encoding/json"
 	"fmt"
-	"maps"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/lassoColombo/agent-notify/container"
@@ -51,54 +51,65 @@ type Container struct {
 // Configured is every container, outermost first.
 //
 // A container is an integration that answers `focus`, and it says so itself.
-// `[container] order` no longer decides which programs are containers — it
+// “containers“ does not decide which programs are containers — it
 // keeps the one job that is genuinely the user's, which is how the shells nest:
 // zellij inside a window aerospace manages looks, from inside, exactly like
 // zellij on its own, so nesting is not discoverable and never will be (§A11.2).
+// With one container there is nothing to nest, so an absent order is that one
+// (D-101); with two or more, the order has to be written.
 //
 // answers is what each one said to `capabilities`, handed over by whoever read
 // it: the session-watcher has it in memory and a command reads the report. This
 // package runs containers and does not decide what a container is.
 func Configured(settings config.Config, answers map[string]session.Capabilities) ([]Container, []error) {
+	var declared []string
+	for _, name := range settings.Enabled() {
+		if slices.Contains(answers[name].Methods, session.MethodFocus) {
+			declared = append(declared, name)
+		}
+	}
+	order := settings.Containers
+	if len(order) == 0 {
+		switch len(declared) {
+		case 0:
+			return nil, nil
+		case 1:
+			order = declared
+		default:
+			return nil, []error{fmt.Errorf(
+				"%s all answer `focus`, and which is outside which is not discoverable: "+
+					"write `containers`, outermost first", strings.Join(declared, " and "))}
+		}
+	}
+
 	var found []Container
 	var problems []error
-	for _, name := range settings.Container.Order {
-		integration, present := settings.Integration[name]
+	for _, name := range order {
 		switch {
-		case !present:
+		case !slices.Contains(settings.Installed, name):
 			problems = append(problems, fmt.Errorf(
-				"[container] order names %q, which has no [integration.%s] table", name, name))
+				"`containers` names %q, and there is no %s on PATH", name, config.Program(name)))
 			continue
-		case !integration.IsEnabled():
-			continue
-		case integration.Binary == "":
-			problems = append(problems, fmt.Errorf(
-				"[integration.%s] is in [container] order but has no binary to run", name))
+		case !settings.Integrations[name].IsEnabled():
 			continue
 		case !slices.Contains(answers[name].Methods, session.MethodFocus):
 			problems = append(problems, fmt.Errorf(
-				"[integration.%s] is in [container] order and does not answer `focus`, "+
+				"%s is in `containers` and does not answer `focus`, "+
 					"so it cannot bring anything to the front", name))
 			continue
 		}
 		found = append(found, Container{
-			Name: name, Binary: integration.Binary, Methods: answers[name].Methods})
+			Name: name, Binary: config.Program(name), Methods: answers[name].Methods})
 	}
 
-	// A container that answers `focus` and is not in the order is the mistake
-	// this change makes possible: it is a container by its own account and
-	// there is nowhere to put it in the nesting, so it is never walked. Before,
-	// the order was the definition and the two could not disagree.
-	for _, name := range slices.Sorted(maps.Keys(answers)) {
-		integration, present := settings.Integration[name]
-		if !present || !integration.IsEnabled() ||
-			slices.Contains(settings.Container.Order, name) ||
-			!slices.Contains(answers[name].Methods, session.MethodFocus) {
-			continue
+	// A container that answers `focus` and is not in the order is a container
+	// by its own account with nowhere in the nesting, so it is never walked.
+	for _, name := range declared {
+		if !slices.Contains(order, name) {
+			problems = append(problems, fmt.Errorf(
+				"%s answers `focus` and is not in `containers`, so nothing will ever "+
+					"ask it to: add it, outermost first", name))
 		}
-		problems = append(problems, fmt.Errorf(
-			"%s answers `focus` and is not in [container] order, so nothing will ever "+
-				"ask it to: add it, outermost first", name))
 	}
 	return found, problems
 }
@@ -203,7 +214,7 @@ func FocusSession(
 ) ([]Step, container.Outcome) {
 	configured, problems := Configured(settings, answers)
 	if len(configured) == 0 {
-		detail := "nothing is listed in [container] order"
+		detail := "nothing is listed in `containers`"
 		if len(problems) > 0 {
 			detail = problems[0].Error()
 		}

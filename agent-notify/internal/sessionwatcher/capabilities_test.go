@@ -1,10 +1,8 @@
 package sessionwatcher_test
 
 import (
-	"fmt"
-	"path/filepath"
+	"os"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -18,10 +16,8 @@ import (
 func TestAnIntegrationIsAskedWhatItAnswers(t *testing.T) {
 	atATestablePace(t, 200*time.Millisecond)
 	root := shortRoot(t)
-	binary := answersCapabilities(t, root, "painter",
+	answersCapabilities(t, root, "painter",
 		`{"version":"0.0.0-dev","methods":["render"],"wake_on":["kernel"],"want_ended":true}`)
-	write(t, root+"/config.toml", fmt.Sprintf(
-		"[integration.painter]\nbinary = %q\n", binary))
 
 	layout := running(t, root)
 	var one handshake.Integration
@@ -54,15 +50,16 @@ func TestAnIntegrationIsAskedWhatItAnswers(t *testing.T) {
 // TestAnIntegrationThatCannotBeAskedSaysSoInTheReport is the case the Problem
 // field exists for.
 //
-// Without it, a display whose binary was deleted reports no methods, which is
+// Without it, a display that crashes when asked reports no methods, which is
 // exactly what a display with nothing to offer reports — and core would stop
 // running it for ever without anybody being told why.
 func TestAnIntegrationThatCannotBeAskedSaysSoInTheReport(t *testing.T) {
 	atATestablePace(t, 100*time.Millisecond)
 	root := shortRoot(t)
-	missing := filepath.Join(root, "agent-notify-ghost")
-	write(t, root+"/config.toml", fmt.Sprintf(
-		"[integration.ghost]\nbinary = %q\n", missing))
+	write(t, root+"/agent-notify-ghost", "#!/bin/sh\nexit 3\n")
+	if err := os.Chmod(root+"/agent-notify-ghost", 0o700); err != nil {
+		t.Fatal(err)
+	}
 
 	layout := running(t, root)
 	waitFor(t, "the missing integration to be reported", func() bool {
@@ -74,8 +71,8 @@ func TestAnIntegrationThatCannotBeAskedSaysSoInTheReport(t *testing.T) {
 	if len(one.Answers.Methods) != 0 {
 		t.Errorf("a program that is not there answers %v", one.Answers.Methods)
 	}
-	if !strings.Contains(one.Problem, missing) {
-		t.Errorf("the problem does not name the path that is wrong: %s", one.Problem)
+	if one.Problem == "" {
+		t.Errorf("the report carries no problem for a program that could not be asked")
 	}
 }
 
@@ -87,10 +84,8 @@ func TestAnIntegrationThatCannotBeAskedSaysSoInTheReport(t *testing.T) {
 func TestAContainerIsInTheReportAtAll(t *testing.T) {
 	atATestablePace(t, 100*time.Millisecond)
 	root := shortRoot(t)
-	binary := answersCapabilities(t, root, "placer",
+	answersCapabilities(t, root, "placer",
 		`{"version":"0.0.0-dev","methods":["interpret-environment","focus","focused"]}`)
-	write(t, root+"/config.toml", fmt.Sprintf(
-		"[integration.placer]\nbinary = %q\n\n[container]\norder = [\"placer\"]\n", binary))
 
 	layout := running(t, root)
 	waitFor(t, "the container to be reported", func() bool {

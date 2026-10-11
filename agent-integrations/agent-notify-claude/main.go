@@ -12,6 +12,8 @@ func main() {
 		"agent-notify-claude reads one hook payload on stdin.\n"+
 			"  agent-notify-claude install [--print] [--settings PATH]\n"+
 			"  agent-notify-claude uninstall [--settings PATH]\n",
+		// The process the agent runs under, for the ancestry walk (§A8.4).
+		"claude",
 		map[string]func([]string) int{"install": install, "uninstall": uninstall},
 		func(payload Payload) (session.Report, bool) {
 			return Translate(payload.HookEventName, payload,

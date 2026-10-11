@@ -114,7 +114,7 @@ func watcherStart() int {
 		fmt.Println("already running")
 		return 0
 	}
-	if err := onewatcher.Spawn(layout, ""); err != nil {
+	if err := onewatcher.Spawn(layout); err != nil {
 		fmt.Fprintf(os.Stderr, "agent-notify watcher: %v\n", err)
 		return 1
 	}

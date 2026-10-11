@@ -37,17 +37,15 @@ var DefaultColours = map[session.Kernel]string{
 	session.Idle:          "0xcce0def4", // text — never notifies
 }
 
-// Settings is `[integration.macos-notifier.settings]`, and nothing else in
+// Settings is `integrations.macos-notifier.settings`, and nothing else in
 // the file is ours. A key nobody declared is refused by name.
 type Settings struct {
-	// Alerter is the program that puts the banner on the screen, absolute,
-	// written by `install` from your PATH because nothing core starts has one
-	// (D-67). Empty falls back to PATH, which is right for a shell and wrong
-	// for a session-watcher.
-	Alerter string `toml:"alerter"`
+	// Alerter is where the program that puts the banner on the screen is,
+	// when it is not on this process's PATH (D-101).
+	Alerter string `yaml:"alerter"`
 
 	// Preview is how much of what the agent said a banner carries.
-	Preview PreviewSettings `toml:"preview"`
+	Preview PreviewSettings `yaml:"preview"`
 
 	// Sound is what a banner plays: `true` for the default chime, `false` for
 	// silence, or the name of a sound — "Submarine", or anything in
@@ -59,26 +57,26 @@ type Settings struct {
 	// desktop at home wants a different noise, or none. macOS's own switch is
 	// per-app and has no third setting between chime and silence.
 	//
-	// `any`, because TOML is typed and this key takes two types; taken apart by
+	// `any`, because this key takes two types; taken apart by
 	// theSoundIn (sounds.go), which is also where a name is checked against the
 	// files that actually exist.
 	//
 	// It decides what THIS program attaches, and nothing more. System Settings
 	// → Notifications still has the last word — sound turned off there is
 	// silence whatever is written here.
-	Sound any `toml:"sound"`
+	Sound any `yaml:"sound"`
 
 	// Colors is the invader's colour per state, as `0xAARRGGBB`. Hex only, and
 	// not AppKit's colour names: the invader is drawn into a PNG that macOS
 	// composites onto a surface of its own, where a colour that adapts to the
 	// appearance has nothing to adapt to.
-	Colors map[string]string `toml:"colors"`
+	Colors map[string]string `yaml:"colors"`
 }
 
-// PreviewSettings is `[integration.macos-notifier.settings.preview]`.
+// PreviewSettings is `integrations.macos-notifier.settings.preview`.
 type PreviewSettings struct {
-	Lines *int `toml:"lines"`
-	Width *int `toml:"width"`
+	Lines *int `yaml:"lines"`
+	Width *int `yaml:"width"`
 }
 
 // Resolved is Settings after everything that can fail has been done once, at
@@ -125,7 +123,7 @@ func Read(given subscribe.Integration) (Resolved, error) {
 	for state, value := range settings.Colors {
 		if _, ok := theRGBWithoutTheAlpha(value); !ok {
 			return Resolved{}, fmt.Errorf(
-				"[integration.%s.settings.colors] %s = %q is not 0xAARRGGBB — AppKit's "+
+				"integrations.%s.settings.colors %s = %q is not 0xAARRGGBB — AppKit's "+
 					"colour names are no use here, because the mark is drawn into a file",
 				Name, state, value)
 		}
@@ -137,7 +135,7 @@ func Read(given subscribe.Integration) (Resolved, error) {
 		resolved.Preview.Width = *settings.Preview.Width
 	}
 	if problem := resolved.Preview.sane(); problem != "" {
-		return Resolved{}, fmt.Errorf("[integration.%s.settings.preview] %s", Name, problem)
+		return Resolved{}, fmt.Errorf("integrations.%s.settings.preview %s", Name, problem)
 	}
 
 	// Refused now rather than when somebody taps a banner.

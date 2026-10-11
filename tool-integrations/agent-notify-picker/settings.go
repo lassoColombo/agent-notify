@@ -7,16 +7,16 @@ import (
 	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
-// Settings is `[integration.picker.settings]`, and nothing else in the file is
+// Settings is `integrations.picker.settings`, and nothing else in the file is
 // ours. A key nobody declared is refused by name rather than ignored
 // (subscribe.Settings), because a misspelled colour that changes nothing and
 // says nothing is the config bug people give up on.
 type Settings struct {
-	Colours Colours `toml:"colors"`
-	Keymap  Keymap  `toml:"keys"`
+	Colours Colours `yaml:"colors"`
+	Keymap  Keymap  `yaml:"keys"`
 }
 
-// Keymap is `[integration.picker.settings.keys]`, and it is the colours table
+// Keymap is `integrations.picker.settings.keys`, and it is the colours table
 // the other way round.
 //
 // A hue is the user's and where it is spent is this program's; a KEY is the
@@ -34,14 +34,14 @@ type Settings struct {
 // `preview-page-down` and it is fzf's "quit on an empty query" again, which is
 // exactly what the README says binding it cost.
 type Keymap struct {
-	Down            Keys `toml:"down"`
-	Up              Keys `toml:"up"`
-	PreviewDown     Keys `toml:"preview-down"`
-	PreviewUp       Keys `toml:"preview-up"`
-	PreviewPageDown Keys `toml:"preview-page-down"`
-	PreviewPageUp   Keys `toml:"preview-page-up"`
-	Choose          Keys `toml:"choose"`
-	Leave           Keys `toml:"leave"`
+	Down            Keys `yaml:"down"`
+	Up              Keys `yaml:"up"`
+	PreviewDown     Keys `yaml:"preview-down"`
+	PreviewUp       Keys `yaml:"preview-up"`
+	PreviewPageDown Keys `yaml:"preview-page-down"`
+	PreviewPageUp   Keys `yaml:"preview-page-up"`
+	Choose          Keys `yaml:"choose"`
+	Leave           Keys `yaml:"leave"`
 }
 
 // Keys is what asks for one action: `"ctrl-j"`, or `["down", "ctrl-n"]` where
@@ -111,7 +111,7 @@ func (m *Keymap) bindings() []binding {
 	}
 }
 
-// Colours is `[integration.picker.settings.colors]`: the twelve hues this
+// Colours is `integrations.picker.settings.colors`: the twelve hues this
 // program paints with, by base24 slot.
 //
 // WHAT a slot is, is the user's — it is the one thing about a terminal's
@@ -130,18 +130,18 @@ func (m *Keymap) bindings() []binding {
 // is not offered, since a key that changes nothing is the same silence the
 // strictness above exists to break.
 type Colours struct {
-	Base02 string `toml:"base02"`
-	Base03 string `toml:"base03"`
-	Base04 string `toml:"base04"`
-	Base05 string `toml:"base05"`
-	Base08 string `toml:"base08"`
-	Base09 string `toml:"base09"`
-	Base0A string `toml:"base0A"`
-	Base0B string `toml:"base0B"`
-	Base0C string `toml:"base0C"`
-	Base0D string `toml:"base0D"`
-	Base13 string `toml:"base13"`
-	Base14 string `toml:"base14"`
+	Base02 string `yaml:"base02"`
+	Base03 string `yaml:"base03"`
+	Base04 string `yaml:"base04"`
+	Base05 string `yaml:"base05"`
+	Base08 string `yaml:"base08"`
+	Base09 string `yaml:"base09"`
+	Base0A string `yaml:"base0A"`
+	Base0B string `yaml:"base0B"`
+	Base0C string `yaml:"base0C"`
+	Base0D string `yaml:"base0D"`
+	Base13 string `yaml:"base13"`
+	Base14 string `yaml:"base14"`
 }
 
 // slot is one line of that table: what it is called, what the user wrote, and
@@ -215,7 +215,7 @@ func repaint(colours Colours) []string {
 			// An absent key is not an opinion, and the default stands.
 		case !isHue(slot.given):
 			complaints = append(complaints, fmt.Sprintf(
-				"[integration.%s.settings.colors] %s = %q is not a colour, "+
+				"integrations.%s.settings.colors %s = %q is not a colour, "+
 					"so %s is still %s", Name, slot.key, slot.given, slot.key, *slot.into))
 		default:
 			*slot.into = strings.ToLower(slot.given)
@@ -256,7 +256,7 @@ func rebind(given Keymap) []string {
 			if other, already := taken[key]; already {
 				keymap, rebound = DefaultKeys, false
 				return []string{fmt.Sprintf(
-					"[integration.%s.settings.keys] %s is asked to be both %s and %s, "+
+					"integrations.%s.settings.keys %s is asked to be both %s and %s, "+
 						"so the keys this program shipped with are the ones in force",
 					Name, key, other, one.action)}
 			}
@@ -295,7 +295,7 @@ func fzfBinds() string {
 // nothing back.
 func TheKeysWeShippedWith(refusal error) string {
 	keymap, rebound = DefaultKeys, false
-	return fmt.Sprintf("[integration.%s.settings.keys] %s — keeping the keys "+
+	return fmt.Sprintf("integrations.%s.settings.keys %s — keeping the keys "+
 		"this program shipped with", Name, oneLine(refusal.Error()))
 }
 

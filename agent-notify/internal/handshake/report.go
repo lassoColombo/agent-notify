@@ -19,9 +19,7 @@ type Integration struct {
 	// answers no methods and one that could not be asked look identical and
 	// mean opposite things.
 	Problem string `json:"problem,omitempty"`
-	// Binary is what core runs; a table without one is a client's settings.
-	Binary string `json:"binary,omitempty"`
-	State  string `json:"state"`
+	State   string `json:"state"`
 }
 
 // Report is what the session-watcher knows about the integrations, written as
@@ -33,22 +31,26 @@ type Report struct {
 	Integrations []Integration `json:"integrations"`
 }
 
-// Write files the report: every enabled integration, with what the runnable
-// ones answered and why any of them did not.
+// Write files the report: every enabled integration, what it answered and why
+// it did not.
 func Write(layout paths.Layout, settings config.Config,
 	answers map[string]session.Capabilities, unanswered map[string]string) {
 	report := Report{PID: os.Getpid(), Written: time.Now().UTC().Format(time.RFC3339)}
 
-	runnable := settings.Runnable()
 	for _, name := range settings.Enabled() {
-		line := Integration{Name: name, State: "yours to start; core never runs it"}
-		if slices.Contains(runnable, name) {
-			line.Binary = settings.Integration[name].Binary
-			line.Answers, line.Problem = answers[name], unanswered[name]
+		line := Integration{Name: name, Answers: answers[name], Problem: unanswered[name]}
+		switch {
+		case line.Problem != "":
+			line.State = "could not be asked"
+		case !slices.ContainsFunc(line.Answers.Methods, session.CoreRuns):
+			// An agent-integration, run by its agent's hooks; a picker, run
+			// by a keybinding. Core asked what it answers and will never
+			// call any of it.
+			line.State = "yours to start; core never runs it"
+		case slices.Contains(line.Answers.Methods, session.MethodRender):
+			line.State = "drawn when something it watches moves"
+		default:
 			line.State = "run when core needs it"
-			if slices.Contains(line.Answers.Methods, session.MethodRender) {
-				line.State = "drawn when something it watches moves"
-			}
 		}
 		report.Integrations = append(report.Integrations, line)
 	}

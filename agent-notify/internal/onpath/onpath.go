@@ -1,10 +1,7 @@
-// Package onpath answers which integrations are actually installed, by looking
-// at PATH and nothing else.
-//
-// Two commands ask: `install` completes to them, and `doctor` uses the same
-// answer to notice a program you installed and never mentioned in your config.
-// Having one answer is what stops the completion offering something `install`
-// would then refuse.
+// Package onpath answers which integrations are installed, by looking at
+// PATH and nothing else (D-102). It is the set the configuration starts from
+// and the set `install` completes to, and having one answer is what stops
+// the completion offering something the configuration would not run.
 package onpath
 
 import (
@@ -13,8 +10,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-
-	"github.com/spf13/cobra"
 )
 
 // Integrations is every agent-notify-<name> a person could run, by the name you
@@ -46,15 +41,4 @@ func Integrations() []string {
 	}
 	slices.Sort(found)
 	return found
-}
-
-// CompleteThem offers the programs that are actually there, which is the same
-// question `install` asks a moment later.
-func CompleteThem(
-	command *cobra.Command, arguments []string, whatHasBeenTypedSoFar string,
-) ([]string, cobra.ShellCompDirective) {
-	if len(arguments) > 0 {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
-	return Integrations(), cobra.ShellCompDirectiveNoFileComp
 }

@@ -12,10 +12,10 @@ import (
 	"github.com/lassoColombo/agent-notify/session"
 )
 
-// Commands is what an integration answers besides `capabilities` and
-// `capture-environment`, which every one answers. Each function that is
-// filled in is a method core may call; a nil one is not declared and never
-// asked (D-81).
+// Commands is what an integration answers besides `capabilities`, which every
+// one answers. Each function that is filled in is a method core may call; a
+// nil one is not declared and never asked (D-81). `capture-environment` is
+// declared the same way, by Reads on the Integration (D-101).
 type Commands struct {
 	// Render paints the view core hands over on stdin. Nil for a display that
 	// owns its process.
@@ -42,6 +42,7 @@ func (c Commands) capabilities(i Integration) session.Capabilities {
 		method string
 		filled bool
 	}{
+		{session.CaptureCommand, i.Reads != nil},
 		{session.MethodInterpret, c.Interpret != nil},
 		{session.MethodFocus, c.Focus != nil},
 		{session.MethodFocused, c.Focused != nil},
@@ -92,7 +93,7 @@ func Main(i Integration, commands Commands, arguments []string) int {
 	if commands.Default != nil {
 		return commands.Default(arguments)
 	}
-	known := []string{session.CapabilitiesCommand, session.CaptureCommand}
+	known := []string{session.CapabilitiesCommand}
 	known = append(known, commands.capabilities(i).Methods...)
 	for name := range commands.Named {
 		known = append(known, name)

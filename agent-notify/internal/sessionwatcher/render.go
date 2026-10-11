@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lassoColombo/agent-notify/internal/config"
 	"github.com/lassoColombo/agent-notify/session"
 	"github.com/lassoColombo/agent-notify/tool"
 )
@@ -101,17 +102,17 @@ func (w *Watcher) startRenderers(ctx context.Context) {
 	w.mu.Unlock()
 
 	wanted := map[string]bool{}
-	for _, name := range settings.Runnable() {
+	for _, name := range settings.Enabled() {
 		if !slices.Contains(answers[name].Methods, session.MethodRender) {
 			continue
 		}
 		wanted[name] = true
-		if already, have := w.renderers[name]; have && already.binary == settings.Integration[name].Binary {
+		if _, have := w.renderers[name]; have {
 			continue
 		}
 
 		drawing := &renderer{
-			name: name, binary: settings.Integration[name].Binary, asked: answers[name],
+			name: name, binary: config.Program(name), asked: answers[name],
 			logger: w.logger, woken: make(chan struct{}, 1),
 		}
 		w.renderers[name] = drawing

@@ -70,9 +70,12 @@ func TestAUserWithNoOpinionKeepsThePalette(t *testing.T) {
 // palette and half in mine is worse than one wholly in mine.
 func TestAHueIsSpentEverywhereItIsUsed(t *testing.T) {
 	if complaints := appliedWith(t, `
-[integration.picker.settings.colors]
-base0D = "#010203"
-base13 = "#040506"
+integrations:
+  picker:
+    settings:
+      colors:
+        base0D: "#010203"
+        base13: "#040506"
 `); len(complaints) > 0 {
 		t.Fatalf("a colour was refused: %v", complaints)
 	}
@@ -97,8 +100,11 @@ base13 = "#040506"
 // (§A14).
 func TestAColourThatIsNotOneKeepsTheDefault(t *testing.T) {
 	complaints := appliedWith(t, `
-[integration.picker.settings.colors]
-base05 = "rose"
+integrations:
+  picker:
+    settings:
+      colors:
+        base05: "rose"
 `)
 	if len(complaints) != 1 {
 		t.Fatalf("complaints = %v", complaints)
@@ -122,8 +128,11 @@ base05 = "rose"
 // the feature does not work.
 func TestASlotNobodyPaintsWithIsRefusedByName(t *testing.T) {
 	complaints := appliedWith(t, `
-[integration.picker.settings.colors]
-base0E = "#ffffff"
+integrations:
+  picker:
+    settings:
+      colors:
+        base0E: "#ffffff"
 `)
 	if len(complaints) != 1 || !strings.Contains(complaints[0], "base0E") {
 		t.Fatalf("complaints = %v", complaints)
@@ -194,9 +203,12 @@ func TestTheKeysAreTodaysBehaviourWrittenDown(t *testing.T) {
 // was replaced rather than added to.
 func TestAKeyIsTheUsersAndAnActionIsNot(t *testing.T) {
 	if complaints := appliedWith(t, `
-[integration.picker.settings.keys]
-preview-down = "ctrl-f"
-leave = ["esc", "ctrl-g"]
+integrations:
+  picker:
+    settings:
+      keys:
+        preview-down: "ctrl-f"
+        leave: ["esc", "ctrl-g"]
 `); len(complaints) > 0 {
 		t.Fatalf("a keymap was refused: %v", complaints)
 	}
@@ -224,8 +236,11 @@ leave = ["esc", "ctrl-g"]
 // had it was left where it was.
 func TestAKeyAskedToDoTwoThingsIsRefusedWhole(t *testing.T) {
 	complaints := appliedWith(t, `
-[integration.picker.settings.keys]
-preview-down = "ctrl-p"
+integrations:
+  picker:
+    settings:
+      keys:
+        preview-down: "ctrl-p"
 `)
 	if len(complaints) != 1 {
 		t.Fatalf("complaints = %v", complaints)
@@ -246,8 +261,11 @@ preview-down = "ctrl-p"
 // with — the fallback chooseOne makes on the one keypress somebody makes.
 func TestFzfIsWhatChecksAKeyName(t *testing.T) {
 	if complaints := appliedWith(t, `
-[integration.picker.settings.keys]
-down = "ctrl-shmuck"
+integrations:
+  picker:
+    settings:
+      keys:
+        down: "ctrl-shmuck"
 `); len(complaints) > 0 {
 		t.Fatalf("this program does not check key names: %v", complaints)
 	}
@@ -275,8 +293,11 @@ down = "ctrl-shmuck"
 // a key at all, so it lives in a --bind of its own where no table can take it.
 func TestTheLabelBindIsNotTheUsers(t *testing.T) {
 	if complaints := appliedWith(t, `
-[integration.picker.settings.keys]
-down = ["j"]
+integrations:
+  picker:
+    settings:
+      keys:
+        down: ["j"]
 `); len(complaints) > 0 {
 		t.Fatalf("a keymap was refused: %v", complaints)
 	}
@@ -291,9 +312,12 @@ down = ["j"]
 // whatever fzf does with it, which for ctrl-d is quitting on an empty query.
 func TestAKeyCanBeGivenBack(t *testing.T) {
 	if complaints := appliedWith(t, `
-[integration.picker.settings.keys]
-preview-page-down = []
-preview-page-up = ""
+integrations:
+  picker:
+    settings:
+      keys:
+        preview-page-down: []
+        preview-page-up: ""
 `); len(complaints) > 0 {
 		t.Fatalf("a keymap was refused: %v", complaints)
 	}

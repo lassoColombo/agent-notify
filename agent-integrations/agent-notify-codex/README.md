@@ -16,13 +16,12 @@
   - [Put it on PATH](#put-it-on-path)
   - [Register it with codex](#register-it-with-codex)
   - [Trust it — the one step that is yours](#trust-it--the-one-step-that-is-yours)
-  - [Tell core what a codex process looks like](#tell-core-what-a-codex-process-looks-like)
   - [Check it](#check-it)
   - [Uninstalling](#uninstalling)
 - [Configuration](#configuration)
   - [`install`'s own flags](#installs-own-flags)
   - [Codex's `config.toml`](#codexs-configtoml)
-  - [agent-notify's `config.toml`](#agent-notifys-configtoml)
+  - [agent-notify's `config.yaml`](#agent-notifys-configyaml)
   - [Environment](#environment)
   - [Files this program reads](#files-this-program-reads)
 - [What it reports](#what-it-reports)
@@ -66,8 +65,9 @@ record, it exits — there is no daemon here and nothing to keep running.
 
 ## Installation
 
-Four steps, and the fourth one codex insists on doing with you rather than for
-you.
+Three steps and a check, and the third step codex insists on doing with you
+rather than for you. None of them writes agent-notify's own configuration:
+that file is yours, and no program touches it (D-101).
 
 ### Build it
 
@@ -75,7 +75,9 @@ agent-notify is a monorepo: core, the agent-integrations and the
 tool-integrations are one git repository and one clone. `make install` at the
 root builds every module into `$(go env GOPATH)/bin`, which has to be on your
 PATH under exactly the name **`agent-notify-codex`**, because that is the name
-`agent-notify install codex` looks for.
+`agent-notify install` looks for. The same PATH is where this program looks
+for `agent-notify` when a hook finds no session-watcher running: a hook
+inherits codex's PATH, which is the one your shell started codex with (D-101).
 
 ```sh
 git clone git@github.com:lassoColombo/agent-notify.git ~/projects/agent-notify
@@ -89,13 +91,17 @@ an outer shell exported, which would otherwise override that pin.
 ### Register it with codex
 
 ```sh
+agent-notify install                # every agent on PATH, this one included
 agent-notify install codex          # appends to ~/.codex/config.toml
 agent-notify install codex --print  # show what it would add, change nothing
 ```
 
 `agent-notify install codex` and `agent-notify-codex install` are the same
 command: the first runs the second, so the flags, the output and the exit code
-are this program's.
+are this program's. A bare `agent-notify install` asks every `agent-notify-*`
+on your PATH what it answers and runs `install` on each one that answers it;
+this program answers with `install` and `uninstall`, so it is set up by the
+bare form beside every other agent (D-101).
 
 What it writes is seven hook blocks, all running the same absolute path — the
 path of the binary you ran it from, resolved at that moment, because a hook's
@@ -149,23 +155,6 @@ This installer deliberately does not write those entries. The hash is codex's
 own, and writing one would be forging your consent to run a program on every
 event. So start a codex thread, answer the prompt, and the hooks begin firing.
 
-### Core is told what a codex process looks like
-
-One table in agent-notify's configuration, and without it the session is
-recorded but never judged dead. The name of the process is codex's, so
-`install` files it, in `conf.d/codex.toml` beside your `config.toml`:
-
-```toml
-[agent.codex]
-binary = "codex"
-```
-
-On every hook, core walks the process ancestry from this program upwards
-looking for a process that matches `binary` — the short name the kernel
-reports, the full path, or the basename of that path. With two codexes to tell
-apart, write `binary = "/opt/homebrew/bin/codex"` under `[agent.codex]` in your
-own `config.toml`, which wins over the drop-in.
-
 ### Check it
 
 ```sh
@@ -175,9 +164,12 @@ codex                                # start a thread, say something
 agent-notify list                    # it should be there, working
 ```
 
-`doctor` deliberately does not check whether an agent's hooks are installed —
-it says so in its own output — so the honest check is a real thread and
-`agent-notify list`. When a thread does not appear, the log is the place to
+`doctor` lists this program under `integrations` the moment it is on PATH,
+because being on PATH is what makes it one (D-102), and marks it *yours to
+start; core never runs it* — it answers `install` and `uninstall`, neither of
+which core calls. That line says the binary was found and asked, not that
+codex runs it: `doctor` deliberately does not check whether an agent's hooks
+are installed, so the honest check is a real thread and `agent-notify list`. When a thread does not appear, the log is the place to
 look: `~/Library/Application Support/agent-notify/agent-notify.log` on macOS,
 `$XDG_STATE_HOME/agent-notify/agent-notify.log` otherwise. Everything a hook
 cannot do goes there, because nothing a hook does may reach the agent.
@@ -188,24 +180,25 @@ cannot do goes there, because nothing a hook does may reach the agent.
 agent-notify uninstall codex
 ```
 
-It takes the block `install` appended out again, verbatim, and removes
-`conf.d/codex.toml`. A block somebody has edited is not recognised and is
-left, with a word about it: rearranging a hooks table under a person is worse
-than asking them to. The `[hooks.state]` entries codex wrote when you trusted
-the hooks are codex's, and stay unless you delete them.
+It takes the block `install` appended out again, verbatim, and nothing else,
+because nothing else was filed. A block somebody has edited is not recognised
+and is left, with a word about it: rearranging a hooks table under a person is
+worse than asking them to. The `[hooks.state]` entries codex wrote when you
+trusted the hooks are codex's, and stay unless you delete them.
 
 ## Configuration
 
-There are two files, and this program's own knowledge is in neither of them.
-Codex's `config.toml` says that the hooks exist; agent-notify's `config.toml`
-says what a codex process is called. Nothing configures the mapping, the
-events, the field names or where codex keeps its rollouts — those are facts
-about codex that the program already holds, and a second copy in a file you
-edit would be a copy that can disagree with the first.
+There is one file, codex's `config.toml`, and it says only that the hooks
+exist. Nothing configures the mapping, the events, the field names, where codex
+keeps its rollouts or what a codex process is called — those are facts about
+codex that the program already holds, and a second copy in a file you edit
+would be a copy that can disagree with the first (D-101).
 
-In particular: **an agent-integration has no `[integration.codex]` table and no
-`settings`.** That table is for the long-lived tool-integrations core
-runs. This program is started by codex, not by core.
+In particular: **an agent-integration has no `settings` in agent-notify's
+file, and nothing to write under `integrations.codex`.** `settings` is for the
+long-lived tool-integrations core runs. This program is started by codex, not
+by core, and it is an integration because it is on PATH, not because any file
+says so (D-102).
 
 ### `install`'s own flags
 
@@ -241,20 +234,31 @@ laziness: codex writes `hook_event_name` into every payload, so the program
 takes the event from the body rather than from its arguments and no argument
 can disagree with the key it was registered under.
 
-### agent-notify's `config.toml`
+### agent-notify's `config.yaml`
 
-`~/.config/agent-notify/config.toml`, or `$XDG_CONFIG_HOME/agent-notify/config.toml`,
-or `$AGENT_NOTIFY_ROOT/config.toml`. There is no file by default and running
-without one is supported — but the one key below is worth having.
+A different file from codex's, in a different format: YAML (D-103), at
+`~/.config/agent-notify/config.yaml`, or `$XDG_CONFIG_HOME/agent-notify/config.yaml`,
+or `$AGENT_NOTIFY_ROOT/config.yaml`. It is the only configuration file
+agent-notify has, there is no file by default, and **this integration wants
+nothing in it** (D-101). Every `agent-notify-<name>` on PATH is in the set
+without a line there (D-102); `integrations.codex.enabled: false` takes this
+one out of the session-watcher's handshake and `doctor`'s listing, and nothing
+else, since codex runs the hook because its own `config.toml` names it and
+`agent-notify uninstall codex` is how that stops.
 
-| Key | Type | Default | What it changes |
-| --- | --- | --- | --- |
-| `agent.codex.binary` | string | `"codex"`, filed by `install` in `conf.d/codex.toml` | What to look for when climbing this hook's ancestry to find codex itself. Matched against the kernel's command name, the executable path, or that path's basename. A value in your `config.toml` wins. |
+The hook exists because codex's `config.toml` names it, and the process the
+session *is* — the ancestor core records the pid of
+and judges liveness by — is found by walking this hook's own ancestry for a
+process called `codex`. That name is a constant of this program: `main.go`
+hands it to `hook.Main` beside the usage string, and core matches it against
+the kernel's command name for each ancestor, the executable path, and that
+path's basename. There is no key for it, because no file could know codex's
+process name better than the program written for codex.
 
-Everything else in that file — `keep-ended-sessions`, the integration tables,
-`container.order` — belongs to core and to the tools, and this program neither
-reads nor writes any of it. Core's [README](../../agent-notify/README.md) has
-the rest.
+Everything in that file — `keep-ended-sessions: 168h`, the `integrations:`
+map, the `containers:` list — belongs to core and to the tools, and this
+program neither reads nor writes any of it. Core's
+[README](../../agent-notify/README.md) has the rest.
 
 ### Environment
 
@@ -262,7 +266,7 @@ the rest.
 | --- | --- | --- |
 | `CODEX_HOME` | this program | Relocates the whole of codex's home. It decides where `install` writes (`$CODEX_HOME/config.toml`) and where the thread name is read from (`$CODEX_HOME/session_index.jsonl`). Unset ⇒ `~/.codex`. |
 | `AGENT_NOTIFY_ROOT` | core, on the hook path | Moves agent-notify's state directory, runtime directory and configuration file beneath one root. One variable, so that running an isolated instance is one step. |
-| `XDG_CONFIG_HOME` | core | Where `agent-notify/config.toml` is looked for, when `AGENT_NOTIFY_ROOT` is unset. |
+| `XDG_CONFIG_HOME` | core | Where `agent-notify/config.yaml` is looked for, when `AGENT_NOTIFY_ROOT` is unset. |
 | `HOME` | both | The fallback for both of the above. |
 | `GOROOT` | the Go toolchain | Nothing at run time; at build time an inherited value overrides `.tool-versions`. |
 
@@ -288,7 +292,7 @@ One `session.Report` per hook, and these are its fields:
 
 | Field | Where it comes from |
 | --- | --- |
-| `Key.Agent` | the constant `codex`, which is also what your `[agent.codex]` table is keyed on |
+| `Key.Agent` | the constant `codex`; the store, the picker and every display key on it |
 | `Key.SessionID` | the payload's `session_id`, codex's thread id. No id, no report — nothing can be written about a session nobody can name |
 | `Event` | the payload's `hook_event_name`, through [the mapping](#the-mapping) |
 | `Detail` | the mapping too: `permission-prompt`, `interrupted`, `exited`, `superseded` |
@@ -506,9 +510,9 @@ everywhere but the machine that made them.
   this directory alone does not compile. That line comes out when core is
   published, and the version every integration handshakes against is still the
   constant `0.0.0-dev` rather than something the build stamps.
-- **There is no `uninstall`**, and `install` will not update a stale path it
-  finds. Both are edits to a file you own, and it says what to change rather
-  than changing it.
+- **`install` will not update a stale path it finds**, and `uninstall` will
+  not take out a block somebody edited. Both are edits to a file you own, and
+  it says what to change rather than changing it.
 - **`SubagentStart`, `SubagentStop`, `PreCompact` and `PostCompact` are
   unmapped** on the evidence described above rather than on principle. If codex
   starts firing subagent hooks for real work, that decision deserves revisiting

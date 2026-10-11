@@ -14,7 +14,7 @@ import (
 )
 
 // AgentName is what every record this writes says it is, and what the user's
-// `[agent.codex]` table is keyed on.
+// record is keyed on.
 const AgentName = "codex"
 
 // SubscribedHooks is every hook this asks for, spelled as codex spells it.

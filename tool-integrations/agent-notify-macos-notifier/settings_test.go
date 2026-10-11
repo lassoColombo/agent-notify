@@ -25,15 +25,18 @@ func settingsIn(t *testing.T, body string) (Resolved, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	// `/usr/bin/true` stands in for core: what matters here is that something
-	// is there to be found, because a program that could not run anything when
-	// a banner is tapped refuses to start at all.
-	// And a stub alerter on PATH, so that this suite says the same thing on a
-	// machine that has never installed one. The tests that care about which
-	// alerter is found write their own into the body.
-	t.Setenv("PATH", stubAlerterOnPATH(t))
-	whole := "agent-notify-binary = \"/usr/bin/true\"\n" + body
-	if err := os.WriteFile(path, []byte(whole), 0o600); err != nil {
+	// A stub core and a stub alerter on PATH, so that this suite says the
+	// same thing on a machine that has installed neither: what matters here
+	// is that something is there to be found, because a program that could
+	// not run anything when a banner is tapped refuses to start at all. The
+	// tests that care about which alerter is found write their own into the
+	// body.
+	bin := stubAlerterOnPATH(t)
+	if err := os.WriteFile(filepath.Join(bin, "agent-notify"), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	t.Setenv("PATH", bin)
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	return Read(given)
@@ -67,14 +70,14 @@ func TestSoundTakesThreeShapes(t *testing.T) {
 		written string
 		want    Sound
 	}{
-		{"sound = false", Sound{}},
-		{"sound = true", Sound{Plays: true}},
+		{"sound: false", Sound{}},
+		{"sound: true", Sound{Plays: true}},
 		// Named by its bare name and matched case-insensitively, and what comes
 		// back is the FILE's name: that is what macOS's lookup matches on.
-		{`sound = "submarine"`, Sound{Plays: true, Name: "Submarine.aiff"}},
-		{`sound = "Submarine.aiff"`, Sound{Plays: true, Name: "Submarine.aiff"}},
+		{`sound: "submarine"`, Sound{Plays: true, Name: "Submarine.aiff"}},
+		{`sound: "Submarine.aiff"`, Sound{Plays: true, Name: "Submarine.aiff"}},
 	} {
-		settings, err := settingsIn(t, "[integration.macos-notifier.settings]\n"+shape.written)
+		settings, err := settingsIn(t, "integrations:\n  macos-notifier:\n    settings:\n      "+shape.written)
 		if err != nil {
 			t.Fatalf("%s: %v", shape.written, err)
 		}
@@ -93,8 +96,10 @@ func TestASoundThatIsNotOnThisMachineIsRefused(t *testing.T) {
 		t.Skip("this machine has no Submarine.aiff to offer in the refusal")
 	}
 	_, err := settingsIn(t, `
-[integration.macos-notifier.settings]
-sound = "Submarien"
+integrations:
+  macos-notifier:
+    settings:
+      sound: "Submarien"
 `)
 	if err == nil {
 		t.Fatal("a sound nothing can play was accepted")
@@ -111,8 +116,10 @@ sound = "Submarien"
 // than being read as false by a switch with a lazy default.
 func TestSoundIsNotAnythingElse(t *testing.T) {
 	if _, err := settingsIn(t, `
-[integration.macos-notifier.settings]
-sound = 3
+integrations:
+  macos-notifier:
+    settings:
+      sound: 3
 `); err == nil {
 		t.Errorf("sound = 3 was accepted")
 	}
@@ -120,9 +127,12 @@ sound = 3
 
 func TestThePreviewCanBeChangedAndCanBeWrong(t *testing.T) {
 	settings, err := settingsIn(t, `
-[integration.macos-notifier.settings.preview]
-lines = 3
-width = 40
+integrations:
+  macos-notifier:
+    settings:
+      preview:
+        lines: 3
+        width: 40
 `)
 	if err != nil {
 		t.Fatalf("Read: %v", err)
@@ -132,8 +142,11 @@ width = 40
 	}
 
 	if _, err := settingsIn(t, `
-[integration.macos-notifier.settings.preview]
-width = 4
+integrations:
+  macos-notifier:
+    settings:
+      preview:
+        width: 4
 `); err == nil {
 		t.Errorf("a preview four characters wide was accepted")
 	}
@@ -143,8 +156,10 @@ width = 4
 // changes nothing and says nothing is the config bug people give up on.
 func TestAKeyNobodyDeclaredIsRefused(t *testing.T) {
 	_, err := settingsIn(t, `
-[integration.macos-notifier.settings]
-sing = "agent-notify self-signed"
+integrations:
+  macos-notifier:
+    settings:
+      sing: "agent-notify self-signed"
 `)
 	if err == nil {
 		t.Fatal("a key nobody declared was accepted")
@@ -159,14 +174,14 @@ sing = "agent-notify self-signed"
 // refusing the file because of them — is the failure this checks for.
 func TestSomebodyElsesTableIsNotOurs(t *testing.T) {
 	settings, err := settingsIn(t, `
-[integration.zellij]
-binary = "/usr/bin/true"
-
-[integration.zellij.settings]
-zellij = "/usr/bin/true"
-
-[integration.macos-notifier.settings.preview]
-lines = 2
+integrations:
+  zellij:
+    settings:
+      zellij: /usr/bin/true
+  macos-notifier:
+    settings:
+      preview:
+        lines: 2
 `)
 	if err != nil {
 		t.Fatalf("Read: %v", err)
@@ -180,8 +195,10 @@ lines = 2
 // shell's PATH (D-67), and `install` writes down what it found in yours.
 func TestTheWrittenAlerterWinsOverPATH(t *testing.T) {
 	settings, err := settingsIn(t, `
-[integration.macos-notifier.settings]
-alerter = "/usr/bin/true"
+integrations:
+  macos-notifier:
+    settings:
+      alerter: "/usr/bin/true"
 `)
 	if err != nil {
 		t.Fatalf("Read: %v", err)
@@ -196,8 +213,10 @@ alerter = "/usr/bin/true"
 // anybody, which is the failure this whole file exists to make impossible.
 func TestAnAlerterThatIsNotThereIsRefused(t *testing.T) {
 	_, err := settingsIn(t, `
-[integration.macos-notifier.settings]
-alerter = "/nowhere/alerter"
+integrations:
+  macos-notifier:
+    settings:
+      alerter: "/nowhere/alerter"
 `)
 	if err == nil || !strings.Contains(err.Error(), "/nowhere/alerter") {
 		t.Errorf("err = %v, want the path named", err)
@@ -209,15 +228,21 @@ alerter = "/nowhere/alerter"
 // adapts to the appearance has nothing to adapt to.
 func TestAColourThatCannotBeDrawnIsRefused(t *testing.T) {
 	if _, err := settingsIn(t, `
-[integration.macos-notifier.settings.colors]
-broke = "systemOrange"
+integrations:
+  macos-notifier:
+    settings:
+      colors:
+        broke: "systemOrange"
 `); err == nil || !strings.Contains(err.Error(), "broke") {
 		t.Errorf("err = %v, want the state named", err)
 	}
 
 	settings, err := settingsIn(t, `
-[integration.macos-notifier.settings.colors]
-broke = "0xfff6c177"
+integrations:
+  macos-notifier:
+    settings:
+      colors:
+        broke: "0xfff6c177"
 `)
 	if err != nil {
 		t.Fatalf("Read: %v", err)

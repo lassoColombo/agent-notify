@@ -88,7 +88,7 @@ func TestMain(m *testing.M) {
 	// spawned as a child of the hook and inherits the agent's whole environment
 	// — including the variable that says "be the agent", which would make it
 	// one.
-	if filepath.Base(os.Args[0]) == "fake-container" {
+	if filepath.Base(os.Args[0]) == "agent-notify-paneish" {
 		os.Exit(pretendToBeAContainer())
 	}
 	if os.Getenv(roleEnv) == "agent" {
@@ -170,14 +170,9 @@ func startWith(t *testing.T, extraConfig string) *pretendAgent {
 	}
 	t.Cleanup(func() { os.RemoveAll(root) })
 
-	containerPath := filepath.Join(root, "fake-container")
-	if err := os.WriteFile(filepath.Join(root, "config.toml"), []byte(extraConfig+`
-[agent.fake]
-binary = "fake-agent"
-
-[integration.paneish]
-binary = "`+containerPath+`"
-`), 0o600); err != nil {
+	// The container is found on PATH by its name (D-101); root is put there.
+	containerPath := filepath.Join(root, "agent-notify-paneish")
+	if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte(extraConfig), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
@@ -190,10 +185,10 @@ binary = "`+containerPath+`"
 set -e
 AN="$1"
 SESSION="$2"
-"$AN" report-event --agent fake --session "$SESSION" --event session-started --no-message
-"$AN" report-event --agent fake --session "$SESSION" --event user-sent-prompt --name "the-store" --message "refactor the store"
-"$AN" report-event --agent fake --session "$SESSION" --event agent-progressed --detail running-tool --message "reading store.go"
-"$AN" report-event --agent fake --session "$SESSION" --event blocked-on-human --detail permission-prompt --message "may I edit store.go?"
+"$AN" report-event --agent fake --process fake-agent --session "$SESSION" --event session-started --no-message
+"$AN" report-event --agent fake --process fake-agent --session "$SESSION" --event user-sent-prompt --name "the-store" --message "refactor the store"
+"$AN" report-event --agent fake --process fake-agent --session "$SESSION" --event agent-progressed --detail running-tool --message "reading store.go"
+"$AN" report-event --agent fake --process fake-agent --session "$SESSION" --event blocked-on-human --detail permission-prompt --message "may I edit store.go?"
 `), 0o700); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
@@ -203,6 +198,7 @@ SESSION="$2"
 	agent.Dir = root
 	agent.Env = append(os.Environ(),
 		"AGENT_NOTIFY_ROOT="+root,
+		"PATH="+root+":/usr/bin:/bin",
 		"FAKE_PANE=%7",
 		roleEnv+"=agent",
 		scriptEnv+"="+script,
@@ -300,7 +296,8 @@ func (p *pretendAgent) kill() {
 func (p *pretendAgent) run(t *testing.T, arguments ...string) (stdout, stderr string, code int) {
 	t.Helper()
 	command := exec.Command(p.binary, arguments...)
-	command.Env = append(os.Environ(), "AGENT_NOTIFY_ROOT="+p.root)
+	command.Env = append(os.Environ(), "AGENT_NOTIFY_ROOT="+p.root,
+		"PATH="+p.root+":/usr/bin:/bin")
 	var out, errs strings.Builder
 	command.Stdout, command.Stderr = &out, &errs
 	if err := command.Run(); err != nil {
@@ -403,7 +400,7 @@ func TestARenameDoesNotResetTheClock(t *testing.T) {
 
 	before := pretend.records(t)[0]
 	time.Sleep(20 * time.Millisecond)
-	pretend.inside(t, `"`+pretend.binary+`" report-event --agent fake --session `+
+	pretend.inside(t, `"`+pretend.binary+`" report-event --agent fake --process fake-agent --session `+
 		pretend.session+` --event context-changed --name renamed-on-purpose --no-message`)
 
 	after := pretend.records(t)[0]
@@ -427,7 +424,7 @@ func TestARenameDoesNotResetTheClock(t *testing.T) {
 // anyway, so the only way this shows up is an agent that has no name yet.
 func TestAnEventCarryingNoNameLeavesTheNameAlone(t *testing.T) {
 	pretend := start(t)
-	pretend.inside(t, `"`+pretend.binary+`" report-event --agent fake --session `+
+	pretend.inside(t, `"`+pretend.binary+`" report-event --agent fake --process fake-agent --session `+
 		pretend.session+` --event agent-progressed --no-message`)
 	if got := pretend.records(t)[0].Name; got != "the-store" {
 		t.Errorf("name = %q, want the name it already had", got)

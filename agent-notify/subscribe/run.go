@@ -33,7 +33,7 @@ func Run(ctx context.Context, i Integration, onChange func(session.View) error) 
 	if err != nil {
 		return err
 	}
-	if err := onewatcher.StartIfNobodyIs(opened.Layout, opened.Settings.AgentNotifyBinary); err != nil {
+	if err := onewatcher.StartIfNobodyIs(opened.Layout); err != nil {
 		opened.Logger.Warn("cannot start a session-watcher", "problem", err.Error())
 	}
 	watch, err := storewatch.Directories(opened.Layout.Sessions(), opened.Layout.Ended())

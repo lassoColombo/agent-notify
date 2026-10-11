@@ -14,19 +14,17 @@
 - [Installation](#installation)
   - [What you need](#what-you-need)
   - [Clone the monorepo](#clone-the-monorepo)
-  - [Build and install core](#build-and-install-core)
-  - [Build the integrations](#build-the-integrations)
-  - [Turn them on](#turn-them-on)
+  - [Build and install everything](#build-and-install-everything)
+  - [Set them up](#set-them-up)
   - [Start the watcher](#start-the-watcher)
   - [Shell completion](#shell-completion)
 - [Configuration](#configuration)
   - [Where the file is](#where-the-file-is)
   - [Environment variables](#environment-variables)
   - [The top-level keys](#the-top-level-keys)
-  - [`[agent.<name>]`](#agentname)
-  - [`[integration.<name>]`](#integrationname)
-  - [`[integration.<name>.settings]`](#integrationnamesettings)
-  - [`[container]`](#container)
+  - [`integrations.<name>`](#integrationsname)
+  - [`integrations.<name>.settings`](#integrationsnamesettings)
+  - [`containers`](#containers)
   - [A complete file](#a-complete-file)
   - [What happens when the file is wrong](#what-happens-when-the-file-is-wrong)
   - [Re-reading it](#re-reading-it)
@@ -195,30 +193,39 @@ the root is what lets an editor see all eight modules as one.
 agent-notify install
 ```
 
-It files where `agent-notify` itself is, then runs `agent-notify-<name>
-install` for every integration on your PATH. Each writes what only it knows
-into a file of its own under `conf.d`, beside your `config.toml`: an
-agent-integration writes its agent's hooks and its `[agent.<name>]` table, a
-tool-integration its table with the absolute path of its binary and of the
-tool it drives, and a macOS display also builds its `.app` and loads its launch
-agent. **Your `config.toml` is never written by any of them** (D-66, D-85).
+It asks every `agent-notify-*` on your PATH what it answers and runs
+`agent-notify-<name> install` on the ones that answer the verb: the
+agent-integrations, which write the hook into their agent's own settings file.
+That is the only thing `install` exists for — a file core cannot know about.
+**Nothing writes `config.yaml`, ever** (D-66, D-101), and after `make install`
+and `agent-notify install` you are done: the file need not exist.
 
-Name the ones you want to set up just those; options after a name belong to
-that program:
+A tool-integration has nothing to install. **What is on PATH is what runs**
+(D-102): `agent-notify-zellij` in a directory on your PATH is the whole of
+asking for zellij, and the file never lists what runs. It is where you turn one
+off, or tune one:
 
-```sh
-agent-notify install claude codex zellij
-agent-notify install macos-notifier
+```yaml
+integrations:
+  picker:
+    enabled: false
 ```
 
-Two things stay yours. `[container] order` says which shell is outside which,
-and that is not discoverable, so it goes in `config.toml` by hand. And the
-picker's keybinding is KDL in zellij's config, so its install prints it.
+Name an agent to set up just that one; options after a name belong to that
+program:
 
-`agent-notify uninstall` takes it all back, integration by integration, and
-`agent-notify uninstall zellij` takes back one. Run `install` again after a
-rebuild: every step of it is idempotent, and for the macOS displays it is the
-upgrade.
+```sh
+agent-notify install claude codex
+agent-notify install claude --print
+```
+
+Two things stay yours. `containers` says which shell is outside which, and that
+is not discoverable, so with two containers it goes in `config.yaml` by hand
+(with one, that one is the order). And the picker's keybinding is KDL in
+zellij's config; its README has it.
+
+`agent-notify uninstall` mirrors `install`: each agent takes its hook back, and
+nothing else was written. Run `install` again after a rebuild; it is idempotent.
 
 ### Start the watcher
 
@@ -241,25 +248,32 @@ paths
   root        (default — AGENT_NOTIFY_ROOT is not set)
   state       /Users/you/Library/Application Support/agent-notify
   runtime     /var/folders/hg/sj58j9kx5sz6w73q4wf60dtm0000gn/T/agent-notify
-  config      /Users/you/.config/agent-notify/config.toml
+  config      /Users/you/.config/agent-notify/config.yaml
   log         /Users/you/Library/Application Support/agent-notify/agent-notify.log
 
 directories  ok    present, mode 700
-config       ok    2 agent(s), 5 integration(s), keep-ended-sessions 168h0m0s
+config       ok    no file, using defaults — 6 integration(s) on PATH, 6 enabled, keep-ended-sessions 168h0m0s
+binary       ok    /opt/homebrew/bin/agent-notify
 store        ok    3 live session(s), 74 ended and still resumable, 0 forgotten this run
 liveness     ok    boot 027BA0B8-… — 3 running, 0 gone but not yet ended, 0 cannot tell
 watcher      ok    pid 86777, version 0.0.0-dev, since 2026-09-28T20:15:40Z
 integrations ok    reported by pid 86777 at 2026-09-28T20:38:09Z
              aerospace-container    run when core needs it
-                                    answers interpret-environment, focus, focused — built against 0.0.0-dev
+                                    answers capture-environment, interpret-environment, focus, focused — built against 0.0.0-dev
+             claude                 yours to start; core never runs it
+                                    answers install, uninstall, none of which core calls
+             codex                  yours to start; core never runs it
+                                    answers install, uninstall, none of which core calls
              macos-notifier         drawn when something it watches moves
                                     answers render — built against 0.0.0-dev
              picker                 yours to start; core never runs it
+                                    answers nothing core calls
              zellij                 drawn when something it watches moves
-                                    answers interpret-environment, focus, focused, render — built against 0.0.0-dev
+                                    answers capture-environment, interpret-environment, focus, focused, render — built against 0.0.0-dev
+containers   ok    outermost first: aerospace-container, zellij
 
-not checked here: which agents have their hooks installed. Each
-agent-integration answers that with its own `install`.
+not checked here: whether each agent still runs its hooks. An
+agent-integration's `install` says so, and is safe to run again.
 ```
 
 ### Shell completion
@@ -366,36 +380,36 @@ match $spans.0 {
 
 ## Configuration
 
-One file, TOML, and **there is no file by default**. Running without one is the
-supported case rather than a degraded one: states, counts, liveness and history
-all work with nothing configured. What a file buys you is agents core can
-recognise the processes of, and integrations it is allowed to start.
+One file, YAML (D-103), and **there is no file by default**. Running without
+one is the supported case rather than a degraded one: states, counts, liveness,
+history and every integration on your PATH all work with nothing configured.
+What a file buys you is opinions — a tool turned off, a glyph changed, a
+retention window, which shell is outside which.
 
-Nothing in the file is an integration's own knowledge. Everything in it is
-something only you can decide — which agents you run, where the binaries are,
-which tools you want, how long to remember an ended session. A key whose correct
-value is a fact about a program does not belong here: it would only be a second
-copy that can disagree with the first, and you would be the one who broke it.
+The file never lists what runs. **What is on PATH is what runs** (D-102): the
+set of integrations is every `agent-notify-<name>` found there, read whenever
+the configuration is read, and a name appears in the file only to be turned off
+or tuned. Nothing in the file is an integration's own knowledge, and no program
+writes it (D-101). A key whose correct value is a fact about a program does not
+belong here: it would only be a second copy that can disagree with the first,
+and you would be the one who broke it. Paths are the case in point: every
+program here is found on PATH by name, and the one path you may write is the
+override for a tool a process started outside your shell cannot see.
+
+Core is the only reader. An integration never locates, opens or parses the
+file; it asks core for its own `settings` and is handed them (D-103).
 
 ### Where the file is
 
 | Situation | Path |
 | --- | --- |
-| `AGENT_NOTIFY_ROOT` is set | `$AGENT_NOTIFY_ROOT/config.toml` |
-| `XDG_CONFIG_HOME` is set | `$XDG_CONFIG_HOME/agent-notify/config.toml` |
-| otherwise | `~/.config/agent-notify/config.toml` |
+| `AGENT_NOTIFY_ROOT` is set | `$AGENT_NOTIFY_ROOT/config.yaml` |
+| `XDG_CONFIG_HOME` is set | `$XDG_CONFIG_HOME/agent-notify/config.yaml` |
+| otherwise | `~/.config/agent-notify/config.yaml` |
 
 `agent-notify doctor` prints the one it resolved, which is the answer to use
-when the two of you disagree.
-
-Beside it is `conf.d/`, one file per integration, written by that
-integration's `install` and removed by its `uninstall`: `conf.d/zellij.toml`,
-`conf.d/claude.toml`, and `conf.d/agent-notify.toml` for core's own
-`agent-notify-binary`. They are read first, in name order, and `config.toml`
-is read on top, so anything you write there wins: `enabled = false` in your
-file switches off an integration whose drop-in says nothing about it. A
-drop-in that does not parse is reported by name and skipped; nothing else
-about it is yours to maintain.
+when the two of you disagree. It is the only file: there is no `conf.d/` and
+no drop-in beside it (D-101).
 
 ### Environment variables
 
@@ -404,13 +418,13 @@ read through the standard rules.
 
 | Variable | What it does |
 | --- | --- |
-| `AGENT_NOTIFY_ROOT` | Moves everything beneath one directory: `<root>/state`, `<root>/run`, `<root>/config.toml`. One variable, so that running an isolated instance is one step. It is made absolute, so a relative value is resolved against the process's own working directory — which for a program core starts is not yours. |
+| `AGENT_NOTIFY_ROOT` | Moves everything beneath one directory: `<root>/state`, `<root>/run`, `<root>/config.yaml`. One variable, so that running an isolated instance is one step. It is made absolute, so a relative value is resolved against the process's own working directory — which for a program core starts is not yours. |
 | `AGENT_NOTIFY_LOG_LEVEL` | `debug`, `info`, `warn` or `error`. Absent means `info`, and so does a value it cannot read — which it says in the log, because a typo in the variable you set precisely to see more must not be the reason you see the same as before. It is a variable rather than a configuration key because the log is opened before the configuration is read, deliberately, so that complaints about the configuration have somewhere to go. Setting it once before starting anything sets it for everything. |
 | `XDG_STATE_HOME` | Where records and the log go on Linux. Ignored on macOS, which uses `~/Library/Application Support`. |
 | `XDG_RUNTIME_DIR` | Where the lock and the report go on Linux. |
 | `TMPDIR` | The same, on macOS: under launchd it is a per-user `0700` directory. With none, `os.TempDir()` plus a uid suffix, because `/tmp` is writable by everyone and an unsuffixed name there is a name another user can take first. |
 | `XDG_CONFIG_HOME` | Where the configuration file is, as above. |
-| `PATH` | How `install` and `doctor` find `agent-notify-<name>` programs. |
+| `PATH` | Where every program here is found by name, and what decides which integrations exist: `agent-notify` itself, every `agent-notify-<name>` (each one found here runs, D-102), and the tool an integration drives. Every process descends from a hook, which descends from the agent you started from a shell, so this is your PATH; an agent started from the Dock is the exception, and the settings key is for it (D-101). |
 
 Those are also almost the whole of what an integration inherits when core runs
 it. The session-watcher hands it an explicit short list — `HOME`, `PATH`,
@@ -426,28 +440,27 @@ memory for days.
 | `keep-ended-sessions` | duration | `"168h"` (7 days) | How long an ended session's record survives, so that resuming it is recognised as a return rather than a birth. It is also the set `list --all` and a picker offer you. Must be positive. |
 | `history-messages` | integer | `20` | How many of a session's messages are kept in its history file. `0` keeps none, which is the point of it being expressible. |
 | `history-changes` | integer | `100` | How many state transitions are kept, same rules. |
-| `agent-notify-binary` | string | empty, meaning "work it out" | Where the `agent-notify` binary is, for the one job that needs to start it: a hook whose poke found no session-watcher, and a display that offers a click. A hook's PATH is not your shell's PATH, and a click on a menu-bar item runs from launchd's, which is `/usr/bin:/bin` and nothing else. |
 
 `keep-ended-sessions` is written the way a person writes a duration. It is
 `time.ParseDuration`'s spelling and the only one in this system: core's file and
-every integration's table read the same (D-78).
+every integration's settings read the same (D-78), and YAML does not change
+that — the text arrives as text, quoted or not.
 
-```toml
-keep-ended-sessions = "24h"    # one day
-keep-ended-sessions = "168h"   # the default week
-keep-ended-sessions = "30m"    # half an hour, if you want the list short
+```yaml
+keep-ended-sessions: 24h     # one day
+keep-ended-sessions: 168h    # the default week
+keep-ended-sessions: "30m"   # half an hour, if you want the list short; quotes are fine
 ```
 
 A bare number is refused, and deliberately: there is no way to accept
-`= 8` that does not also accept somebody who meant eight seconds writing what a
+`: 8` that does not also accept somebody who meant eight seconds writing what a
 `time.Duration` reads as eight nanoseconds. The one number that survives is `0`,
 which means the same however it is spelled. Getting it wrong costs the value and
 not the file it is written in:
 
 ```
-config       FAIL  ~/.config/agent-notify/config.toml: keep-ended-sessions = "7 days",
-                   which is not a duration; write it as "168h" or "30m"; using 168h0m0s
-                  running with: 2 agent(s), 6 integration(s), keep-ended-sessions 168h0m0s
+config       FAIL  /Users/you/.config/agent-notify/config.yaml: keep-ended-sessions = "7 days", which is not a duration; write it as 168h or 30m; using 168h0m0s
+                  running with: 6 integration(s) on PATH, 6 enabled, keep-ended-sessions 168h0m0s
 ```
 
 Every duration that is not this one — timeouts, sweep intervals, lock waits — is
@@ -455,133 +468,131 @@ deliberately not configurable. Each was mechanism rather than preference, and a
 person editing this file has no information with which to choose a better value
 than the code does. They are named constants beside the code they bound.
 
-### `[agent.<name>]`
+### `integrations.<name>`
 
-One table per agent you run. The name is your word for it: it is the `--agent`
-an agent-integration reports under and the middle third of every session key,
-and it never appears in core's source.
+A map keyed on the program's name, with one entry per program you have
+something to say about — and **an entry is never the ask**. Every
+`agent-notify-<name>` on your PATH runs, whether or not it is written here
+(D-102); the entry is where you turn one off or hand it settings. You write
+names, not paths. A name written here with no `agent-notify-<name>` on PATH is
+a complaint, because the file is then describing something that does not exist:
 
-```toml
-[agent.claude]
-binary = "claude"
-
-[agent.codex]
-binary = "codex"
+```
+config       FAIL  /Users/you/.config/agent-notify/config.yaml: integrations.zelij is written, and there is no agent-notify-zelij on PATH
 ```
 
-| Key | Type | What it does |
-| --- | --- | --- |
-| `binary` | string | What to look for when climbing a hook's process ancestry to find the agent itself. Without it nothing records which process a session is, and liveness has nothing to judge — the session still exists, but nobody can say whether it is still alive. |
+Agents are in here on the same terms as everything else: `agent-notify-claude`
+on PATH is an integration and `doctor` lists it. `enabled: false` under it
+takes it out of the handshake and the report, and no further — its agent runs
+it as a hook, and that was never core's to start or stop; `agent-notify
+uninstall claude` is how that stops.
 
-### `[integration.<name>]`
-
-One table per integration, and **the table being there is how you ask for it**.
-An integration's `install` writes its own into `conf.d/<name>.toml` and its
-`uninstall` removes it; what you write in `config.toml` is laid on top. No
-integration can be made to depend on another being present.
-
-```toml
-[integration.zellij]
-binary = "/opt/homebrew/bin/agent-notify-zellij"
-
-[integration.picker]
+```yaml
+integrations:
+  picker:
+    enabled: false
+  zellij:
+    settings:
+      glyphs: { working: "*" }
 ```
 
 | Key | Type | Default | What it does |
 | --- | --- | --- | --- |
-| `enabled` | boolean | absent means **yes** | `false` means "do not run this for me". Writing the table at all is how you ask for the integration, so absence means enabled. |
-| `binary` | string | none | The program, and naming one means **core may run this**: the hook runs it on the agent's path, the session-watcher runs it to ask what it answers and then to render or to focus. Looked up on PATH unless it is an absolute path. Leaving it out is a decision rather than an omission — a table with no binary belongs to something core never runs, like the picker, which a keybinding starts. |
-| `settings` | table | empty | Handed to the integration verbatim. See below. |
+| `enabled` | boolean | absent means **yes** | `false` means "do not run this for me": core will not ask it anything, run it for anything, or hand its environment to the hook. Being on PATH is how you ask for an integration, so absence means enabled. |
+| `settings` | map | empty | Handed to the integration verbatim. See below. |
 
-### `[integration.<name>.settings]`
+What core does with the program is what it declared at the handshake: the hook
+runs it on the agent's path if it answers `capture-environment`, the
+session-watcher runs it to render or to focus if it answers those. The picker
+answers nothing, so core never runs it; a keybinding does.
+
+### `integrations.<name>.settings`
 
 Everything under here belongs to that integration alone. Core never reads it,
 never validates it, and must not know what the zellij display's glyph keys are
-called.
+called. Core does load it — it is the one reader of the file (D-103) — and
+hands it to the integration through `subscribe.Integration.Settings`, which
+refuses a key the integration never declared **by name**, because a misspelled
+setting that changes nothing and says nothing is the config bug people give up
+on.
 
-The integration decodes it through the SDK, which refuses a key it never
-declared **by name** — because a misspelled setting that changes nothing and
-says nothing is the config bug people give up on.
-
-```toml
-[integration.zellij.settings]
-zellij = "/opt/homebrew/bin/zellij"
-
-[integration.macos-notifier.settings]
-alerter = "/opt/homebrew/bin/alerter"
-sound   = false
+```yaml
+integrations:
+  macos-notifier:
+    settings:
+      sound: false
 ```
 
-What each integration accepts is in that integration's own README, and
-`agent-notify install <name>` files the table it wants.
+What each integration accepts is in that integration's own README.
+
+The one key the three that drive a tool share is the tool's path — `zellij`,
+`aerospace`, `alerter` — and it is **optional**: the integration looks the tool
+up on PATH when it runs, and the key is the override for a process started
+without your PATH, an agent launched from the Dock (D-101, amending D-67). The
+message when neither finds it names the key to write.
+
+```yaml
+integrations:
+  zellij:
+    settings:
+      zellij: /opt/homebrew/bin/zellij    # only if `zellij` is not on the runtime PATH
+```
 
 The one shape core does define is the **palette**: a display that paints a glyph
-or a colour per state resolves it most-specific-first, and the table is yours.
+or a colour per state resolves it most-specific-first, and the map is yours.
 
-```toml
-[integration.zellij.settings.glyphs]
-"blocked-on-you" = "!"
-"blocked-on-you/permission-prompt" = "?"
-"working" = "~"
+```yaml
+integrations:
+  zellij:
+    settings:
+      glyphs:
+        blocked-on-you: "!"
+        blocked-on-you/permission-prompt: "?"
+        working: "~"
 ```
 
 Keys are the `kernel` or the `kernel/detail` pair. A state this build has never
 met falls back to the nearest known rank, which is what makes a display built
 today survive a seventh state shipped tomorrow.
 
-### `[container]`
+### `containers`
 
-```toml
-[container]
-order = ["aerospace-container", "zellij"]
+```yaml
+containers: [aerospace-container, zellij]
 ```
 
 | Key | Type | What it does |
 | --- | --- | --- |
-| `order` | list of integration names, **outermost first** | The order `focus-session` walks: raise the window, then focus the pane inside it. It is configured rather than discovered because nesting is not discoverable — zellij inside a window aerospace manages looks, from inside, exactly like zellij on its own. |
+| `containers` | list of integration names, **outermost first** | The order `focus-session` walks: raise the window, then focus the pane inside it. It is configured rather than discovered because nesting is not discoverable — zellij inside a window aerospace manages looks, from inside, exactly like zellij on its own. With exactly one integration answering `focus` there is nothing to nest, and an absent list is that one (D-101); with two or more you write it, and `doctor` says so until you do — "aerospace-container and zellij all answer focus, and which is outside which is not discoverable: write containers, outermost first". |
+
+A name in the list that is not on PATH, or that is turned off, is a complaint;
+so is a container that answers `focus` and is left out, because nothing would
+ever ask it to.
 
 ### A complete file
 
-This is a working configuration: two agents, a multiplexer that both paints and
-navigates, a window manager, a menu bar, notifications, and a picker that is run
-from a key.
+This is a working configuration: a multiplexer that both paints and navigates, a
+window manager and notifications, all on PATH and none of them named to be
+turned on. Also on PATH, and turned off: a picker. The two agents are on PATH as
+well and need no line — their hooks are in their own settings files, written by
+`agent-notify install`.
 
-```toml
-# A hook's PATH is not your shell's PATH, and a menu-bar click runs from
-# launchd's, which is /usr/bin:/bin and nothing else.
-agent-notify-binary = "/opt/homebrew/bin/agent-notify"
+```yaml
+keep-ended-sessions: 168h
 
-[agent.claude]
-binary = "claude"
+integrations:
+  zellij:
+    settings:
+      glyphs:
+        working: "*"
+  macos-notifier:
+    settings:
+      sound: false
+  picker:
+    enabled: false
 
-[agent.codex]
-binary = "codex"
-
-[integration.zellij]
-binary = "/opt/homebrew/bin/agent-notify-zellij"
-
-[integration.zellij.settings]
-zellij = "/opt/homebrew/bin/zellij"
-
-[integration.aerospace-container]
-binary = "/opt/homebrew/bin/agent-notify-aerospace-container"
-
-[integration.aerospace-container.settings]
-aerospace = "/opt/homebrew/bin/aerospace"
-
-[container]
-order = ["aerospace-container", "zellij"]
-
-[integration.macos-notifier]
-binary = "/opt/homebrew/bin/agent-notify-macos-notifier"
-
-[integration.macos-notifier.settings]
-alerter = "/opt/homebrew/bin/alerter"
-sound   = false
-
-# Run when you press a key. It needs a terminal, so it has no binary: the path
-# lives in the keybinding, which is the only thing that runs it.
-[integration.picker]
+# Two containers, so which is outside which has to be said.
+containers: [aerospace-container, zellij]
 ```
 
 ### What happens when the file is wrong
@@ -593,30 +604,29 @@ A hook logs and exits 0; `doctor` prints and exits 1.
 
 Failure is graded, and the grades are not the same thing:
 
-- **A file that is not TOML is refused whole**, and the defaults apply. Nothing
+- **A file that is not YAML is refused whole**, and the defaults apply. Nothing
   in it is used, because a half-decoded file silently mixes your intent with
-  defaults in a way nobody can see. The same goes for a value of the wrong type,
-  like the `"24h"` above.
+  defaults in a way nobody can see. The same goes for a value of the wrong type
+  — a word where `history-messages` wants a number. An integration asking for
+  its settings from a refused file is told that, rather than "you have none".
 - **A key that is not recognised is ignored**, by name, and everything the file
   got right survives. The strict pass that finds it is a second decode purely to
   report typos: the first pass has to populate the configuration whatever
   happens, and a decoder that stopped at the first unknown key would decide how
   much of your file survives based on the order you happened to write it in.
 - **A value that cannot be used is replaced by its default**, one at a time. A
-  negative `history-messages` costs you that line and not the other twelve.
-- **An enabled integration with no `binary` is a complaint**, because nothing
-  will ever happen for it.
-- Two keys that used to exist — `capture` and `focus` in an integration's table
-  — get a sentence of their own rather than the generic "not recognised",
-  because a display that quietly stopped placing sessions deserves to be told
-  why.
+  negative `history-messages`, or a `keep-ended-sessions` that is not a
+  duration, costs you that line and not the other twelve.
+- **A name under `integrations` with no program on PATH is a complaint** named
+  after the program, and the rest of the file stands (D-102). A program that is
+  on PATH and does not answer is a different thing, and the session-watcher's
+  report and `doctor` say which.
 
 ```
 $ agent-notify doctor
-config       FAIL  /Users/you/.config/agent-notify/config.toml: 1 key(s) not recognised and ignored:
-                  3| bogus-key = 1
-                   | ~~~~~~~~~ unknown field
-                  running with: 0 agent(s), 0 integration(s), keep-ended-sessions 24h0m0s
+config       FAIL  /Users/you/.config/agent-notify/config.yaml: 1 key(s) not recognised and ignored:
+                    line 3: field bogus-key not found in type config.Config
+                  running with: 6 integration(s) on PATH, 6 enabled, keep-ended-sessions 24h0m0s
 ```
 
 ### Re-reading it
@@ -626,13 +636,13 @@ is a real failure and not a theoretical one. You ask.
 
 ```sh
 agent-notify watcher reload
-# asked pid 86777 to re-read /Users/you/.config/agent-notify/config.toml
+# asked pid 86777 to re-read /Users/you/.config/agent-notify/config.yaml
 ```
 
-Asking is also how you retry. An integration that was broken, misspelled or not
-yet installed gets another go rather than being written off for the life of the
-process. The state directory is fixed for the life of the process; everything
-else takes effect now.
+Asking is also how you retry, and how PATH is read again: an integration you
+have just built gets picked up, and one that was broken gets another go rather
+than being written off for the life of the process. The state directory is
+fixed for the life of the process; everything else takes effect now.
 
 ## Where everything lives on disk
 
@@ -646,7 +656,7 @@ carries the text of what an agent last said.
 | --- | --- | --- | --- |
 | state | `~/Library/Application Support/agent-notify` | `$XDG_STATE_HOME/agent-notify` | `<root>/state` |
 | runtime | `$TMPDIR/agent-notify` | `$XDG_RUNTIME_DIR/agent-notify` | `<root>/run` |
-| config | `~/.config/agent-notify/config.toml` | the same | `<root>/config.toml` |
+| config | `~/.config/agent-notify/config.yaml` | the same | `<root>/config.yaml` |
 
 Inside state: `sessions/<key>.json` for what is live, `ended/<key>.json` for what
 is over and still resumable, `history/<key>.json` for the last few things each
@@ -677,8 +687,8 @@ disagree.
 | [`version`](#agent-notify-version) | 0 | what every integration handshakes against |
 | [`focus-session`](#agent-notify-focus-session) | 0/1 | bring one session to the front |
 | [`annotate`](#agent-notify-annotate) | 0/1 | write one owner's section of a record |
-| [`install`](#agent-notify-install) | any | set up every integration on your PATH, or the ones named |
-| [`uninstall`](#agent-notify-install) | any | take every integration on your PATH down, or the ones named |
+| [`install`](#agent-notify-install) | any | wire every agent on your PATH up, or the ones named |
+| [`uninstall`](#agent-notify-install) | any | take every agent on your PATH out of its hooks, or the ones named |
 | [`watcher`](#agent-notify-watcher) | 0/1/3 | the one long-lived process |
 | [`report-event`](#agent-notify-report-event) | **always 0** | what an agent-integration calls when its agent did something |
 | [`completion`](#agent-notify-completion) | 0/1 | a completion script for your shell |
@@ -793,17 +803,30 @@ Where everything resolves to, and what is wrong with it. Exits non-zero when
 something is, because a health check nothing can branch on is a health check
 nobody runs twice.
 
-It checks the directories, the configuration, the
-store, liveness, whether the watcher is up — and whether it *answers*, which is
-the difference between "something holds the lock" and "something holds the lock
-and works". A wedged watcher is named and never killed: recovery is your word,
-and a notification tool that kills things unprompted is not one you would leave
-running.
+It checks the directories, the configuration, that `agent-notify` itself is on
+PATH (without it no hook can start a session-watcher, and the only other sign
+is a line in the log), the store, liveness, whether the watcher is up — and
+whether it *answers*, which is the difference between "something holds the
+lock" and "something holds the lock and works". A wedged watcher is named and
+never killed: recovery is your word, and a notification tool that kills things
+unprompted is not one you would leave running.
+
+The `config` line counts what PATH holds and what the file left on — `6
+integration(s) on PATH, 5 enabled, keep-ended-sessions 168h0m0s` — because
+PATH is what decides what runs (D-102). Then the integrations, one line per
+program on PATH that is not turned off, agents included: what each answered at
+the handshake, or why it could not be asked. An agent-integration reads `yours
+to start; core never runs it — answers install, uninstall, none of which core
+calls`, and the picker `answers nothing core calls`; both are correct and
+neither is a fault. With no `agent-notify-*` anywhere on PATH the line says
+`none on PATH`. And the containers: which answer `focus`, in the order they
+will be walked, or that none does and nothing can be focused while everything
+else works.
 
 It also names what it does **not** check, so its output never reads as a clean
-bill of health for something still being built. Today that is which agents have
-their hooks installed; each agent-integration answers that with its own
-`install`.
+bill of health for something still being built. Today that is whether each
+agent still runs its hooks; an agent-integration's `install` says so, and is
+safe to run again.
 
 One side effect worth knowing: `doctor` forgets whatever has outlived
 `keep-ended-sessions`, and says how many.
@@ -883,25 +906,28 @@ agent-notify annotate lenny-load jira --remove
 
 ### `agent-notify install`
 
-Sets integrations up. With no name it files core's own `agent-notify-binary`
-into `conf.d/agent-notify.toml` and runs `agent-notify-<name> install` for
-every `agent-notify-*` on your PATH, one after another, each owning the
-terminal while it runs. With names it runs those, and **every option after a
-name belongs to that program**: core does not parse them.
+Wires the agents up. With no name it asks every `agent-notify-*` on your PATH
+`capabilities` and runs `agent-notify-<name> install` on each that lists
+`install` among its methods, one after another, each owning the terminal while
+it runs. Those are the agent-integrations, and what each writes is the hook,
+into its own agent's settings file — the one thing core cannot discover (R10).
+Nothing writes `config.yaml` (D-101). With a name it runs that program's
+`install` whether or not it said it answers, and **every option after a name
+belongs to that program**: core does not parse them.
 
 ```sh
 agent-notify install
 agent-notify install claude --print
-agent-notify install macos-notifier
 ```
 
-Each integration writes its own file under `conf.d` and nothing in
-`config.toml`. TAB offers the integrations on your PATH. An integration that is
-not there is refused with the reason: it is its own program, and you build it
-first.
+A tool-integration has nothing to install: it is on PATH, so it runs (D-102).
+With no agent on PATH the command says so and exits 0. TAB offers
+the integrations on your PATH. A name that is not there is refused with the
+reason: it is its own program, and you build it first.
 
-`agent-notify uninstall` is the reverse: `agent-notify-<name> uninstall` for
-every program on PATH or for the ones named, then core's own drop-in goes.
+`agent-notify uninstall` mirrors it: `agent-notify-<name> uninstall` for every
+program on PATH that answers the verb, or for the ones named. Each takes back
+what its install wrote, and core has nothing of its own to remove.
 
 ### `agent-notify watcher`
 
@@ -949,7 +975,8 @@ listening.
 
 | Flag | Type | Description |
 | --- | --- | --- |
-| `--agent` | string | **required.** the agent this session belongs to, as configured |
+| `--agent` | string | **required.** the agent this session belongs to; the middle third of its key |
+| `--process` | string | the name the agent's process runs under, for finding it in this process's ancestry; defaults to `--agent` |
 | `--session` | string | **required.** the agent's own id for the session |
 | `--event` | string | **required.** one of the nine events |
 | `--detail` | string | the agent's refinement of the state |
@@ -1023,25 +1050,33 @@ differently, are here once: `Record.DisplayName()`, `Record.State()`,
 A translation and one call.
 
 ```go
-os.Exit(hook.Main(os.Args[1:], usage, install, func(payload Payload) (session.Report, bool) {
-    return session.Report{
-        Key:     session.Key{Agent: "claude", SessionID: payload.SessionID},
-        Event:   session.TurnFinished,
-        Message: &payload.LastAssistantMessage,
-    }, true
-}))
+os.Exit(hook.Main(os.Args[1:], usage, "claude",
+    map[string]func([]string) int{"install": install, "uninstall": uninstall},
+    func(payload Payload) (session.Report, bool) {
+        return session.Report{
+            Key:     session.Key{Agent: "claude", SessionID: payload.SessionID},
+            Event:   session.TurnFinished,
+            Message: &payload.LastAssistantMessage,
+        }, true
+    }))
 ```
 
-`Main` hands `install` its arguments, refuses any other word with the usage,
-and otherwise decodes the payload on stdin into a fresh `Payload`, hands it
-to the translation and records what it returns. It never exits non-zero and never writes to stdout, because
-an agent reads both as verdicts. `LastResponses` reads the agent's transcript
+The third argument is the name the agent's process runs under, for finding it
+in the hook's ancestry. It is a constant of the program, not configuration:
+nothing in a file could know it better (D-101). The named subcommands are the
+program's own — `install` and `uninstall`, which a person runs and which may
+speak and fail — and `Main` answers `capabilities` with them as methods, which
+is how `agent-notify install` knows whom to hand the verb to. `Main` hands a
+named subcommand its arguments, refuses any other word with the usage, and
+otherwise decodes the payload on stdin into a fresh `Payload`, hands it to the
+translation and records what it returns. It never exits non-zero and never
+writes to stdout, because an agent reads both as verdicts. `LastResponses` reads the agent's transcript
 backwards for what the newest responses cost, given the one function that
 knows what a line of that transcript looks like.
 
 `Record` does the rest: resolves where things live, reads the configuration,
-walks its own ancestry to find the agent's process, runs the
-`capture-environment` of each integration that has one, reads the branch, takes
+walks its own ancestry to find the agent's process by that name, runs the
+`capture-environment` of each enabled integration that declared it, reads the branch, takes
 the session's lock, reduces, writes, and starts a session-watcher if none holds
 the lock. It returns no error, and that is the contract rather than an
 oversight.
@@ -1072,7 +1107,6 @@ func main() {
         Interpret: interpret,  // runs in the watcher: ask the tool
         Focus:     focus,
         Focused:   focused,
-        Named:     map[string]func([]string) int{"install": install},
     }, os.Args[1:]))
 }
 ```
@@ -1093,17 +1127,41 @@ started by launchd, and calls `subscribe.Run(ctx, me, paint)`: it watches the
 store and hands `paint` a view whenever something in `WakeOn` moves, starting a
 session-watcher if none is running. `agent-notify tail` is the same loop.
 
-Beside them: `Settings(&mine)` decodes this integration's own settings table
-and refuses a key nobody declared, `Read()`/`ReadIncludingEnded()` are the cold
+There is no `install`. A tool-integration runs because it is on PATH (D-102),
+and the program has nothing to write anywhere (D-101). `Named` is for
+subcommands of your own that a person runs — the picker's `--preview` and
+`--label` — and `Default` is what runs when no word matched.
+
+Settings come from core, never from the file: an integration does not know
+where the file is and does not parse YAML (D-103). Declare the shape with
+`yaml` tags and ask for it filled in. `Settings(&into)` decodes this
+integration's own `integrations.<name>.settings` into it, refuses a key nobody
+declared by name, leaves `into` untouched when there is no entry, and returns
+the refusal when the whole file was refused.
+
+```go
+type Settings struct {
+    Zellij string            `yaml:"zellij"`   // the tool's path, when PATH will not do
+    Glyphs map[string]string `yaml:"glyphs"`   // kernel or kernel/detail → glyph
+}
+
+var mine Settings
+if err := me.Settings(&mine); err != nil {
+    return err   // "integrations.zellij.settings: 1 key(s) not recognised and ignored: …"
+}
+```
+
+Beside it: `Read()`/`ReadIncludingEnded()` are the cold
 read, `History(key)` is one session's last few messages and transitions,
 `Focus(key)` runs `agent-notify focus-session` for a display that offers a
-click, and `Install`/`InstallBundle` are the two shapes an `install` takes: a
-table with this program's path and its tool's filled in and printed, or a
-macOS `.app` built around a copy of this binary with the table and the launch
-agent printed after it. Both write nothing to your config file.
+click, and `CoreBinary()` is where `agent-notify` is, found on PATH. The tool
+you drive is found the same way: `tool.Find(key, name, configured)` returns the
+configured path when the settings give one, checked, and otherwise the name
+looked up on PATH, with a message naming the key when neither answers.
 
 `Main` refuses a `WakeOn` naming a field no record has, and a `Named`
-subcommand called `focus` or `render`. One trap it cannot catch, because it
+subcommand called by any word core runs — `capabilities`, `capture-environment`,
+`interpret-environment`, `focus`, `focused`, `render`. One trap it cannot catch, because it
 is silent: a field your renderer reads and your `WakeOn` omits wakes you never
 for that change. `FieldsRenderedButNotWokenFor` exists so a test can find that
 for you.
@@ -1128,22 +1186,25 @@ never open a socket, never wait. Whatever it returns is stored verbatim under
 that integration's name and is opaque to core in both directions; what it means
 is agreed between your `Reads` and your `Interpret` and nobody else.
 
-There is nothing to declare. Every integration core can run is asked this one,
-and an integration with nothing to read answers an empty object, which is
-stored like any other answer: it is how core knows the question was answered
+Filling in `Reads` is the declaration: `capabilities` lists
+`capture-environment` among the methods like any other, and the hook asks only
+the enabled integrations that declared it (D-101). What one answers is stored
+like any other answer, and that is how core knows the question was answered
 and need not be asked again.
 
 ### How core finds an integration
 
-Five things are true of a working integration, and each is a different
-mechanism. It is on your PATH as `agent-notify-<name>`, which is what `install`
-execs and `doctor` lists. It has a `[integration.<name>]` table, which is what
-turns it on. The table names a `binary` when core may run it; a display that
-owns its process leaves that out. It answered `capabilities`, which the
-session-watcher asks at startup and on `reload` and writes to
-`integrations.json` for `focus` and `doctor` to read. And a container is named
-in `[container] order`, which is the one fact only you know. `doctor` prints
-where each of yours stands.
+Three things are true of a working integration, and each is a different
+mechanism. It is on your PATH as `agent-notify-<name>`, which is what turns it
+on: the name is the whole of what core knows about it (D-101), and being found
+is the whole of the ask (D-102) — `integrations.<name>.enabled: false` is the
+only way off. It answered `capabilities`, which the session-watcher asks at
+startup and on `reload` and writes to `integrations.json` for `focus`, the hook
+and `doctor` to read; what it listed there is what core will run it for, and a
+program that answers nothing is one core never runs. And a container is named
+in `containers`, which is the one fact only you know — unless it is the only
+container, in which case there is nothing to know. `doctor` prints where each
+of yours stands.
 
 ## What is not finished
 
@@ -1175,5 +1236,5 @@ The codebase says this in places and it is worth saying here.
 
 What does work, and has been the thing running on the machine it was written on
 since 2026-09-18: two agents tracked in one vocabulary, liveness, zellij pane
-and tab titles, the semaphore on the menu bar, notifications, and focus through
-every layer a session is buried under.
+and tab titles, notifications, a picker, and focus through every layer a
+session is buried under.

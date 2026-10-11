@@ -24,14 +24,12 @@ import (
 	"github.com/lassoColombo/agent-notify/tool"
 )
 
-// Settings is `[integration.aerospace-container.settings]`, and nothing else in
+// Settings is `integrations.aerospace-container.settings`, and nothing else in
 // the file is ours. An undeclared key is refused by name.
 type Settings struct {
-	// Aerospace is where aerospace is, as an absolute path. Required, and named
-	// after the tool rather than called `binary` because the table above it has
-	// a `binary` of its own — this program's — and install prints both
-	// together (D-67).
-	Aerospace string `toml:"aerospace"`
+	// Aerospace is where aerospace is, when it is not on this process's PATH
+	// (D-101).
+	Aerospace string `yaml:"aerospace"`
 
 	// Title is how to build the window-title key, with {VARIABLE} filled in
 	// from the agent's environment. It is configuration because the coupling it
@@ -41,7 +39,7 @@ type Settings struct {
 	//
 	// Setting it to "" turns the key off, leaving the process chain as the only
 	// way in — which is the right setting for somebody who runs no multiplexer.
-	Title string `toml:"title"`
+	Title string `yaml:"title"`
 }
 
 // The zellij convention, which is the one people actually have. The separator
@@ -59,9 +57,8 @@ const defaultTitle = "{ZELLIJ_SESSION_NAME} | "
 const aerospaceTimeout = 2 * time.Second
 
 func main() {
-	// Read on first use, so that `install` still runs against a broken file
-	// and `capture-environment`, on the path the agent waits on, reads the
-	// file only when it must.
+	// Read on first use, so that `capture-environment`, on the path the agent
+	// waits on, reads the file only when it must.
 	settings := sync.OnceValues(func() (Settings, error) { return Read(me) })
 	me.Reads = func() (any, error) {
 		resolved, err := settings()
@@ -71,7 +68,6 @@ func main() {
 		return Capture(resolved.Title)
 	}
 	os.Exit(subscribe.Main(me, subscribe.Commands{
-		Named: map[string]func([]string) int{"install": install, "uninstall": uninstall},
 		Interpret: func(captured json.RawMessage, ancestry []session.Ancestor) (any, error) {
 			resolved, err := settings()
 			if err != nil {
@@ -117,7 +113,7 @@ func Read(given subscribe.Integration) (Settings, error) {
 }
 
 func (s Settings) aerospace() (Aerospace, error) {
-	binary, err := tool.AbsolutePath("[integration."+Name+".settings] aerospace", s.Aerospace)
+	binary, err := tool.Find("integrations."+Name+".settings.aerospace", "aerospace", s.Aerospace)
 	if err != nil {
 		return Aerospace{}, err
 	}

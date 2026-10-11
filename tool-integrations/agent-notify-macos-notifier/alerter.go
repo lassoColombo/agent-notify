@@ -7,6 +7,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/lassoColombo/agent-notify/tool"
 )
 
 // This file is the whole of what this program knows about macOS, and it is an
@@ -46,25 +47,13 @@ const tapped = "@CONTENTCLICKED"
 // something.
 const holdCommand = "hold"
 
-// Alerter is where alerter is: what install wrote into the table, or PATH, or
-// the reason there will be no banners.
-//
-// The written one wins because nothing core starts has your shell's PATH
-// (D-67), and it is checked rather than trusted: a brew upgrade that moves it
-// would otherwise be a display that silently stops interrupting anybody.
+// Alerter is where alerter is: what the table says, or PATH, or the reason
+// there will be no banners (D-101).
 func Alerter(configured string) (string, error) {
-	if configured != "" {
-		if _, err := os.Stat(configured); err != nil {
-			return "", fmt.Errorf("[integration.%s.settings] alerter = %q is not there: %w",
-				Name, configured, err)
-		}
-		return configured, nil
-	}
-	path, err := exec.LookPath(alerterProgram)
+	path, err := tool.Find("integrations."+Name+".settings.alerter", alerterProgram, configured)
 	if err != nil {
-		return "", fmt.Errorf("%s is what posts a notification on this machine, and it is "+
-			"neither written in [integration.%s.settings] alerter nor on PATH: "+
-			"brew install vjeantet/tap/alerter", alerterProgram, Name)
+		return "", fmt.Errorf("%w: %s is what posts a notification on this machine; "+
+			"brew install vjeantet/tap/alerter", err, alerterProgram)
 	}
 	return path, nil
 }

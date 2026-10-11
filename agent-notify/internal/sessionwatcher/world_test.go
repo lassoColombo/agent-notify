@@ -1,7 +1,6 @@
 package sessionwatcher_test
 
 import (
-	"fmt"
 	"os/exec"
 	"testing"
 	"time"
@@ -19,13 +18,11 @@ import (
 func TestOneWakeHandsEveryDisplayTheSameWorld(t *testing.T) {
 	atATestablePace(t, 200*time.Millisecond)
 	root := shortRoot(t)
-	keeper, kept := aDisplayAnswering(t, root, "keeper", session.Capabilities{
+	_, kept := aDisplayAnswering(t, root, "keeper", session.Capabilities{
 		Version: "0.0.0-dev", Methods: []string{session.MethodRender},
 		WakeOn: []string{"kernel"}, WantEnded: true,
 	})
-	bar, barred := aDisplay(t, root, "bar", "kernel")
-	write(t, root+"/config.toml", fmt.Sprintf(
-		"[integration.keeper]\nbinary = %q\n\n[integration.bar]\nbinary = %q\n", keeper, bar))
+	_, barred := aDisplay(t, root, "bar", "kernel")
 
 	layout := running(t, root)
 

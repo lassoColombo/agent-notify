@@ -73,7 +73,7 @@ func Under(root string) (Layout, error) {
 		Root:       absolute,
 		State:      filepath.Join(absolute, "state"),
 		Runtime:    filepath.Join(absolute, "run"),
-		ConfigFile: filepath.Join(absolute, "config.toml"),
+		ConfigFile: filepath.Join(absolute, "config.yaml"),
 	}, nil
 }
 
@@ -114,21 +114,14 @@ func defaultRuntimeDir() (string, error) {
 
 func defaultConfigFile() (string, error) {
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		return filepath.Join(xdg, "agent-notify", "config.toml"), nil
+		return filepath.Join(xdg, "agent-notify", "config.yaml"), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("cannot locate the configuration file: %w", err)
 	}
-	return filepath.Join(home, ".config", "agent-notify", "config.toml"), nil
+	return filepath.Join(home, ".config", "agent-notify", "config.yaml"), nil
 }
-
-// DropIns holds one table per integration, written by that integration's
-// install and read before ConfigFile, which wins (D-85).
-func (l Layout) DropIns() string { return filepath.Join(filepath.Dir(l.ConfigFile), "conf.d") }
-
-// DropIn is one integration's table.
-func (l Layout) DropIn(name string) string { return filepath.Join(l.DropIns(), name+".toml") }
 
 // Sessions holds the record of every session that has not ended.
 func (l Layout) Sessions() string { return filepath.Join(l.State, "sessions") }

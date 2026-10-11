@@ -98,7 +98,7 @@ func TheSoundsOnThisMachine(directories []string) []string {
 
 // Sound is what a banner plays.
 type Sound struct {
-	// Plays is false for silence, which is `sound = false`.
+	// Plays is false for silence, which is `sound: false`.
 	Plays bool
 	// Name is the sound file macOS is asked for, or "" for the system default.
 	Name string
@@ -106,8 +106,8 @@ type Sound struct {
 
 // theSoundIn reads the `sound` key, which is the one setting here that takes
 // more than one kind of value: `true`, `false`, or a name. It is declared as
-// `any` and taken apart by hand because TOML is typed and go-toml has no hook
-// for a value that may be either — and two keys for one idea (`sound` and
+// `any` and taken apart by hand because the decoder has no hook for a value
+// that may be either — and two keys for one idea (`sound` and
 // `sound-name`, one of which quietly wins) would be worse than this switch.
 func theSoundIn(written any, directories []string) (Sound, error) {
 	switch value := written.(type) {
@@ -119,7 +119,7 @@ func theSoundIn(written any, directories []string) (Sound, error) {
 		file, found := TheSoundFileCalled(value, directories)
 		if !found {
 			return Sound{}, fmt.Errorf(
-				"[integration.%s.settings] sound = %q is not a sound on this machine.\n"+
+				"integrations.%s.settings sound = %q is not a sound on this machine.\n"+
 					"macOS is given the name and never says it could not find it — it plays the\n"+
 					"default chime instead — so it is refused here. There is: %s.\n"+
 					"A sound of your own goes in ~/Library/Sounds and can be called anything.",
@@ -128,7 +128,7 @@ func theSoundIn(written any, directories []string) (Sound, error) {
 		return Sound{Plays: true, Name: file}, nil
 	default:
 		return Sound{}, fmt.Errorf(
-			"[integration.%s.settings] sound = %v is neither true, false, nor the name of a "+
+			"integrations.%s.settings sound = %v is neither true, false, nor the name of a "+
 				"sound like \"Submarine\"", Name, written)
 	}
 }

@@ -53,7 +53,7 @@ func onStderr(t *testing.T) func() string {
 func TestMainDecodesAFreshPayloadAndHandsItOver(t *testing.T) {
 	onStdin(t, `{"session_id":"alpha","a_field_this_build_has_never_seen":true}`)
 	var handed pretendPayload
-	code := Main(nil, "usage\n", nil, func(payload pretendPayload) (session.Report, bool) {
+	code := Main(nil, "usage\n", "", nil, func(payload pretendPayload) (session.Report, bool) {
 		handed = payload
 		return session.Report{}, false
 	})
@@ -68,7 +68,7 @@ func TestMainDecodesAFreshPayloadAndHandsItOver(t *testing.T) {
 func TestAPayloadThatDoesNotParseIsStillTranslated(t *testing.T) {
 	onStdin(t, `this is not json`)
 	translated := false
-	code := Main(nil, "usage\n", nil, func(payload pretendPayload) (session.Report, bool) {
+	code := Main(nil, "usage\n", "", nil, func(payload pretendPayload) (session.Report, bool) {
 		translated = true
 		return session.Report{}, false
 	})
@@ -91,12 +91,12 @@ func TestAWordOnTheCommandLineIsASubcommandOrTheUsage(t *testing.T) {
 		return session.Report{}, false
 	}
 
-	if code := Main([]string{"install", "--print"}, "usage\n", named, translate); code != 3 || len(given) != 1 || given[0] != "--print" {
+	if code := Main([]string{"install", "--print"}, "usage\n", "", named, translate); code != 3 || len(given) != 1 || given[0] != "--print" {
 		t.Errorf("install exited %d with %v; want its own 3 and its own arguments", code, given)
 	}
 
 	said := onStderr(t)
-	if code := Main([]string{"instal"}, "usage\n", named, translate); code != 1 || !strings.Contains(said(), "usage") {
+	if code := Main([]string{"instal"}, "usage\n", "", named, translate); code != 1 || !strings.Contains(said(), "usage") {
 		t.Errorf("an unknown word exited %d saying %q; want 1 and the usage", code, said())
 	}
 }

@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/lassoColombo/agent-notify/hook"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -49,7 +48,6 @@ func install(arguments []string) int {
 
 	if *print {
 		fmt.Print(block)
-		fmt.Print(agentTable)
 		return 0
 	}
 
@@ -74,7 +72,7 @@ func install(arguments []string) int {
 		}
 		if strings.Contains(string(existing), filepath.Base(program)) {
 			fmt.Printf("%s already runs %s; nothing changed.\n", *path, filepath.Base(program))
-			return fileTheAgentTable()
+			return 0
 		}
 	}
 
@@ -99,25 +97,10 @@ func install(arguments []string) int {
 	fmt.Fprintln(os.Stderr, "record the answer in that same file. That step is yours: the trust hash is")
 	fmt.Fprintln(os.Stderr, "codex's own and writing one here would be forging your consent to run a")
 	fmt.Fprintln(os.Stderr, "program on every hook.")
-	return fileTheAgentTable()
-}
-
-// agentTable is what core needs to recognise codex's process in a hook's
-// ancestry (§A8.4). The name is codex's, so it is this program's to file.
-const agentTable = "# Written by `agent-notify-codex install`.\n[agent." + AgentName + "]\nbinary = \"codex\"\n"
-
-func fileTheAgentTable() int {
-	written, err := hook.WriteDropIn(AgentName, agentTable)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "agent-notify-codex install: %v\n", err)
-		return 1
-	}
-	fmt.Printf("wrote %s\n", written)
 	return 0
 }
 
-// uninstall takes the block install appended out again, verbatim, and the
-// table away. A block somebody has edited is not recognised and is left, with
+// uninstall takes the block install appended out again, verbatim. A block somebody has edited is not recognised and is left, with
 // a word about it: rearranging a hooks table under a person is worse than
 // asking them to.
 func uninstall(arguments []string) int {
@@ -158,11 +141,6 @@ func uninstall(arguments []string) int {
 		}
 		fmt.Printf("removed %d hook(s) from %s.\n", len(SubscribedHooks), *path)
 	}
-	if err := hook.RemoveDropIn(AgentName); err != nil {
-		fmt.Fprintf(os.Stderr, "agent-notify-codex uninstall: %v\n", err)
-		return 1
-	}
-	fmt.Println("removed the [agent." + AgentName + "] table")
 	return 0
 }
 

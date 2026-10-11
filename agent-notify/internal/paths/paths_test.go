@@ -69,8 +69,8 @@ func TestDefaultsSeparateStateFromRuntime(t *testing.T) {
 	if !strings.HasPrefix(layout.State, home) {
 		t.Errorf("State = %q, want it under the home directory %q", layout.State, home)
 	}
-	if !strings.HasSuffix(layout.ConfigFile, filepath.Join("agent-notify", "config.toml")) {
-		t.Errorf("ConfigFile = %q, want it to end in agent-notify/config.toml", layout.ConfigFile)
+	if !strings.HasSuffix(layout.ConfigFile, filepath.Join("agent-notify", "config.yaml")) {
+		t.Errorf("ConfigFile = %q, want it to end in agent-notify/config.yaml", layout.ConfigFile)
 	}
 
 	wantState := filepath.Join(home, ".local", "state", "agent-notify")
@@ -108,7 +108,7 @@ func TestConfigHonoursXDGOnBothPlatforms(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	want := filepath.Join(config, "agent-notify", "config.toml")
+	want := filepath.Join(config, "agent-notify", "config.yaml")
 	if layout.ConfigFile != want {
 		t.Errorf("ConfigFile = %q, want %q", layout.ConfigFile, want)
 	}
@@ -171,7 +171,7 @@ func TestNamingTheRootAndLettingTheEnvironmentNameItAgree(t *testing.T) {
 	for _, root := range []string{
 		"a/relative/root",  // the case that differed
 		"/tmp/an/absolute", // the case that did not
-		"/tmp/trailing/",   // and the one that produced `root//config.toml`
+		"/tmp/trailing/",   // and the one that produced `root//config.yaml`
 	} {
 		t.Setenv(paths.TheVariableThatNamesTheRoot, root)
 

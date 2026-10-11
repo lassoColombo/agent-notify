@@ -6,19 +6,21 @@
 //	    Key:   session.Key{Agent: "claude", SessionID: payload.SessionID},
 //	    Event: session.TurnFinished,
 //	    Message: &payload.LastAssistantMessage,
-//	})
+//	}, "claude")
 package hook
 
 import (
 	"encoding/json"
 	"log/slog"
 	"os"
+	"slices"
 	"sync"
 	"time"
 
 	"github.com/lassoColombo/agent-notify/hook/internal/branch"
 	"github.com/lassoColombo/agent-notify/internal/config"
 	"github.com/lassoColombo/agent-notify/internal/core"
+	"github.com/lassoColombo/agent-notify/internal/handshake"
 	"github.com/lassoColombo/agent-notify/internal/onewatcher"
 	"github.com/lassoColombo/agent-notify/internal/process"
 	"github.com/lassoColombo/agent-notify/session"
@@ -36,12 +38,14 @@ var captureTimeout = time.Second
 
 // Record is the whole hook path: resolve where things live, read the config,
 // find the agent's process, capture, reduce under the session's lock, write,
-// and make sure a session-watcher exists.
+// and make sure a session-watcher exists. agentProcess is the name the agent
+// runs under, matched against this process's ancestry (§A8.4): the
+// integration's constant, not a configured value (D-101).
 //
 // It returns no error, by contract: an agent interprets its hooks, so
 // everything that goes wrong goes to the log (R2). The record returned is what
 // was written; false means nothing was.
-func Record(report session.Report) (session.Record, bool) {
+func Record(report session.Report, agentProcess string) (session.Record, bool) {
 	opened, err := core.OpenEverythingACommandNeeds("record-agent-event")
 	if err != nil {
 		return session.Record{}, false
@@ -74,7 +78,7 @@ func Record(report session.Report) (session.Record, bool) {
 	// `gitBranch: "HEAD"` for a repository sitting on `main` (§A7.4.4).
 	report.Branch = branch.At(report.Cwd)
 
-	look(opened, &report)
+	look(opened, &report, agentProcess)
 
 	written, err := opened.Store.Apply(report, time.Now().UTC())
 	if err != nil {
@@ -89,7 +93,7 @@ func Record(report session.Report) (session.Record, bool) {
 	// The session-watcher wakes on the store itself; all that is left is to
 	// make sure there is one. A race between hooks is harmless: the lock
 	// means exactly one survives (§A9.2).
-	if err := onewatcher.StartIfNobodyIs(opened.Layout, opened.Settings.AgentNotifyBinary); err != nil {
+	if err := onewatcher.StartIfNobodyIs(opened.Layout); err != nil {
 		opened.Logger.Warn("cannot start a session-watcher", "problem", err.Error())
 	}
 	return written, true
@@ -99,15 +103,13 @@ func Record(report session.Report) (session.Record, bool) {
 // and what its environment says about where it lives. By the time anything
 // else reads this event the hook has exited and there is no chain to walk
 // (§A8.4).
-func look(opened *core.Core, report *session.Report) {
+func look(opened *core.Core, report *session.Report, binary string) {
 	machine := process.ProcessesOnThisMachine{}
-	binary := opened.Settings.Agent[report.Key.Agent].Binary
 	agentProcess, chain, found := process.FindAgent(binary, process.Self(), machine)
 
 	if !found {
-		// The chain is recorded anyway: it is what a person needs to fix the
-		// config.
-		opened.Logger.Warn("no ancestor matched the configured binary",
+		// The chain is recorded anyway: it is what a person needs to see.
+		opened.Logger.Warn("no ancestor is the agent's process",
 			"agent", report.Key.Agent, "binary", binary, "walked", len(chain))
 	} else {
 		if boot, err := process.BootIdentity(); err == nil {
@@ -125,9 +127,9 @@ func look(opened *core.Core, report *session.Report) {
 	// Decided before anything is spawned. [measured 2026-09-19, macOS 26]
 	// three capturing integrations cost a hook 9.3ms when it captures and
 	// 4.9ms when it does not.
-	asked, stale := whoToAsk(previous, opened.Settings.Runnable(), report.Process)
+	asked, stale := whoToAsk(previous, whoCaptures(opened), report.Process)
 	if stale || len(asked) > 0 {
-		captured := askEveryoneWhoCaptures(opened.Settings, asked, opened.Logger, chain)
+		captured := askEveryoneWhoCaptures(asked, opened.Logger, chain)
 		report.CapturedContext = &captured
 	}
 }
@@ -137,7 +139,7 @@ func look(opened *core.Core, report *session.Report) {
 // answers an empty object, kept as it is; one that hangs, crashes or is
 // missing contributes nothing (R13).
 func askEveryoneWhoCaptures(
-	settings config.Config, asked []string, logger *slog.Logger, chain []session.Ancestor,
+	asked []string, logger *slog.Logger, chain []session.Ancestor,
 ) session.CapturedContext {
 	captured := session.CapturedContext{Ancestry: chain}
 
@@ -147,7 +149,7 @@ func askEveryoneWhoCaptures(
 		running.Add(1)
 		go func() {
 			defer running.Done()
-			blob, err := tool.Ask(settings.Integration[name].Binary,
+			blob, err := tool.Ask(config.Program(name),
 				session.CaptureCommand, nil, captureTimeout)
 			if err != nil {
 				logger.Warn("capture-environment", "integration", name, "problem", err.Error())
@@ -168,6 +170,20 @@ func askEveryoneWhoCaptures(
 		captured.By[name] = answered[i]
 	}
 	return captured
+}
+
+// whoCaptures is every enabled integration that declared `capture-environment`
+// (D-101): read from the session-watcher's report, or asked when there is none
+// yet, which is the first hook on a machine and no other.
+func whoCaptures(opened *core.Core) []string {
+	answers := handshake.ByIntegration(opened.Layout, opened.Settings)
+	var names []string
+	for _, name := range opened.Settings.Enabled() {
+		if slices.Contains(answers[name].Methods, session.CaptureCommand) {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 // whoToAsk is which integrations this hook runs `capture-environment` on, and

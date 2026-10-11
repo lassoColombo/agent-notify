@@ -1,6 +1,6 @@
-# Two commands set a machine up: `make install` builds every module into
-# $(GOBIN), then `agent-notify install` sets up every integration it finds on
-# PATH (D-85).
+# Setting a machine up: `make install` builds every module into $(GOBIN), and
+# `agent-notify install` writes the hook into every agent it finds on PATH.
+# Everything on PATH runs; config.yaml holds opinions (D-101, D-102).
 
 MODULES := agent-notify $(wildcard agent-integrations/*) $(wildcard tool-integrations/*)
 

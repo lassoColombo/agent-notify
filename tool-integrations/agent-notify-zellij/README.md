@@ -21,8 +21,8 @@ lenny is in front.
 
 It is one program for both halves (plan.md D-83): they read the same two
 environment variables and drive the same tool. Titles without focus is a
-configuration, not a separate install — leave `zellij` out of
-`[container] order` and nothing will ever ask it to move you.
+configuration, not a separate install — leave `zellij` out of `containers`
+and nothing will ever ask it to move you.
 
 Core runs it. There is no daemon: the hook runs `capture-environment` inside
 the agent, the session-watcher runs `render` when something a title shows
@@ -37,65 +37,76 @@ focus-session` runs `focus`. Each is one JSON object on stdin, one on stdout.
 
 ```sh
 make install                    # at the root: every module, into $(go env GOPATH)/bin
-agent-notify install zellij
 ```
 
-`install` writes `conf.d/zellij.toml` beside your `config.toml` and touches
-nothing else:
+That directory has to be on your PATH, because the name is all core knows —
+and being there is the whole of installing it (plan.md D-102). There is no
+`install` verb for this program, and nothing is written to
+`~/.config/agent-notify/config.yaml` to make it run: every `agent-notify-<name>`
+on PATH runs, and the file need not exist. zellij itself is found the same way,
+at runtime; `integrations.zellij.settings.zellij` is the override for a process
+that was not started from your shell (see [Configuration](#configuration)).
 
-```toml
-[integration.zellij]
-binary = "/Users/you/go/bin/agent-notify-zellij"
+If this is your only container, it is the whole of `containers` and you need
+not write one. With a window manager outside it, write the list, outermost
+first — `doctor` says "write `containers`, outermost first" when two
+containers answer `focus` and none is written:
 
-[integration.zellij.settings]
-zellij = "/opt/homebrew/bin/zellij"
-
-[container]
-order = ["zellij"]
-```
-
-`binary` and `zellij` are absolute because the programs that run this do not
-have your shell's PATH; `zellij` is resolved at install time, in your shell,
-for the same reason. The `[container] order` in that file is the whole order
-only when this is your only container. With a window manager outside it, write
-the order in `config.toml`, outermost first, and yours wins:
-
-```toml
-[container]
-order = ["aerospace-container", "zellij"]
+```yaml
+containers: [aerospace-container, zellij]
 ```
 
 Then `agent-notify watcher reload` so the session-watcher asks this program
 what it answers, and `agent-notify doctor` to see it listed:
 
 ```
-integrations ok    reported by pid 41022 at 2026-09-28T08:14:02Z
+config       ok    no file, using defaults — 2 integration(s) on PATH, 2 enabled, keep-ended-sessions 168h0m0s
+integrations ok    reported by pid 41022 at 2026-10-11T08:14:02Z
              zellij                 drawn when something it watches moves
-                                    answers interpret-environment, focus, focused, render — built against 0.0.0-dev
+                                    answers capture-environment, interpret-environment, focus, focused, render — built against 0.0.0-dev
 containers   ok    outermost first: aerospace-container, zellij
 ```
 
-A rebuilt binary is picked up on the next render; a rebuild that changes the
-wake list needs a reload. `agent-notify uninstall zellij` removes the drop-in;
-a line naming it in your own `[container] order` is yours to take out.
+A program that is on PATH and did not answer `capabilities` is listed as
+`could not be asked`, with the reason. A rebuilt binary is picked up on the
+next render; a rebuild that changes the wake list needs a reload. To turn it
+off without removing the binary:
+
+```yaml
+integrations:
+  zellij:
+    enabled: false
+```
+
+To take it out, delete the binary from PATH; a line naming it in your own
+`containers` is yours to take out too, and so is its `integrations` entry —
+one that names a program not on PATH is a complaint on `doctor`'s `config`
+line.
 
 ## Configuration
 
+Everything of this program's lives under `integrations.zellij` in
+`~/.config/agent-notify/config.yaml` (plan.md D-103); the file is core's, and
+this program asks core's SDK for its own `settings` rather than reading it.
+
 | Key | Default | What it does |
 | --- | --- | --- |
-| `binary` | required | this program, absolute |
-| `enabled` | `true` | `false` keeps the table and stops core running it |
-| `settings.zellij` | required | absolute path to zellij |
-| `settings.glyphs` | see below | what each state looks like, keyed on `kernel` or `kernel/detail` |
+| `integrations.zellij.enabled` | `true` | `false` leaves the binary on PATH and stops core running it (D-102) |
+| `integrations.zellij.settings.zellij` | `zellij` on PATH | where zellij is, when this process's PATH does not say. Core runs this as a descendant of the agent, which you started from a shell, so PATH is ordinarily yours; an agent launched from the Dock has no such PATH, and this key is the answer. Found neither way, `render` and `interpret-environment` fail at startup and `focus` answers `not-running`, each naming this key (D-101) |
+| `integrations.zellij.settings.glyphs` | see below | what each state looks like, keyed on `kernel` or `kernel/detail` |
 
 A settings key nobody declared is refused by name.
 
-```toml
-[integration.zellij.settings.glyphs]
-working                            = "↻"
-"working/compacting"               = "~"
-"blocked-on-you/permission-prompt" = "?"
-idle                               = ""
+```yaml
+integrations:
+  zellij:
+    settings:
+      zellij: /Users/you/.cargo/bin/zellij   # only when zellij is not on the process's PATH
+      glyphs:
+        working: "↻"
+        working/compacting: "~"
+        blocked-on-you/permission-prompt: "?"
+        idle: ""
 ```
 
 Most specific first: the `kernel/detail` pair, then the `kernel`, then the

@@ -13,7 +13,7 @@ import (
 // screen.
 //
 // These twelve are the DEFAULTS, and a hue is the only thing about the palette
-// a person can change: `[integration.picker.settings.colors]` says what a slot
+// a person can change: `integrations.picker.settings.colors` says what a slot
 // IS, and this file says what a slot is FOR. That asymmetry is the whole of it
 // — two things drawn in one slot move together when it changes, and the table
 // in the config file is twelve lines because this file is disciplined about

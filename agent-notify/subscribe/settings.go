@@ -8,7 +8,6 @@
 package subscribe
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -19,7 +18,7 @@ import (
 	"github.com/lassoColombo/agent-notify/internal/onewatcher"
 	"github.com/lassoColombo/agent-notify/internal/paths"
 	"github.com/lassoColombo/agent-notify/session"
-	"github.com/pelletier/go-toml/v2"
+	"gopkg.in/yaml.v3"
 )
 
 // Integration is what an author fills in: what this program is called, and
@@ -106,29 +105,26 @@ func (i Integration) Settings(into any) error {
 		}
 	}
 
-	section := opened.Settings.Integration[i.Name].Settings
+	section := opened.Settings.Integrations[i.Name].Settings
 	if len(section) == 0 {
 		return nil
 	}
-	encoded, err := toml.Marshal(section)
+	encoded, err := yaml.Marshal(section)
 	if err != nil {
-		return fmt.Errorf("[integration.%s.settings] cannot be re-encoded: %w", i.Name, err)
+		return fmt.Errorf("integrations.%s.settings cannot be re-encoded: %w", i.Name, err)
 	}
-	decoder := toml.NewDecoder(bytes.NewReader(encoded))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(into); err != nil {
-		var strict *toml.StrictMissingError
-		if errors.As(err, &strict) {
-			return fmt.Errorf("[integration.%s.settings]: %d key(s) nobody declared:\n%s",
-				i.Name, len(strict.Errors), strict.String())
-		}
-		return fmt.Errorf("[integration.%s.settings]: %w", i.Name, err)
+	where := "integrations." + i.Name + ".settings"
+	if problems := config.UnknownKeys(encoded, into, where); len(problems) > 0 {
+		return problems[0]
+	}
+	if err := yaml.Unmarshal(encoded, into); err != nil {
+		return fmt.Errorf("%s: %w", where, err)
 	}
 	return nil
 }
 
-// ConfigFile is where agent-notify's configuration lives, for an `install`
-// that has a table to tell somebody about.
+// ConfigFile is where agent-notify's configuration lives, for a message that
+// names a table to write.
 func (i Integration) ConfigFile() (string, error) {
 	layout, err := i.layout()
 	if err != nil {
@@ -137,14 +133,9 @@ func (i Integration) ConfigFile() (string, error) {
 	return layout.ConfigFile, nil
 }
 
-// CoreBinary is where the agent-notify command lives: what the configuration
-// names, or a lookup, since a launchd job's PATH is not your shell's (D-33).
+// CoreBinary is where the agent-notify command lives (D-33).
 func (i Integration) CoreBinary() (string, error) {
-	opened, err := i.core()
-	if err != nil {
-		return "", err
-	}
-	return onewatcher.CoreBinary(opened.Settings.AgentNotifyBinary)
+	return onewatcher.CoreBinary()
 }
 
 // Read is the cold read: what is running, straight from the store, with the

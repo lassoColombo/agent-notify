@@ -9,8 +9,8 @@ import (
 )
 
 type zellijish struct {
-	Binary string            `toml:"binary"`
-	Glyphs map[string]string `toml:"glyphs"`
+	Binary string            `yaml:"binary"`
+	Glyphs map[string]string `yaml:"glyphs"`
 }
 
 // shortRoot is a root a unix socket path still fits under.
@@ -30,7 +30,7 @@ func shortRoot(t *testing.T) string {
 func configured(t *testing.T, body string) string {
 	t.Helper()
 	root := shortRoot(t)
-	if err := os.WriteFile(root+"/config.toml", []byte(body), 0o600); err != nil {
+	if err := os.WriteFile(root+"/config.yaml", []byte(body), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	return root
@@ -38,18 +38,16 @@ func configured(t *testing.T, body string) string {
 
 func TestSettingsDecodeAnIntegrationsOwnTable(t *testing.T) {
 	root := configured(t, `
-[integration.zellij]
-binary = "agent-notify-zellij"
-
-[integration.zellij.settings]
-binary = "/opt/homebrew/bin/zellij"
-
-[integration.zellij.settings.glyphs]
-working = "*"
-"blocked-on-you/permission-prompt" = "?"
-
-[integration.sketchybar.settings]
-colour = "red"
+integrations:
+  zellij:
+    settings:
+      binary: /opt/homebrew/bin/zellij
+      glyphs:
+        working: "*"
+        blocked-on-you/permission-prompt: "?"
+  sketchybar:
+    settings:
+      colour: red
 `)
 
 	var mine zellijish
@@ -72,7 +70,7 @@ colour = "red"
 // name with a typo in it changes nothing and says nothing, and the person
 // concludes the feature does not work.
 func TestAMisspelledSettingIsLoud(t *testing.T) {
-	root := configured(t, "[integration.zellij.settings]\nbinry = \"zellij\"\n")
+	root := configured(t, "integrations:\n  zellij:\n    settings:\n      binry: zellij\n")
 
 	var mine zellijish
 	err := (subscribe.Integration{Name: "zellij", Root: root}).Settings(&mine)

@@ -2,7 +2,7 @@
 // agent state onto pane and tab titles, and it places and focuses sessions.
 // One program because the two halves read the same two variables and drive
 // the same tool; wanting titles without focus is a matter of leaving it out
-// of `[container] order`.
+// of `containers`. Being on PATH is the whole of installing it (D-102).
 package main
 
 import (
@@ -13,7 +13,7 @@ import (
 	"github.com/lassoColombo/agent-notify/tool"
 )
 
-// Name is the config table, the entry in `[container] order`, and the key of
+// Name is the config table, the entry in `containers`, and the key of
 // this program's section of a record.
 const Name = "zellij"
 
@@ -45,14 +45,15 @@ var DefaultGlyphs = map[session.Kernel]string{
 	session.Ended:         "",
 }
 
-// Settings is `[integration.zellij.settings]`; a key not declared here is
+// Settings is `integrations.zellij.settings`; a key not declared here is
 // refused by name.
 type Settings struct {
-	// Zellij is where zellij is, as an absolute path.
-	Zellij string `toml:"zellij"`
+	// Zellij is where zellij is, when it is not on this process's PATH
+	// (D-101).
+	Zellij string `yaml:"zellij"`
 	// Glyphs is the user's table, keyed on `kernel` or `kernel/detail`,
 	// layered over DefaultGlyphs.
-	Glyphs map[string]string `toml:"glyphs"`
+	Glyphs map[string]string `yaml:"glyphs"`
 }
 
 type Resolved struct {
@@ -69,7 +70,7 @@ func Read(given subscribe.Integration) (Resolved, error) {
 	if err := given.Settings(&settings); err != nil {
 		return Resolved{}, err
 	}
-	binary, err := tool.AbsolutePath("[integration."+Name+".settings] zellij", settings.Zellij)
+	binary, err := tool.Find("integrations."+Name+".settings.zellij", "zellij", settings.Zellij)
 	if err != nil {
 		return Resolved{}, err
 	}

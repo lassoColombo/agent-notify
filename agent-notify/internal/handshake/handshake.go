@@ -38,20 +38,21 @@ func ByIntegration(layout paths.Layout, settings config.Config) map[string]sessi
 	return answers
 }
 
-// Ask runs `capabilities` on every runnable integration at once, under one
-// shared timeout. The second map is why one did not answer.
+// Ask runs `capabilities` on every enabled integration at once, under one
+// shared timeout. The second map is why one did not answer, which includes
+// a program that is not on PATH (D-101).
 func Ask(settings config.Config) (map[string]session.Capabilities, map[string]string) {
-	runnable := settings.Runnable()
-	answers := make(map[string]session.Capabilities, len(runnable))
+	enabled := settings.Enabled()
+	answers := make(map[string]session.Capabilities, len(enabled))
 	unanswered := map[string]string{}
 
 	var asking sync.WaitGroup
 	var writing sync.Mutex
-	for _, name := range runnable {
+	for _, name := range enabled {
 		asking.Add(1)
 		go func() {
 			defer asking.Done()
-			answered, err := ask(settings.Integration[name].Binary)
+			answered, err := ask(config.Program(name))
 			writing.Lock()
 			defer writing.Unlock()
 			if err != nil {

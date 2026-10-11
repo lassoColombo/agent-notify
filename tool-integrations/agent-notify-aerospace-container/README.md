@@ -14,8 +14,8 @@ window 34                      session home
 ```
 
 Focusing a pane in a window you cannot see changes nothing on your screen. That
-is the whole reason this program exists, and it is why `[container] order` puts
-this one **first**.
+is the whole reason this program exists, and it is why `containers` puts this
+one **first**.
 
 ---
 
@@ -28,14 +28,14 @@ this one **first**.
 - [Installation](#installation)
   - [Prerequisites](#prerequisites)
   - [Build it](#build-it)
-  - [Register it with core](#register-it-with-core)
+  - [Put it on PATH](#put-it-on-path)
   - [Check it](#check-it)
   - [Prove it moved something](#prove-it-moved-something)
 - [Configuration](#configuration)
   - [Where the configuration lives](#where-the-configuration-lives)
-  - [`[integration.aerospace-container]` — core's half](#integrationaerospace-container--cores-half)
-  - [`[integration.aerospace-container.settings]` — this program's half](#integrationaerospace-containersettings--this-programs-half)
-  - [`[container] order` — your half](#container-order--your-half)
+  - [`integrations.aerospace-container` — core's half](#integrationsaerospace-container--cores-half)
+  - [`integrations.aerospace-container.settings` — this program's half](#integrationsaerospace-containersettings--this-programs-half)
+  - [`containers` — your half](#containers--your-half)
   - [The title template in detail](#the-title-template-in-detail)
   - [Environment variables](#environment-variables)
   - [What is deliberately not configurable](#what-is-deliberately-not-configurable)
@@ -181,7 +181,7 @@ Each one deserves a different next move, and a sentence cannot be switched on:
 | --- | --- |
 | `place-is-gone` | the key matches no window — nothing is showing this session, so the walk stops before an inner container focuses a pane nobody can see |
 | `ambiguous` | several windows could be it and nothing tells them apart; going to one at random is wrong half the time and looks exactly like success |
-| `not-running` | aerospace is not there to be asked, or the configured path does not exist |
+| `not-running` | aerospace is not there to be asked: not on this process's PATH with no `aerospace` setting to say where, or at a configured path that does not exist |
 | `never-placed` | this session has no key at all; core *skips* this layer rather than failing, so the layers inside it still run |
 | `refused` | aerospace was asked, understood, and would not |
 
@@ -206,51 +206,46 @@ speak anyway.
 - **agent-notify core**, built and on your PATH. It lives in this same
   repository, one directory over.
 
-### Build and register it
+### Build it
 
 This is a monorepo: core, the agent-integrations and the tool-integrations are
 one clone. `make install` at the root builds every module into
-`$(go env GOPATH)/bin`, which has to be on your PATH: being there is what lets
-`agent-notify install` find this program by name.
+`$(go env GOPATH)/bin`, which has to be on your PATH: the name
+`agent-notify-aerospace-container` found there is all core knows about this
+program.
 
 ```sh
 git clone git@github.com:lassoColombo/agent-notify.git ~/projects/agent-notify
 cd ~/projects/agent-notify
 make install
-agent-notify install aerospace-container
 ```
 
-`install` writes `conf.d/aerospace-container.toml` beside your `config.toml`,
-with what only this program can know: where its own binary ended up, and where
-aerospace is, looked up now because install runs in your shell and nothing
-that runs later has your PATH.
+If your shell exported a `GOROOT`, unset it for the build — `make` does — so
+that the toolchain `.tool-versions` pins is the one that compiles.
 
-```toml
-[integration.aerospace-container]
-binary = "/Users/you/go/bin/agent-notify-aerospace-container"
+### Put it on PATH
 
-[integration.aerospace-container.settings]
-aerospace = "/opt/homebrew/bin/aerospace"
+That `make install` was the whole of installing it (plan.md D-102). There is
+no `install` verb for this program, `agent-notify install` sets up only the
+agents, and nothing is written to `~/.config/agent-notify/config.yaml` to make
+it run: every `agent-notify-<name>` on PATH runs, and the file need not exist.
+Where aerospace is, this program looks up on PATH at runtime; the `aerospace`
+setting is the override for the one process that was not started from your
+shell (see
+[this program's half](#integrationsaerospace-containersettings--this-programs-half)).
 
-[container]
-order = ["aerospace-container"]
+One thing is yours. If this is your only container, it is the whole of
+`containers` and you need not write one. A window manager is outside whatever
+multiplexer runs inside it, so with zellij too the list has to be written, this
+program **first** — `doctor` says "write `containers`, outermost first" when
+two containers answer `focus` and nothing says which is outside which:
+
+```yaml
+containers: [aerospace-container, zellij]
 ```
 
-One thing is yours. The `[container] order` in that file is the whole order
-only when this is your only container; a window manager is outside whatever
-multiplexer runs inside it, so with zellij too the order goes in `config.toml`,
-which wins, and this program **first**:
-
-```toml
-[container]
-order = ["aerospace-container", "zellij"]
-```
-
-If `aerospace` was not on PATH when you ran install, the line comes out empty
-with a comment where the answer should be, and install exits 1 saying so. Fill
-it in: no window can be focused without it. `install` takes no options and
-exits 2 if you give it one. `agent-notify uninstall aerospace-container`
-removes the drop-in.
+To turn it off without removing the binary, `integrations.aerospace-container.enabled: false`.
+To take it out, delete the binary from PATH.
 
 ### Check it
 
@@ -259,18 +254,25 @@ agent-notify doctor
 ```
 
 ```
-config       ok    2 agent(s), 6 integration(s), keep-ended-sessions 168h0m0s
-integrations ok    reported by pid 86777 at 2026-09-23T20:38:44Z
-             macos-bar              yours to start; core never runs it
+config       ok    2 integration(s) on PATH, 2 enabled, keep-ended-sessions 168h0m0s
+integrations ok    reported by pid 86777 at 2026-10-11T20:38:44Z
+             aerospace-container    run when core needs it
+                                    answers capture-environment, interpret-environment, focus, focused — built against 0.0.0-dev
              zellij                 drawn when something it watches moves
+                                    answers capture-environment, interpret-environment, focus, focused, render — built against 0.0.0-dev
+containers   ok    outermost first: aerospace-container, zellij
 ```
 
-Read that honestly: a container **does not appear** in the `integrations` list
-and never will. That list is the session-watcher's report of the long-lived
-displays it draws with, and a container is not one of them — it is a program
-that gets run and exits. What doctor tells you about this one is that the
-configuration parses and that it is counted among the integrations; the rest is
-checked by using it.
+Read that honestly. The `config` line counts every `agent-notify-<name>` on
+PATH and how many of them are not turned off (D-102). The `integrations` list
+is the session-watcher's report of what each of those said to `capabilities`
+when it was asked, at startup and on `agent-notify watcher reload`; one that
+did not answer is listed as `could not be asked`, with the reason. The
+`containers` line is the order a focus will walk, or what is wrong with it: a
+name in `containers` with no program on PATH, a name in the list whose program
+does not answer `focus`, or two containers and no list. Beyond that, doctor
+knows nothing about this program; whether aerospace can be found, and whether
+a window can, is checked by using it.
 
 The direct checks are these:
 
@@ -279,10 +281,6 @@ agent-notify-aerospace-container capture-environment          # your session nam
 agent-notify focus-session <session>                          # the real thing
 agent-notify focused <session>                                # yes / no / cannot-tell
 ```
-
-A name in `[container] order` with no table behind it, or a table with no
-`binary`, is what `doctor`'s `containers` line reports, and what a focus
-skips: it is almost always a typo in the one place that cannot be typo-checked.
 
 ### Prove it moved something
 
@@ -304,54 +302,71 @@ focused?     yes
 
 ### Where the configuration lives
 
-One file, core's: `~/.config/agent-notify/config.toml`, or
-`$XDG_CONFIG_HOME/agent-notify/config.toml` if you set that, or under
+One file, core's, and it is YAML (plan.md D-103):
+`~/.config/agent-notify/config.yaml`, or
+`$XDG_CONFIG_HOME/agent-notify/config.yaml` if you set that, or under
 `$AGENT_NOTIFY_ROOT` if you set *that*. This program never locates or parses the
-file itself — it asks core's SDK for its own table — so there is no second copy
-of the path rules to disagree with the first. `agent-notify doctor` prints the
-file it resolved to, and so does this program's `install` when it tells you
-where to put what it printed.
+file itself — it asks core's SDK for its own `settings` — so there is no second
+copy of the path rules to disagree with the first. `agent-notify doctor` prints
+the file it resolved to.
 
-There is no file by default, and running agent-notify without one is supported.
-Running *this* without one is not: with no table, nothing turns it on.
+There is no file by default, and running agent-notify without one is
+supported. So is running *this* without one: being on PATH is what turns it on
+(D-102), and the file holds only what you want different.
 
-Three tables matter here, and they are owned by three different parties.
+Three keys matter here, and they are owned by three different parties.
 
-### `[integration.aerospace-container]` — core's half
+### `integrations.aerospace-container` — core's half
 
-Core reads this one. The keys are core's, the same for every integration.
+Core reads this one. The keys are core's, the same for every integration, and
+the entry's name is the program: `aerospace-container` is
+`agent-notify-aerospace-container`, found on PATH. There is no key for where
+the program is; you write names, not paths. An entry whose program is not on
+PATH is a complaint on `doctor`'s `config` line.
 
 | key | type | default | what it does |
 | --- | --- | --- | --- |
-| `binary` | string | none | the program to run. **Absolute**, and install resolves it for you: this is run by the hook and by the session-watcher, and a launchd job's PATH is `/usr/bin:/bin` and nothing else, which is how a container can be perfectly correct and never once be found |
-| `enabled` | bool | `true` | absence means enabled: writing the table at all is the act of asking for the integration. Set it to `false` to keep the table and turn the thing off |
+| `integrations.aerospace-container.enabled` | bool | `true` | absence means enabled: being on PATH is the act of asking for the integration (D-102). Set it to `false` to keep the binary and turn the thing off |
 
-### `[integration.aerospace-container.settings]` — this program's half
+### `integrations.aerospace-container.settings` — this program's half
 
-Core hands this table over verbatim and never reads what is in it. A key nobody
+Core hands this map over verbatim and never reads what is in it. A key nobody
 declared is refused **by name**, because a misspelled setting that changes
 nothing and says nothing is the config bug people give up on.
 
 | key | type | default | what it does |
 | --- | --- | --- | --- |
-| `aerospace` | string | none — **required** | absolute path to the `aerospace` binary. There is no PATH search and no Homebrew-prefix guessing, deliberately: a lookup performed here would be performed in the one context that cannot answer it. A missing value, a relative one, or one that does not `stat` each fail with their own sentence, and `focus` reports `not-running` rather than crashing |
-| `title` | string | `"{ZELLIJ_SESSION_NAME} \| "` | the template for the window-title key. `{VARIABLE}` is filled in from the agent's environment. `""` turns the key off |
+| `integrations.aerospace-container.settings.aerospace` | string | `aerospace` on PATH | where the `aerospace` binary is, when this process's PATH does not say. Unset, it is looked up on PATH at runtime, which is ordinarily yours: this program runs as a descendant of the agent, which you started from a shell. An agent launched from the Dock has no such PATH, and this key is the answer for it. Found neither way — not on PATH and no key, or a key naming a path that does not `stat` — `focus` reports `not-running` and `focused` answers `cannot-tell`, each with a sentence that names this key, rather than crashing |
+| `integrations.aerospace-container.settings.title` | string | `"{ZELLIJ_SESSION_NAME} \| "` | the template for the window-title key. `{VARIABLE}` is filled in from the agent's environment. `""` turns the key off |
 
-It is called `aerospace` rather than `binary` because the table above it has a
-`binary` of its own — this program's — and install prints both together.
-
-### `[container] order` — your half
-
-```toml
-[container]
-order = ["aerospace-container", "zellij"]
+```yaml
+integrations:
+  aerospace-container:
+    settings:
+      aerospace: /opt/homebrew/bin/aerospace   # only when aerospace is not on the process's PATH
+      title: "{ZELLIJ_SESSION_NAME} | "
 ```
 
-Outermost first. This is configuration rather than discovery because nesting is
-not discoverable: zellij inside a window that aerospace manages looks, from
-inside, exactly like zellij on its own. It is the one thing `install` offers and
-never decides, because which shell is outside which is something only the person
-running them knows.
+The lookup is PATH-first since D-101. D-67 had made the key required and
+absolute because a launchd job's PATH is `/usr/bin:/bin`; there has been no
+launchd job since D-87, so the path that was being resolved in your shell is
+the one this process already has. The key is named for the tool, not for the
+program: nothing in this file names a program's path any more.
+
+### `containers` — your half
+
+```yaml
+containers: [aerospace-container, zellij]
+```
+
+Outermost first (D-103). This is configuration rather than discovery because
+nesting is not discoverable: zellij inside a window that aerospace manages looks, from
+inside, exactly like zellij on its own. It is the one thing about containers
+nothing decides for you, because which shell is outside which is something
+only the person running them knows. The one exception is the case with nothing
+to nest: when exactly one enabled integration answers `focus`, an absent list
+is that one (D-101). With two or more and no list, nothing is walked, and
+`doctor`'s `containers` line says to write it.
 
 Core walks that list in order and each step must succeed before the next is
 attempted — focusing a zellij pane in a window on a workspace you are not
@@ -361,9 +376,11 @@ layer is unconfigured still focus the pane.
 
 ### The title template in detail
 
-```toml
-[integration.aerospace-container.settings]
-title = "{ZELLIJ_SESSION_NAME} | "   # the default
+```yaml
+integrations:
+  aerospace-container:
+    settings:
+      title: "{ZELLIJ_SESSION_NAME} | "   # the default
 ```
 
 zellij titles its terminal window `<session> | <active tab>`, so the session
@@ -386,8 +403,8 @@ name in **both** the environment and the window title. zellij does. tmux — whi
 puts neither its session name nor anything else nameable in an agent's
 environment — would need a different key.
 
-```toml
-title = ""    # no multiplexer: the process chain is the only way in, and it is the exact one
+```yaml
+      title: ""    # no multiplexer: the process chain is the only way in, and it is the exact one
 ```
 
 ### Environment variables
@@ -474,9 +491,10 @@ What no test covers is whether a focus actually **moved** anybody. See
   That cost is written into a test rather than into a footnote. The separator is
   what keeps it survivable, and the alternative — refusing to focus anything
   inside a multiplexer — is worse.
-- **`doctor` cannot say anything useful about a container** beyond that its
-  table parses, because a container never connects to the session-watcher. A
-  fuller `doctor` is also M18.
+- **`doctor` cannot say whether a window could be found.** It reports that
+  this program was asked and what it answered, and that `containers`
+  is consistent; whether aerospace is on PATH, and whether any window carries
+  the key, it does not try. A fuller `doctor` is also M18.
 - **Off macOS there is nothing to place.** This program has no platform code
   of its own since D-93 — the process walk is core's — so it builds and its
   pure half tests everywhere, and `aerospace` is simply not there to ask. A

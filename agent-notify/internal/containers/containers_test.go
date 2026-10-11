@@ -3,8 +3,10 @@ package containers_test
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -15,18 +17,21 @@ import (
 	"github.com/lassoColombo/agent-notify/session"
 )
 
-// fake writes a program that answers whatever this test needs it to.
+// fake writes a program that answers whatever this test needs it to, on PATH
+// under the name core will look for (D-101).
 //
 // A shell script rather than a Go binary because what is under test is the
 // contract with an arbitrary program — one JSON object on stdout, exit zero —
 // and a script is the most honest stand-in for "somebody else's code".
 func fake(t *testing.T, name, body string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), name)
+	dir := t.TempDir()
+	path := filepath.Join(dir, config.Program(name))
 	script := "#!/bin/sh\n" + body + "\n"
 	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
 	return path
 }
 
@@ -52,8 +57,9 @@ func settingsWith(
 	order []string, integrations map[string]config.Integration,
 ) (config.Config, map[string]session.Capabilities) {
 	settings := config.Defaults()
-	settings.Container.Order = order
-	settings.Integration = integrations
+	settings.Containers = order
+	settings.Integrations = integrations
+	settings.Installed = slices.Sorted(maps.Keys(integrations))
 
 	methods := make(map[string]session.Capabilities, len(integrations))
 	for name := range integrations {
@@ -84,9 +90,9 @@ func TestNothingConfiguredIsItsOwnAnswer(t *testing.T) {
 // TestNeverPlacedIsNotTheSameAsNothingConfigured is the distinction §A11.7 says
 // feels identical and is not.
 func TestNeverPlacedIsNotTheSameAsNothingConfigured(t *testing.T) {
-	binary := answers(t, "outer", map[string]string{"focus": `{"ok":true}`})
+	answers(t, "outer", map[string]string{"focus": `{"ok":true}`})
 	settings, methods := settingsWith([]string{"outer"}, map[string]config.Integration{
-		"outer": {Binary: binary},
+		"outer": {},
 	})
 
 	_, outcome := containers.FocusSession(settings, methods, placed(nil))
@@ -99,13 +105,13 @@ func TestNeverPlacedIsNotTheSameAsNothingConfigured(t *testing.T) {
 // meaningless without the outer, so a failure ends the walk rather than being
 // stepped over.
 func TestFocusWalksOutermostFirstAndStops(t *testing.T) {
-	outer := answers(t, "outer", map[string]string{
+	answers(t, "outer", map[string]string{
 		"focus": `{"ok":false,"problem":"not-running","detail":"aerospace is not there"}`})
-	inner := fake(t, "inner", "echo 'the inner one was run' >&2; echo '{\"ok\":true}'")
+	fake(t, "inner", "echo 'the inner one was run' >&2; echo '{\"ok\":true}'")
 
 	settings, methods := settingsWith([]string{"outer", "inner"}, map[string]config.Integration{
-		"outer": {Binary: outer},
-		"inner": {Binary: inner},
+		"outer": {},
+		"inner": {},
 	})
 	record := placed(map[string]json.RawMessage{
 		"outer": json.RawMessage(`{"window":3}`),
@@ -124,12 +130,12 @@ func TestFocusWalksOutermostFirstAndStops(t *testing.T) {
 // TestASkippedLayerIsNotAFailedLayer is the refinement that makes focus usable
 // at all: partial placement is the ordinary case.
 func TestASkippedLayerIsNotAFailedLayer(t *testing.T) {
-	outer := answers(t, "outer", map[string]string{"focus": `{"ok":true}`})
-	inner := answers(t, "inner", map[string]string{"focus": `{"ok":true}`})
+	answers(t, "outer", map[string]string{"focus": `{"ok":true}`})
+	answers(t, "inner", map[string]string{"focus": `{"ok":true}`})
 
 	settings, methods := settingsWith([]string{"outer", "inner"}, map[string]config.Integration{
-		"outer": {Binary: outer},
-		"inner": {Binary: inner},
+		"outer": {},
+		"inner": {},
 	})
 	// Only the inner one ever saw this session — you started zellij inside a
 	// terminal window no window manager was recording.
@@ -153,13 +159,13 @@ func TestASkippedLayerIsNotAFailedLayer(t *testing.T) {
 // would stop the walk on the outer layer and never focus the pane, which is
 // there and would have worked (D-45).
 func TestALayerThatSaysItCannotPlaceThisOneIsSkipped(t *testing.T) {
-	outer := answers(t, "outer", map[string]string{
+	answers(t, "outer", map[string]string{
 		"focus": `{"ok":false,"problem":"never-placed","detail":"no window is showing this session"}`})
-	inner := answers(t, "inner", map[string]string{"focus": `{"ok":true}`})
+	answers(t, "inner", map[string]string{"focus": `{"ok":true}`})
 
 	settings, methods := settingsWith([]string{"outer", "inner"}, map[string]config.Integration{
-		"outer": {Binary: outer},
-		"inner": {Binary: inner},
+		"outer": {},
+		"inner": {},
 	})
 	record := placed(map[string]json.RawMessage{
 		"outer": json.RawMessage(`{"title":"home | "}`),
@@ -179,13 +185,13 @@ func TestALayerThatSaysItCannotPlaceThisOneIsSkipped(t *testing.T) {
 // that can see several places and cannot choose must not let the walk carry on
 // as if it had arrived (§A11.3).
 func TestAmbiguityStopsTheWalk(t *testing.T) {
-	outer := answers(t, "outer", map[string]string{
+	answers(t, "outer", map[string]string{
 		"focus": `{"ok":false,"problem":"ambiguous","detail":"3 windows could be this session"}`})
-	inner := fake(t, "inner", "echo 'the inner one was run' >&2; echo '{\"ok\":true}'")
+	fake(t, "inner", "echo 'the inner one was run' >&2; echo '{\"ok\":true}'")
 
 	settings, methods := settingsWith([]string{"outer", "inner"}, map[string]config.Integration{
-		"outer": {Binary: outer},
-		"inner": {Binary: inner},
+		"outer": {},
+		"inner": {},
 	})
 	record := placed(map[string]json.RawMessage{
 		"outer": json.RawMessage(`{"title":"home | "}`),
@@ -201,27 +207,34 @@ func TestAmbiguityStopsTheWalk(t *testing.T) {
 	}
 }
 
-// TestAContainerThatIsOnlyConfiguration is §A11.4: four lines in a file, and
-// not a degraded form of anything.
-// A container is always a program (D-57). A table with no binary used to mean
-// "capture these variables and run this command"; now it means nothing can be
-// asked, and saying so is the whole of what is left to test.
-func TestAContainerWithNoBinaryIsRefusedAndNamed(t *testing.T) {
+// TestAContainerThatIsNotOnPATHIsUnreachable: a container is always a program
+// (D-57), and the table is the ask (D-101). One nobody built is not a
+// configuration error, it is a program that could not be run.
+func TestAContainerThatIsNotOnPATHIsUnreachable(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
 	settings, methods := settingsWith([]string{"tmux"}, map[string]config.Integration{
 		"tmux": {},
 	})
-	configured, problems := containers.Configured(settings, methods)
-	if len(configured) != 0 {
-		t.Errorf("Configured = %v, want nothing runnable", configured)
-	}
-	if len(problems) != 1 || !strings.Contains(problems[0].Error(), "tmux") {
-		t.Fatalf("problems = %v, want one naming tmux", problems)
-	}
-
 	record := placed(map[string]json.RawMessage{"tmux": json.RawMessage(`{"TMUX_PANE":"%7"}`)})
 	_, outcome := containers.FocusSession(settings, methods, record)
-	if outcome.OK || outcome.Problem != container.NoContainer {
-		t.Errorf("outcome = %+v, want no-container-configured", outcome)
+	if outcome.OK || outcome.Problem != container.Unreachable {
+		t.Errorf("outcome = %+v, want container-unreachable", outcome)
+	}
+}
+
+// TestOneContainerNeedsNoOrder is D-101: with nothing to nest, an absent
+// `containers` is the one container; with two, it has to be written.
+func TestOneContainerNeedsNoOrder(t *testing.T) {
+	settings, methods := settingsWith(nil, map[string]config.Integration{"only": {}})
+	configured, problems := containers.Configured(settings, methods)
+	if len(problems) != 0 || len(configured) != 1 || configured[0].Name != "only" {
+		t.Errorf("configured = %v, problems = %v; want the one container and no complaint", configured, problems)
+	}
+
+	settings, methods = settingsWith(nil, map[string]config.Integration{"outer": {}, "inner": {}})
+	configured, problems = containers.Configured(settings, methods)
+	if len(configured) != 0 || len(problems) != 1 || !strings.Contains(problems[0].Error(), "`containers`") {
+		t.Errorf("configured = %v, problems = %v; want nothing walked and one complaint asking for the order", configured, problems)
 	}
 }
 
@@ -250,8 +263,8 @@ func TestAContainerThatHangsIsGivenUpOn(t *testing.T) {
 // how a program failed. Crashed, deleted, hung and babbling are one thing.
 func TestAContainerThatAnswersNonsenseIsUnreachable(t *testing.T) {
 	for _, body := range []string{"echo not json", "exit 3", "echo '{}' ; exit 9"} {
-		binary := fake(t, "odd", body)
-		settings, methods := settingsWith([]string{"odd"}, map[string]config.Integration{"odd": {Binary: binary}})
+		fake(t, "odd", body)
+		settings, methods := settingsWith([]string{"odd"}, map[string]config.Integration{"odd": {}})
 		record := placed(map[string]json.RawMessage{"odd": json.RawMessage(`{"pane":1}`)})
 
 		if _, outcome := containers.FocusSession(settings, methods, record); outcome.Problem != container.Unreachable {
@@ -262,8 +275,8 @@ func TestAContainerThatAnswersNonsenseIsUnreachable(t *testing.T) {
 
 // TestAContainerThatSaysNoWithoutSayingWhyHasStillSaidNo.
 func TestARefusalWithNoReasonIsStillARefusal(t *testing.T) {
-	binary := answers(t, "shy", map[string]string{"focus": `{"ok":false}`})
-	settings, methods := settingsWith([]string{"shy"}, map[string]config.Integration{"shy": {Binary: binary}})
+	answers(t, "shy", map[string]string{"focus": `{"ok":false}`})
+	settings, methods := settingsWith([]string{"shy"}, map[string]config.Integration{"shy": {}})
 	record := placed(map[string]json.RawMessage{"shy": json.RawMessage(`{"pane":1}`)})
 
 	if _, outcome := containers.FocusSession(settings, methods, record); outcome.Problem != container.Refused {
@@ -295,9 +308,11 @@ func TestInFrontOnlyIfEveryLayerAgrees(t *testing.T) {
 		{yes, dunno, container.CannotTell, "a layer that cannot say turns a yes into an unknown"},
 		{dunno, dunno, container.CannotTell, "nobody knows"},
 	} {
+		want.outer(t, "outer")
+		want.inner(t, "inner")
 		settings, methods := settingsWith([]string{"outer", "inner"}, map[string]config.Integration{
-			"outer": {Binary: want.outer(t, "outer")},
-			"inner": {Binary: want.inner(t, "inner")},
+			"outer": {},
+			"inner": {},
 		})
 		record := placed(map[string]json.RawMessage{
 			"outer": json.RawMessage(`{"window":3}`),
@@ -312,10 +327,12 @@ func TestInFrontOnlyIfEveryLayerAgrees(t *testing.T) {
 // TestAnUnplacedLayerCannotSay: no coordinates is not "no", because a wrong no
 // silences a notification that should have fired.
 func TestAnUnplacedLayerCannotSay(t *testing.T) {
-	binary := answers(t, "inner", map[string]string{"focused": `{"answer":"yes"}`})
+	// One program, under both names: the outer one is unplaced anyway.
+	answers(t, "inner", map[string]string{"focused": `{"answer":"yes"}`})
+	answers(t, "outer", map[string]string{"focused": `{"answer":"yes"}`})
 	settings, methods := settingsWith([]string{"outer", "inner"}, map[string]config.Integration{
-		"outer": {Binary: binary},
-		"inner": {Binary: binary},
+		"outer": {},
+		"inner": {},
 	})
 	record := placed(map[string]json.RawMessage{"inner": json.RawMessage(`{"pane":7}`)})
 
@@ -329,7 +346,7 @@ func TestAnUnplacedLayerCannotSay(t *testing.T) {
 // has never heard of (R10).
 func TestAnOrderThatNamesNothingIsReported(t *testing.T) {
 	settings, methods := settingsWith([]string{"zelij-container"}, map[string]config.Integration{
-		"zellij-container": {Binary: "/bin/true"},
+		"zellij-container": {},
 	})
 	configured, problems := containers.Configured(settings, methods)
 	if len(configured) != 0 {
@@ -344,7 +361,7 @@ func TestAnOrderThatNamesNothingIsReported(t *testing.T) {
 	if !strings.Contains(problems[0].Error(), "zelij-container") {
 		t.Errorf("problems = %v, want the first to name the misspelled entry", problems)
 	}
-	if !strings.Contains(problems[1].Error(), "[container] order") {
+	if !strings.Contains(problems[1].Error(), "`containers`") {
 		t.Errorf("problems = %v, want the second to say it is in nobody's order", problems)
 	}
 }
@@ -352,7 +369,7 @@ func TestAnOrderThatNamesNothingIsReported(t *testing.T) {
 func TestADisabledContainerIsSkippedSilently(t *testing.T) {
 	off := false
 	settings, methods := settingsWith([]string{"zellij-container"}, map[string]config.Integration{
-		"zellij-container": {Binary: "/bin/true", Enabled: &off},
+		"zellij-container": {Enabled: &off},
 	})
 	configured, problems := containers.Configured(settings, methods)
 	if len(configured) != 0 || len(problems) != 0 {

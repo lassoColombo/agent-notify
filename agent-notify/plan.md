@@ -1402,14 +1402,14 @@ to re-scan everything rather than to trust anything it computed before.
 a subscriber that loses its connection may do the same — it is the same library
 call, and the lock below makes the race harmless.
 
-**[decided 2026-09-17 — D-33] Which binary it spawns cannot be "this one".** The
-hook library is linked into programs we did not write: inside
-agent-notify-claude, `os.Executable()` is agent-notify-claude, and
-`agent-notify-claude watcher run` is not a thing. So the binary is looked for in
-this order — what `agent-notify-binary` names in the configuration, this
-executable if it is actually called agent-notify, then PATH. PATH is last and
-not trusted much, because a hook's PATH is not your shell's PATH, which is
-exactly why the configuration key exists. **Not finding it is not fatal to
+**[decided 2026-09-17 — D-33; amended 2026-10-11 — D-101] Which binary it
+spawns cannot be "this one".** The hook library is linked into programs we did
+not write: inside agent-notify-claude, `os.Executable()` is agent-notify-claude,
+and `agent-notify-claude watcher run` is not a thing. So it is this executable
+if it is actually called agent-notify, else `agent-notify` on PATH. D-33 put a
+configured path before both because a launchd job's PATH is not yours; there is
+no launchd job since D-87 and no configured path since D-101.
+**Not finding it is not fatal to
 anything**: the record is already written and `list` still applies liveness as
 it reads, so the system degrades to precisely what it was before there was a
 session-watcher at all. Crash recovery therefore works
@@ -2126,40 +2126,33 @@ or only "this session changed, re-read".
 
 ## A14. Configuration
 
-**[decided]** TOML, at `~/.config/agent-notify/config.toml`.
+**[decided 2026-09-17; YAML since 2026-10-11 — D-103]** YAML, at
+`~/.config/agent-notify/config.yaml`.
 
-```toml
-keep-ended-sessions = "168h"   # seven days, ParseDuration's spelling (D-78)
-history-messages    = 20       # per session, by count; 0 keeps none
-history-changes     = 100
+```yaml
+keep-ended-sessions: 168h   # seven days, ParseDuration's spelling (D-78)
+history-messages: 20        # per session, by count; 0 keeps none
+history-changes: 100
 
-[agent.claude]
-binary = "claude"              # matched against the process ancestry (§A8.4)
+integrations:               # every agent-notify-<name> on PATH runs (D-102);
+  zellij:                   # a name appears here only to turn it off or tune it
+    settings:
+      glyphs: { working: "*" }    # opaque to core, handed through
+  macos-notifier:
+    enabled: false
 
-[integration.zellij-display]   # one tool, two roles, two programs (D-37)
-enabled             = true     # absent means true; writing the table is the ask
-binary              = "agent-notify-zellij-display"
-capture-environment = true     # the hook runs it; WHAT it reads is its own (D-57)
-settings = { glyphs = { working = "*" } }   # opaque to core, handed through
-
-[integration.zellij-container] # installed separately, and optional
-binary              = "agent-notify-zellij-container"
-capture-environment = true     # each integration captures for itself, so either
-                               # can be installed without the other
-
-[container]
-order = ["aerospace-container", "zellij-container"]
+containers: [aerospace-container, zellij]   # outermost first; with one
+                                            # container, that one (D-101)
 ```
 
-**[decided 2026-09-29 — D-85] Beside the file is `conf.d/`, one file per
-integration, written by that integration's `install` and read before the
-user's file, which wins.** A drop-in holds what only the program can know: the
-absolute path of its binary and of the tool it drives, an agent's process
-name. **[amended 2026-10-07 — D-87]** It used to hold two more — the signing
-identity a bundle carried and the launch agent that kept a display alive — and
-there is no longer a bundle or a launch agent anywhere in this repository to
-describe. Nothing in `conf.d` is the user's to maintain and nothing in
-`config.toml` is a program's to write.
+**[decided 2026-09-29 — D-85; reversed 2026-10-11 — D-101] This is the only
+file.** D-85 put a `conf.d/` beside it, one drop-in per integration holding
+the absolute paths its `install` had resolved and the agent's process name;
+D-101 found that every one of those was either PATH's job or a constant of the
+program that needed it, and removed the layer. No program writes any
+configuration. **[amended 2026-10-11 — D-102]** Every `agent-notify-<name>` on
+PATH runs; `integrations.<name>.enabled: false` turns one off; an integration
+finds its own tool on PATH unless its settings say where.
 
 **Everything in `config.toml` is the user's to write, and nothing in it is an
 integration's.** **[decided 2026-09-19 — D-57; extended from the file's contents
@@ -2171,10 +2164,10 @@ answer — their agents, their tools, their retention, their glyphs. A key whose
 correct value is a fact about a program is that program's business, and putting
 it here only creates a second copy that can disagree with the first, silently.
 
-`capture-environment` is the one survivor of that test and it survives narrowly:
-the hook has no socket and cannot ask (D-39), so it must read *somewhere* whether
-to run this binary. One boolean, written by an `install`, whose wrong value fails
-coarsely — not a list of strings whose wrong value fails by painting nothing.
+`capture-environment` was the one survivor of that test, as a boolean an
+`install` wrote; **[amended 2026-10-11 — D-101]** it is declared in the
+handshake now, like every other method, and the hook asks only those who
+declared it.
 
 Rules that shape it:
 
@@ -5180,6 +5173,98 @@ of this section is that it prevents re-litigating.
     record's lock; and the write that replaced it woke the loop, which hands
     over a newer world next. The watcher's tests pass three times over and
     under the race detector.
+
+- **D-101** (2026-10-11) — **No program writes any configuration. A table is
+  the ask, PATH is the directory, and a tool is on PATH or you say where.**
+  *Reverses* the drop-in half of D-85 (`conf.d/` is gone, and with it
+  `agent-notify-binary`, `[agent.<name>]` and `[integration.<name>] binary`);
+  *amends* D-67 (a tool's path is looked up on PATH at runtime, and the
+  settings key is the override rather than the only answer); *amends* D-33
+  (there is no configured path to try first); *amends* §A14 (one file);
+  *restates* D-66 in its strongest form. Keeps D-57 and R10. `[container]
+  order` stays the user's (D-85), and defaults to the one container when there
+  is one.
+
+  - **What was wrong.** The configuration carried four facts that were the
+    same fact — an absolute path, resolved in a shell because the runtime
+    might have no PATH — and a fifth, the agent's process name, that is a
+    constant of the program writing the record. To carry them there were seven
+    `install` verbs, seven `uninstall` verbs, a second configuration layer
+    read under the first, a `WriteDropIn` in two SDKs, a three-way lookup for
+    core's own binary and a `doctor` line for a program installed and not
+    filed. Two of the drop-ins also wrote `[container] order`, a line D-85
+    had said was the user's, because the snippet `install` used to print was
+    turned into a file without being re-read. The layer was not wrong; it was
+    out of proportion to the one need it served, and every redesign before
+    this one moved the paths (printed, pasted, filed) instead of asking
+    whether they had to be written at all.
+  - **The reason for the paths is gone.** D-67 and D-33 distrusted PATH
+    because of launchd, whose PATH is `/usr/bin:/bin`. There is no launchd job
+    anywhere here since D-87. Every process now descends from a hook, which
+    descends from the agent, which the user started from a shell, so the
+    runtime PATH is the user's PATH. The hole that remains is an agent
+    started from the Dock, and for that the answer is the settings key and a
+    message that names it — the form D-67 itself called acceptable.
+  - **A table is the ask.** `[integration.zellij]` in `config.toml` means
+    "run `agent-notify-zellij`, found on PATH"; a name that resolves to
+    nothing is in the session-watcher's report and in `doctor`. What you
+    write is what runs, and you write names, not paths. Nothing is enabled
+    by being installed, so `doctor` no longer looks at PATH for programs you
+    did not mention.
+  - **The agent's process name travels with the hook.** `hook.Main` takes it
+    beside the usage string; `agent-notify-claude` says `"claude"`. There
+    was never a file that could know this better than the program that
+    already did.
+  - **`capture-environment` is declared like every other method.** The
+    picker used to be kept out of the hook by having no `binary`; with no
+    `binary` field the gate is the handshake, which is where §A10.3 said
+    capabilities live. An integration lists `capture-environment` when it
+    reads something, and the hook asks only those.
+  - **`install` is what cannot be discovered: other programs' files.**
+    `agent-notify install` runs `agent-notify-<name> install` for every
+    program on PATH that answers the verb — the agents, which write the hook
+    into their settings file. A tool-integration has no install verb at all.
+    `uninstall` mirrors it and removes nothing of its own, because nothing
+    was filed.
+  - **The one trade.** A tool missing from the runtime PATH is a line the
+    user writes instead of a path `install` resolved. Everything else is
+    deletion.
+
+- **D-102** (2026-10-11) — **What is on PATH is what runs. The file holds
+  opinions and nothing else.** *Amends* D-101's "a table is the ask" and
+  D-66's "writing the table is the ask", two hours old and one day old.
+  - **What was wrong.** D-101 made `[integration.zellij]` the way to say
+    "run agent-notify-zellij", and a fresh install was four headings with
+    nothing under them. A file that says nothing four times is not the file
+    D-101 was reaching for.
+  - **The set of integrations is every `agent-notify-<name>` on PATH**, read
+    when the configuration is read (`onpath.Integrations`, which completion
+    already used). `integrations.<name>.enabled: false` takes one out; a
+    name there that is not on PATH is a complaint. A fresh install is `make
+    install`, `agent-notify install`, done, and `config.yaml` need not exist.
+  - **What it costs** is one `ReadDir` per PATH entry per read of the
+    configuration — per hook and per watcher start, a few hundred
+    microseconds — which is less than the fork the hook does next.
+
+- **D-103** (2026-10-11) — **The configuration is YAML, read by core alone.**
+  *Amends* §A14 ("[decided] TOML", 2026-09-17). *Restates* §A10.4: an
+  integration never locates, reads or parses the file; it asks core, which
+  loads the whole file into one struct and hands each integration its own
+  `settings` through `subscribe.Integration.Settings`.
+  - **Why YAML.** The file is now nested opinions — a setting under an
+    integration under `integrations` — and TOML's `[integrations.x.settings]`
+    headings read as four files pasted together, which is exactly what they
+    had been. YAML reads as one document.
+  - **The keys.** `keep-ended-sessions`, `history-messages`,
+    `history-changes`; `integrations.<name>.enabled` and
+    `integrations.<name>.settings`; `containers`, a list outermost first,
+    which is the whole of what `[container] order` was.
+  - **Strictness is kept**: an unknown key is named, a bad value falls back
+    alone, a file that does not parse is refused whole with defaults (§A14).
+    `session.Duration` and every integration's settings decode through the
+    same text spelling as before.
+  - **go-toml leaves core.** codex's own `config.toml` is still TOML and
+    codex's integration still reads it; that is codex's file, not ours.
 
 **The payload discussion of 2026-09-17 is now ratified**
  in D-10 through D-18.

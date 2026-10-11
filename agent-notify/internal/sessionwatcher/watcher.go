@@ -55,7 +55,7 @@ type Watcher struct {
 	// startup and on reload; unanswered is why one did not say.
 	answers    map[string]session.Capabilities
 	unanswered map[string]string
-	// containers is [container] order resolved against those answers, which
+	// containers is `containers` resolved against those answers, which
 	// is the one piece of configuration the deriving goroutine reads.
 	containers []containers.Container
 
@@ -267,7 +267,7 @@ func (w *Watcher) askWhatEachIntegrationAnswers() {
 	settings := w.opened.Settings
 	answers, unanswered := handshake.Ask(settings)
 
-	for _, name := range settings.Runnable() {
+	for _, name := range settings.Enabled() {
 		if problem, failed := unanswered[name]; failed {
 			w.logger.Warn("an integration did not say what it answers",
 				"integration", name, "problem", problem,
@@ -291,7 +291,7 @@ func (w *Watcher) writeReport() {
 	handshake.Write(w.opened.Layout, w.opened.Settings, answers, unanswered)
 }
 
-// resolveContainers reads [container] order against what each integration
+// resolveContainers reads `containers` against what each integration
 // answered, once per ask, so the deriving goroutine never touches Settings.
 func (w *Watcher) resolveContainers() {
 	w.mu.Lock()

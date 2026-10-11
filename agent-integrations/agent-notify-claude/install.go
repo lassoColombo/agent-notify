@@ -9,13 +9,11 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-
-	"github.com/lassoColombo/agent-notify/hook"
 )
 
 // install writes this program into Claude's own settings.json, which is how a
-// hook comes to exist at all, and files the `[agent.claude]` table core needs
-// to recognise Claude's process, in a drop-in of its own (D-85).
+// hook comes to exist at all, and nothing else: agent-notify's own
+// configuration is yours and no program writes it (D-101).
 //
 // It is idempotent and it is conservative: it adds what is missing, updates a
 // stale path to this program, and touches nothing else. A person's settings
@@ -54,7 +52,6 @@ func install(arguments []string) int {
 
 	if *print {
 		fmt.Println(string(rendered))
-		fmt.Print(agentTable)
 		return 0
 	}
 	if len(changes) == 0 {
@@ -69,21 +66,11 @@ func install(arguments []string) int {
 		}
 		fmt.Printf("wrote %s\n", *settingsPath)
 	}
-	written, err := hook.WriteDropIn(AgentName, agentTable)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "agent-notify-claude install: %v\n", err)
-		return 1
-	}
-	fmt.Printf("wrote %s\n", written)
 	return 0
 }
 
-// agentTable is what core needs to recognise Claude's process in a hook's
-// ancestry (§A8.4). The name is Claude's, so it is this program's to file.
-const agentTable = "# Written by `agent-notify-claude install`.\n[agent." + AgentName + "]\nbinary = \"claude\"\n"
-
-// uninstall takes this program out of every hook it was in, and the table
-// away. Everything else in the settings file is kept exactly as it was.
+// uninstall takes this program out of every hook it was in. Everything else
+// in the settings file is kept exactly as it was.
 func uninstall(arguments []string) int {
 	flags := flag.NewFlagSet("uninstall", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
@@ -115,11 +102,6 @@ func uninstall(arguments []string) int {
 	} else {
 		fmt.Printf("not in %s\n", *settingsPath)
 	}
-	if err := hook.RemoveDropIn(AgentName); err != nil {
-		fmt.Fprintf(os.Stderr, "agent-notify-claude uninstall: %v\n", err)
-		return 1
-	}
-	fmt.Println("removed the [agent." + AgentName + "] table")
 	return 0
 }
 

@@ -12,6 +12,8 @@ func main() {
 		"agent-notify-codex reads one hook payload on stdin.\n"+
 			"  agent-notify-codex install [--print] [--config PATH]\n"+
 			"  agent-notify-codex uninstall [--config PATH]\n",
+		// The process the agent runs under, for the ancestry walk (§A8.4).
+		"codex",
 		map[string]func([]string) int{"install": install, "uninstall": uninstall},
 		func(payload Payload) (session.Report, bool) {
 			return Translate(payload,

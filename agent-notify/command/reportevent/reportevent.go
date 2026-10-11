@@ -51,7 +51,8 @@ exactly the same function.`,
 		},
 	}
 	flags := command.Flags()
-	flags.StringVar(&reported.agent, "agent", "", "the agent this session belongs to, as configured")
+	flags.StringVar(&reported.agent, "agent", "", "the agent this session belongs to")
+	flags.StringVar(&reported.process, "process", "", "the name the agent runs under; the agent when absent")
 	flags.StringVar(&reported.session, "session", "", "the agent's own id for the session")
 	flags.StringVar(&reported.event, "event", "", "one of the nine events (§A5.7)")
 	flags.StringVar(&reported.detail, "detail", "", "the agent's refinement of the state")
@@ -67,6 +68,7 @@ exactly the same function.`,
 // in the wrong order.
 type reportedEvent struct {
 	agent     string
+	process   string
 	session   string
 	event     string
 	detail    string
@@ -83,7 +85,10 @@ func reportEvent(reported reportedEvent) int {
 		return 0
 	}
 
-	hook.Record(report)
+	if reported.process == "" {
+		reported.process = reported.agent
+	}
+	hook.Record(report, reported.process)
 	return 0
 }
 

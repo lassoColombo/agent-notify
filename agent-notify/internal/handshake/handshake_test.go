@@ -43,10 +43,7 @@ func TestWithNoReportItAsksRatherThanSayingThereIsNoContainer(t *testing.T) {
 	if err := os.WriteFile(placer, []byte(script), 0o700); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	table := fmt.Sprintf("[integration.placer]\nbinary = %q\n", placer)
-	if err := os.WriteFile(filepath.Join(root, "config.toml"), []byte(table), 0o600); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
+	t.Setenv("PATH", root+":/usr/bin:/bin")
 
 	t.Setenv(paths.TheVariableThatNamesTheRoot, root)
 	layout, err := paths.FromEnvironment()

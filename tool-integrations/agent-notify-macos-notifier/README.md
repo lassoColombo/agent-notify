@@ -29,16 +29,16 @@
   - [Prerequisites](#prerequisites)
   - [1. Install alerter](#1-install-alerter)
   - [2. Clone the monorepo and build](#2-clone-the-monorepo-and-build)
-  - [3. Run `install`](#3-run-install)
+  - [3. Nothing: it is on PATH](#3-nothing-it-is-on-path)
   - [4. Check it](#4-check-it)
   - [Upgrading, and uninstalling](#upgrading-and-uninstalling)
 - [Configuration](#configuration)
   - [Where the file is](#where-the-file-is)
-  - [`[integration.macos-notifier]` — core's half](#integrationmacos-notifier--cores-half)
-  - [`[…settings]` — this display's half](#settings--this-displays-half)
+  - [`integrations.macos-notifier` — core's half](#integrationsmacos-notifier--cores-half)
+  - [`settings` — this display's half](#settings--this-displays-half)
   - [`sound`](#sound)
-  - [`[…settings.preview]`](#settingspreview)
-  - [`[…settings.colors]`](#settingscolors)
+  - [`preview`](#preview)
+  - [`colors`](#colors)
   - [`alerter`](#alerter)
   - [Environment](#environment)
 - [Commands](#commands)
@@ -128,7 +128,7 @@ bounded at thirty seconds. Where a session lives — which window, which multipl
 pane — is the containers' business, and anything that went and looked would be a second
 implementation of it, wrong in its own way.
 
-That is also why `install` writes no `capture-environment` line: a notification does not
+That is also why its handshake declares no `capture-environment`: a notification does not
 care where a session lives, only what it is doing.
 
 ### The only macOS display there is
@@ -187,46 +187,39 @@ cd ~/projects/agent-notify
 make install                        # or: make install GOBIN=/opt/homebrew/bin
 ```
 
-### 3. Run `install`
+### 3. Nothing: it is on PATH
 
-```sh
-agent-notify install macos-notifier
-# or, equivalently, the program by its own name:
-agent-notify-macos-notifier install
-```
+That was the whole of installing it. **What is on PATH is what runs** (D-102): core reads
+PATH for every `agent-notify-<name>` when it reads its configuration, and
+`agent-notify-macos-notifier` being there is what turns it on. There is no table to write,
+no key to set, and `~/.config/agent-notify/config.yaml` need not exist. `agent-notify
+watcher reload` if you want it picked up without waiting.
 
-One thing happens: the table is filed in `conf.d/macos-notifier.toml` beside your
-`config.toml`, which is never written. It carries this program's absolute path and alerter's,
-because the session-watcher runs the first and the first runs the second, and neither has
-your shell's PATH (D-67).
+Nothing here names a path. The session-watcher runs this program and this program runs
+alerter, and both are found on PATH — the one every process here inherits from the shell
+the agent was started in. The one exception is an agent launched from the Dock, and for
+that there is the [`alerter`](#alerter) key.
 
-```toml
-[integration.macos-notifier]
-binary = "/opt/homebrew/bin/agent-notify-macos-notifier"
-
-[integration.macos-notifier.settings]
-alerter = "/opt/homebrew/bin/alerter"
-```
-
-`enabled` defaults to true and the table being there is what turns it on, so there is nothing
-left to do. `agent-notify watcher reload` if you want it picked up without waiting.
-
-**`binary` means "core may run this"**, and for as long as this program posted its own
-notifications it could not be there: a tap is delivered to the process that posted the
-banner, so there had to be a process, and launchd had to keep it. alerter is that process
-now.
+For as long as this program posted its own notifications it could not be run by core at
+all: a tap is delivered to the process that posted the banner, so there had to be a process,
+and launchd had to keep it. alerter is that process now.
 
 ### 4. Check it
 
 ```console
 $ agent-notify doctor
 ...
+config       ok    3 integration(s) on PATH, 3 enabled, keep-ended-sessions 168h0m0s
+...
 integrations ok    reported by pid 1670 at 2026-10-07T21:09:19Z
              macos-notifier    drawn when something it watches moves
                                     answers render — built against 0.0.0-dev
 ```
 
-That line is the handshake working. Then the program's own:
+The `config` line counts this program among what PATH holds, and the `integrations` line
+is the handshake working. A program that is not on the session-watcher's PATH is not on
+that list at all, and `make install` says so when it puts the binaries somewhere PATH does
+not reach. Then the program's own:
 
 ```console
 $ agent-notify-macos-notifier check
@@ -253,59 +246,74 @@ That is the same subscription this display makes, printed.
 make install                     # at the root, and that is the whole upgrade
 ```
 
-There is no second copy anywhere, so nothing goes stale and `install` does not have to be
-re-run — unless alerter moved, which is the one thing the table remembers about your machine.
+There is no second copy anywhere and nothing filed about your machine, so nothing goes
+stale: the program is looked up on PATH every time the configuration is read.
 
-`agent-notify uninstall macos-notifier` removes the drop-in. Nothing else exists to
-remove.
+To uninstall, delete the binary from `$(go env GOPATH)/bin`. To keep it and stop it
+running, write this in `~/.config/agent-notify/config.yaml`:
+
+```yaml
+integrations:
+  macos-notifier:
+    enabled: false
+```
+
+Nothing else exists to remove.
 
 ## Configuration
 
 ### Where the file is
 
-`~/.config/agent-notify/config.toml`, or `$XDG_CONFIG_HOME/agent-notify/config.toml`, or
-`$AGENT_NOTIFY_ROOT/config.toml` when that is set. This program never works that path out
-for itself — it asks the SDK, so that a path derived twice cannot differ once.
+`~/.config/agent-notify/config.yaml`, or `$XDG_CONFIG_HOME/agent-notify/config.yaml`, or
+`$AGENT_NOTIFY_ROOT/config.yaml` when that is set. It is YAML, and it is core's (D-103):
+this program never locates, reads or parses it — it asks the SDK for its own `settings`,
+so that a path derived twice cannot differ once.
 
-Everything optional. There is no file by default and running without one is supported,
-except that without the table the session-watcher never starts this at all.
+Everything optional. There is no file by default and running without one is supported:
+this program runs because it is on PATH, and the file only holds opinions about it.
 
 **A key nobody declared is refused by name**, and the program exits at startup saying which
 one. A misspelled setting that changes nothing and says nothing is the config bug people
 give up on.
 
-### `[integration.macos-notifier]` — core's half
+### `integrations.macos-notifier` — core's half
+
+```yaml
+integrations:
+  macos-notifier:
+    enabled: false
+```
 
 | Key | Type | Default | What it does |
 | --- | --- | --- | --- |
-| `enabled` | bool | `true` | absence means yes: writing the table is how you ask for it. `false` keeps the table and stops it running |
+| `integrations.macos-notifier.enabled` | bool | `true` | absence means yes: being on PATH is how you ask for it (D-102). `false` keeps the binary and stops it running |
 
 There is deliberately no `capture-environment` here, and no list of environment variables:
 what an integration reads is knowledge it already holds in its own source, and a second copy
 in a file you edit is a copy that can disagree.
 
-### `[…settings]` — this display's half
+### `settings` — this display's half
 
-```toml
-[integration.macos-notifier.settings]
-alerter = "/opt/homebrew/bin/alerter"   # written by `install`
-sound   = "Submarine"                   # true, false, or the name of a sound
-
-[integration.macos-notifier.settings.preview]
-lines = 8
-width = 60
-
-[integration.macos-notifier.settings.colors]
-blocked-on-you = "0xffeb6f92"
+```yaml
+integrations:
+  macos-notifier:
+    settings:
+      alerter: /opt/homebrew/bin/alerter   # only when alerter is not on the process's PATH
+      sound: Submarine                     # true, false, or the name of a sound
+      preview:
+        lines: 8
+        width: 60
+      colors:
+        blocked-on-you: "0xffeb6f92"
 ```
 
 | Key | Type | Default | What it changes |
 | --- | --- | --- | --- |
-| `alerter` | string | PATH | where alerter is, absolute. See [below](#alerter) |
-| `sound` | bool or string | `true` | what a banner plays. See below |
-| `preview.lines` | int, ≥ 1 | `8` | how many lines of the agent's last message the body carries |
-| `preview.width` | int, ≥ 16 | `60` | characters per line before it wraps |
-| `colors.<state>` | string, `0xAARRGGBB` | the menu bar's table | the colour the invader beside the text is drawn in |
+| `integrations.macos-notifier.settings.alerter` | string | looked up on PATH | where alerter is, absolute, for a process started without your PATH. See [below](#alerter) |
+| `integrations.macos-notifier.settings.sound` | bool or string | `true` | what a banner plays. See below |
+| `integrations.macos-notifier.settings.preview.lines` | int, ≥ 1 | `8` | how many lines of the agent's last message the body carries |
+| `integrations.macos-notifier.settings.preview.width` | int, ≥ 16 | `60` | characters per line before it wraps |
+| `integrations.macos-notifier.settings.colors.<state>` | string, `0xAARRGGBB` | the table below | the colour the invader beside the text is drawn in |
 
 Everything that can fail is resolved **once, at startup, where there is still somebody to
 tell**: a sound macOS cannot find, a colour that is not hex, a preview too small to read, a
@@ -317,11 +325,13 @@ that quietly comes out wrong forever.
 One key taking three kinds of value, rather than two keys that could disagree and would
 need a winner nobody would guess:
 
-- **`true`, or no line at all** — the usual notification chime.
-- **`false`** — no sound is attached at all, which is silence whatever else is set: there is
-  nothing for macOS to play.
-- **a name** — `"Submarine"`, `"Glass"`, anything in `/System/Library/Sounds`, and anything
-  you put in `~/Library/Sounds`.
+- **`sound: true`, or no line at all** — the usual notification chime.
+- **`sound: false`** — no sound is attached at all, which is silence whatever else is set:
+  there is nothing for macOS to play.
+- **a name** — `sound: Submarine`, `sound: Glass`, anything in `/System/Library/Sounds`,
+  and anything you put in `~/Library/Sounds`. YAML reads a bare word as a string and `true`
+  and `false` as booleans, which is exactly the three-way split this key wants; a value
+  that is none of those is refused naming `integrations.macos-notifier.settings sound`.
 
 A name is looked up in `~/Library/Sounds`, `/Library/Sounds`, `/Network/Library/Sounds` and
 `/System/Library/Sounds`, most specific first, and it is forgiving about what you write and
@@ -360,7 +370,7 @@ the desktop and none on the laptop you take into meetings, and macOS's own switc
 with nothing between chime and silence. System Settings still has the last word — sound
 turned off there is silence whatever this file says.
 
-### `[…settings.preview]`
+### `preview`
 
 The body of a banner is the agent's last message alone, with no state line in front of it:
 the state has already been said in the subtitle, and saying it twice is noise. It is wrapped
@@ -368,27 +378,34 @@ at `width`, on spaces where it can be, keeping the newlines and the blank lines 
 wrote — the difference between a list and a paragraph — and cut to `lines`, with the last
 one ending in an ellipsis.
 
-```toml
-[integration.macos-notifier.settings.preview]
-lines = 3     # a terser banner
-width = 48
+```yaml
+integrations:
+  macos-notifier:
+    settings:
+      preview:
+        lines: 3     # a terser banner
+        width: 48
 ```
 
-`lines` below 1 and `width` below 16 are refused at startup. A banner is not a document:
-what it is for is recognising which of your agents this is, and whether what it last said is
-the thing you are waiting for.
+`lines` below 1 and `width` below 16 are refused at startup, naming
+`integrations.macos-notifier.settings.preview`. A banner is not a document: what it is for
+is recognising which of your agents this is, and whether what it last said is the thing you
+are waiting for.
 
-### `[…settings.colors]`
+### `colors`
 
 The keys are states, most specific first — a kernel, or a `kernel/detail` pair — over the
 defaults this display brings with it:
 
-```toml
-[integration.macos-notifier.settings.colors]
-blocked-on-you                   = "0xffeb6f92"   # love — answer this now
-broke                            = "0xfff6c177"   # gold — something went wrong
-finished-a-turn                  = "0xff9ccfd8"   # foam — there is something to read
-"blocked-on-you/permission-prompt" = "0xffebbcba"  # a pair is more specific than its kernel
+```yaml
+integrations:
+  macos-notifier:
+    settings:
+      colors:
+        blocked-on-you: "0xffeb6f92"                     # love — answer this now
+        broke: "0xfff6c177"                              # gold — something went wrong
+        finished-a-turn: "0xff9ccfd8"                    # foam — there is something to read
+        "blocked-on-you/permission-prompt": "0xffebbcba" # a pair is more specific than its kernel
 ```
 
 Those three are the defaults, and they are the menu bar's, written out again so that the two
@@ -399,9 +416,10 @@ banner; they are there so that the table is the same table.
 **Hex only, as `0xAARRGGBB`.** AppKit's colour names are no use: the invader is drawn into a
 PNG that macOS composites onto a surface of its own, where a colour that adapts to the
 appearance has nothing to adapt to. The alpha is written and then dropped for the same
-reason. A value that is not hex is refused when the config is read, naming the key — because
-the alternative is a banner that quietly arrives with no picture, which looks exactly like a
-banner nobody bothered to draw one for.
+reason. A value that is not hex is refused when the config is read, naming the key under
+`integrations.macos-notifier.settings.colors` — because the alternative is a banner that
+quietly arrives with no picture, which looks exactly like a banner nobody bothered to draw
+one for.
 
 A state a newer core ships and this build has never met is drawn in the colour of the known
 state nearest it in rank, which is "something roughly this important" rather than nothing at
@@ -409,17 +427,22 @@ all.
 
 ### `alerter`
 
-```toml
-[integration.macos-notifier.settings]
-alerter = "/opt/homebrew/bin/alerter"
+```yaml
+integrations:
+  macos-notifier:
+    settings:
+      alerter: /opt/homebrew/bin/alerter
 ```
 
-Where alerter is, absolute, written by `install` out of the PATH you ran it with. Left empty
-it is looked up on PATH, which is right for a shell and wrong for anything core starts
-(D-67).
+Where alerter is, absolute. You almost never write it: alerter is looked up on PATH, and
+this program runs as a descendant of the agent, which you started from a shell, so that
+PATH is yours (D-101, D-102). The key is the override for the one case where it is not — an
+agent launched from the Dock, whose PATH is `/usr/bin:/bin` — and the refusal you get then
+names it: `alerter is not on this process's PATH and
+integrations.macos-notifier.settings.alerter does not say where it is`.
 
-It is **checked when the config is read**, not when there is something to say: a `brew
-upgrade` that moved it would otherwise be a display that silently stops interrupting
+Either way it is **checked when the config is read**, not when there is something to say: a
+`brew upgrade` that moved it would otherwise be a display that silently stops interrupting
 anybody, discovered on the one occasion it mattered. A path that is not there is a refusal
 naming it.
 
@@ -429,22 +452,18 @@ This program reads no environment variable of its own. Three reach it anyway:
 
 | Variable | Effect |
 | --- | --- |
-| `AGENT_NOTIFY_ROOT` | moves agent-notify's state directory, runtime directory and config file beneath it — one variable, so that running an isolated instance is one step |
-| `XDG_CONFIG_HOME` | where the config file is looked for, when the root is not set |
+| `AGENT_NOTIFY_ROOT` | moves agent-notify's state directory, runtime directory and `config.yaml` beneath it — one variable, so that running an isolated instance is one step |
+| `XDG_CONFIG_HOME` | where `agent-notify/config.yaml` is looked for, when the root is not set |
 | `TMPDIR` | holds `agent-notify-invaders/`, the fixed directory the coloured PNGs are cached in — one file per colour, about thirty kilobytes each, reused across restarts |
 
-The path to `agent-notify` itself is not found on PATH, because nothing core starts has your
-shell's. It comes from core's own `agent-notify-binary` setting, and it is what tapping a
-banner runs. A display that cannot locate it refuses to render rather than discovering it
-when somebody taps a banner.
+`agent-notify` itself is found on PATH, and it is what tapping a banner runs. A display that
+cannot locate it refuses to render rather than discovering it when somebody taps a banner.
 
 ## Commands
 
 ```
 agent-notify-macos-notifier render     post banners for what moved (core runs this)
 agent-notify-macos-notifier check      post a test banner and say what would carry it
-agent-notify-macos-notifier install    file the [integration.macos-notifier] table
-agent-notify-macos-notifier uninstall  remove it
 agent-notify-macos-notifier --help     the same list
 ```
 

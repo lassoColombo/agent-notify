@@ -34,11 +34,8 @@ func aSlowContainer(t *testing.T, directory, name string, takes time.Duration) s
 func TestASlowContainerDoesNotDelayADraw(t *testing.T) {
 	atATestablePace(t, 200*time.Millisecond)
 	root := shortRoot(t)
-	display, painted := aDisplay(t, root, "painter", "kernel")
-	placer := aSlowContainer(t, root, "placer", 3*time.Second)
-	write(t, root+"/config.toml", fmt.Sprintf(
-		"[integration.painter]\nbinary = %q\n\n[integration.placer]\nbinary = %q\n\n"+
-			"[container]\norder = [\"placer\"]\n", display, placer))
+	_, painted := aDisplay(t, root, "painter", "kernel")
+	aSlowContainer(t, root, "placer", 3*time.Second)
 
 	layout := running(t, root)
 	waitFor(t, "the first render", func() bool {
@@ -94,8 +91,6 @@ func TestAContainerIsHandedItsOwnEntryAndTheChain(t *testing.T) {
 	if err := os.Chmod(placer, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	write(t, root+"/config.toml", fmt.Sprintf(
-		"[integration.placer]\nbinary = %q\n\n[container]\norder = [\"placer\"]\n", placer))
 
 	layout := running(t, root)
 	applyToTheStore(t, layout, session.Report{
@@ -129,4 +124,3 @@ func TestAContainerIsHandedItsOwnEntryAndTheChain(t *testing.T) {
 		t.Error("the placer was handed no captured_at, want the one the store stamped")
 	}
 }
-

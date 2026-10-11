@@ -3,6 +3,7 @@ package subscribe_test
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -14,11 +15,16 @@ import (
 	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
-// aStore is a root with no session-watcher: `agent-notify-binary` names a
+// aStore is a root with no session-watcher: the `agent-notify` on PATH is a
 // program that exits at once, so Run's attempt to start one costs nothing.
 func aStore(t *testing.T) (string, *sessionstore.SessionStore) {
 	t.Helper()
-	root := configured(t, "agent-notify-binary = \"/usr/bin/true\"\n")
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "agent-notify"), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	root := configured(t, "")
 	layout, err := paths.Under(root)
 	if err != nil {
 		t.Fatal(err)

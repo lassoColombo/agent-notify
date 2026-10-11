@@ -104,11 +104,13 @@ func TestOnlyATapFocusesTheSession(t *testing.T) {
 			// records having been asked to focus anything.
 			asked := filepath.Join(root, "asked")
 			core := scriptCalled(t, "agent-notify", "printf '%s' \"$*\" > "+asked)
-			writeConfig(t, root, "agent-notify-binary = "+quoted(core)+"\n")
+			writeConfig(t, root, "")
 
 			alerter := scriptCalled(t, "alerter", "printf '%s' "+quoted(one.said))
 			held := exec.Command(os.Args[0], "the/session", alerter, "--group", "the/session")
-			held.Env = append(os.Environ(), "AGENT_NOTIFY_ROOT="+root, theHoldToRun+"=yes")
+			// Core is found on PATH (D-101), so the stub's directory is PATH.
+			held.Env = append(os.Environ(), "AGENT_NOTIFY_ROOT="+root, theHoldToRun+"=yes",
+				"PATH="+filepath.Dir(core))
 			if output, err := held.CombinedOutput(); err != nil {
 				t.Fatalf("hold: %v\n%s", err, output)
 			}

@@ -37,8 +37,6 @@ func main() {
 	// separate process.
 	os.Exit(subscribe.Main(me, subscribe.Commands{
 		Named: map[string]func([]string) int{
-			"install":   install,
-			"uninstall": uninstall,
 			"--preview": func(arguments []string) int { Read(me); return previewOf(arguments) },
 			"--label":   func(arguments []string) int { Read(me); return labelOf(arguments) },
 		},
@@ -245,8 +243,6 @@ func usage() {
   agent-notify-picker            the live sessions
   agent-notify-picker --all      the ended-but-resumable ones too
   agent-notify-picker --print    answer with the session instead of going to it
-  agent-notify-picker install    file the table, and print how to bind a key
-  agent-notify-picker uninstall  take the table away
 
 Type to filter. Enter goes there; escape and ctrl+c leave.
 `, Name)

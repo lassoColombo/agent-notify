@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/lassoColombo/agent-notify/internal/paths"
 	"github.com/lassoColombo/agent-notify/internal/logs"
+	"github.com/lassoColombo/agent-notify/internal/paths"
 )
 
 // Spawn starts a detached session-watcher and returns immediately.
@@ -35,8 +35,8 @@ import (
 //     session-watcher would then keep in memory for days. Cut by passing an
 //     explicit short list, which keeps everything path resolution reads, so
 //     the child resolves the same layout this process did.
-func Spawn(layout paths.Layout, configured string) error {
-	program, err := CoreBinary(configured)
+func Spawn(layout paths.Layout) error {
+	program, err := CoreBinary()
 	if err != nil {
 		return err
 	}
@@ -73,25 +73,13 @@ func Spawn(layout paths.Layout, configured string) error {
 // It cannot simply be this executable, and that is the whole problem: the hook
 // library is linked into binaries we did not write. Inside
 // agent-notify-claude, os.Executable() is agent-notify-claude, and
-// `agent-notify-claude watcher run` is not a thing.
-//
-// So, in order: what the configuration named, this executable if it is
-// agent-notify, then PATH. PATH is last and not trusted much — a hook's PATH is
-// not your shell's PATH, which is exactly why `agent-notify-binary` exists in
-// the configuration. An integration that runs `agent-notify focus-session` on
-// a click has the same problem: a launchd job's PATH is not your shell's
-// either.
+// `agent-notify-claude watcher run` is not a thing. So: this executable if it
+// is agent-notify, else PATH (D-33, D-101).
 //
 // Failing to find it is not fatal to anything. The record is already written,
 // `list` still reads it and still applies liveness as it reads; what is lost is
 // the daemon, and with it only the speed of noticing a death.
-func CoreBinary(configured string) (string, error) {
-	if configured != "" {
-		if found, err := exec.LookPath(configured); err == nil {
-			return found, nil
-		}
-		return "", fmt.Errorf("agent-notify-binary names %q, which is not runnable", configured)
-	}
+func CoreBinary() (string, error) {
 	if self, err := os.Executable(); err == nil && filepath.Base(self) == "agent-notify" {
 		return self, nil
 	}
@@ -100,7 +88,7 @@ func CoreBinary(configured string) (string, error) {
 	}
 	return "", fmt.Errorf(
 		"cannot find the agent-notify binary to start a session-watcher: it is not this " +
-			"program and not on PATH. Name it as `agent-notify-binary` in the configuration.")
+			"program and not on PATH")
 }
 
 // keptEnvironment is the explicit short list. Everything not named here is

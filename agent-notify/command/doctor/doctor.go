@@ -15,7 +15,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/lassoColombo/agent-notify/command/internal/onpath"
 	"github.com/lassoColombo/agent-notify/internal/config"
 	"github.com/lassoColombo/agent-notify/internal/containers"
 	"github.com/lassoColombo/agent-notify/internal/handshake"
@@ -88,8 +87,8 @@ func doctor() int {
 		logger.Warn("configuration", "problem", problem.Error())
 	}
 
-	summary := fmt.Sprintf("%d agent(s), %d integration(s), keep-ended-sessions %s",
-		len(settings.Agent), len(settings.Integration), settings.KeepEndedSessions)
+	summary := fmt.Sprintf("%d integration(s) on PATH, %d enabled, keep-ended-sessions %s",
+		len(settings.Installed), len(settings.Enabled()), settings.KeepEndedSessions)
 
 	switch {
 	case len(problems) > 0:
@@ -106,7 +105,7 @@ func doctor() int {
 		report("config", "ok", summary)
 	}
 
-	reportCoreBinary(settings, &healthy)
+	reportCoreBinary(&healthy)
 
 	openedStore, err := sessionstore.Open(layout, settings)
 	switch {
@@ -123,14 +122,12 @@ func doctor() int {
 			report("store", "ok", fmt.Sprintf("%d live session(s), %d ended and still "+
 				"resumable, %d forgotten this run", len(live), len(ended), pruned(openedStore, logger)))
 			reportLiveness(live, &healthy)
-			reportAgents(append(live, ended...), settings, &healthy)
 		}
 	}
 
 	reportWatcher(layout, &healthy)
 	reportIntegrations(layout, settings, &healthy)
 	reportContainers(layout, settings, &healthy)
-	reportWhatIsInstalledAndNotAskedFor(settings)
 
 	fmt.Println()
 	fmt.Println("not checked here: whether each agent still runs its hooks. An")
@@ -171,46 +168,26 @@ func pruned(openedStore *sessionstore.SessionStore, logger *slog.Logger) int {
 	return len(removed)
 }
 
-// reportCoreBinary: without it no hook can start a session-watcher and no
-// launchd child can focus anything, and the only sign is a line in the log.
-func reportCoreBinary(settings config.Config, healthy *bool) {
-	found, err := onewatcher.CoreBinary(settings.AgentNotifyBinary)
+// reportCoreBinary: without it no hook can start a session-watcher, and the
+// only sign is a line in the log.
+func reportCoreBinary(healthy *bool) {
+	found, err := onewatcher.CoreBinary()
 	if err != nil {
-		report("binary", "FAIL", err.Error()+"\n`agent-notify install` files it")
+		report("binary", "FAIL", err.Error())
 		*healthy = false
 		return
 	}
 	report("binary", "ok", found)
 }
 
-// reportAgents: a session from an agent with no [agent.<name>] table has no
-// process to be judged by, so it can never be found dead.
-func reportAgents(records []session.Record, settings config.Config, healthy *bool) {
-	var unknown []string
-	for _, record := range records {
-		if _, known := settings.Agent[record.Key.Agent]; !known && !slices.Contains(unknown, record.Key.Agent) {
-			unknown = append(unknown, record.Key.Agent)
-		}
-	}
-	slices.Sort(unknown)
-	if len(unknown) == 0 {
-		report("agents", "ok", fmt.Sprintf("%d configured", len(settings.Agent)))
-		return
-	}
-	report("agents", "FAIL", fmt.Sprintf("sessions from %s and no [agent.<name>] table for them, so "+
-		"their liveness cannot be judged;\n`agent-notify install %s` files it",
-		strings.Join(unknown, ", "), strings.Join(unknown, " ")))
-	*healthy = false
-}
-
 // reportContainers says what the session-watcher would complain about in its
 // log, here where a person is looking.
 func reportContainers(layout paths.Layout, settings config.Config, healthy *bool) {
-	if len(settings.Container.Order) == 0 {
-		report("containers", "ok", "none in [container] order; nothing can be focused, everything else works")
+	configured, problems := containers.Configured(settings, handshake.ByIntegration(layout, settings))
+	if len(problems) == 0 && len(configured) == 0 {
+		report("containers", "ok", "none answers `focus`; nothing can be focused, everything else works")
 		return
 	}
-	configured, problems := containers.Configured(settings, handshake.ByIntegration(layout, settings))
 	if len(problems) == 0 {
 		names := make([]string, 0, len(configured))
 		for _, one := range configured {
@@ -283,8 +260,8 @@ func reportIntegrations(
 ) {
 	written, found := handshake.Read(layout)
 	if !found {
-		if len(settings.Integration) == 0 {
-			report("integrations", "ok", "none configured")
+		if len(settings.Enabled()) == 0 {
+			report("integrations", "ok", "none on PATH")
 			return
 		}
 		report("integrations", "--", "no report yet — the session-watcher writes one when it starts")
@@ -292,7 +269,7 @@ func reportIntegrations(
 	}
 
 	if len(written.Integrations) == 0 {
-		report("integrations", "ok", "none configured")
+		report("integrations", "ok", "none on PATH")
 		return
 	}
 
@@ -307,12 +284,10 @@ func reportIntegrations(
 
 	for _, one := range written.Integrations {
 		fmt.Printf("             %-22s %s\n", one.Name, one.State)
-		if one.Binary != "" {
-			fmt.Printf("             %-22s %s\n", "", whatItAnswers(one))
-		}
+		fmt.Printf("             %-22s %s\n", "", whatItAnswers(one))
 		if one.Problem != "" {
 			fmt.Printf("             %-22s %s\n", "",
-				"rebuild and reinstall it, then run `agent-notify watcher reload`")
+				"rebuild it, then run `agent-notify watcher reload`")
 		}
 	}
 }
@@ -321,31 +296,13 @@ func whatItAnswers(one handshake.Integration) string {
 	switch {
 	case one.Problem != "":
 		return "did not say what it answers: " + one.Problem
-	case len(one.Answers.Methods) == 0:
-		return "answers nothing, so core will never run it"
+	case !slices.ContainsFunc(one.Answers.Methods, session.CoreRuns):
+		if len(one.Answers.Methods) == 0 {
+			return "answers nothing core calls"
+		}
+		return "answers " + strings.Join(one.Answers.Methods, ", ") + ", none of which core calls"
 	default:
 		return fmt.Sprintf("answers %s — built against %s",
 			strings.Join(one.Answers.Methods, ", "), one.Answers.Version)
 	}
-}
-
-// reportWhatIsInstalledAndNotAskedFor names the programs on your PATH whose
-// install has not been run. Never a failure.
-func reportWhatIsInstalledAndNotAskedFor(settings config.Config) {
-	var unasked []string
-	for _, name := range onpath.Integrations() {
-		if _, wanted := settings.Integration[name]; wanted {
-			continue
-		}
-		if _, wanted := settings.Agent[name]; wanted {
-			continue
-		}
-		unasked = append(unasked, name)
-	}
-	if len(unasked) == 0 {
-		return
-	}
-
-	report("installed", "--", fmt.Sprintf("%d on your PATH and not mentioned here: %s\n"+
-		"`agent-notify install` sets each of them up.", len(unasked), strings.Join(unasked, ", ")))
 }

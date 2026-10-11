@@ -8,9 +8,8 @@ package session
 // CapabilitiesCommand is the subcommand every tool-integration answers.
 const CapabilitiesCommand = "capabilities"
 
-// CaptureCommand is the subcommand core runs on every integration it can run
-// at all, from inside the agent (D-27). Nobody declares it; one that reads
-// nothing answers an empty object.
+// CaptureCommand is the subcommand the hook runs from inside the agent
+// (D-27), on every integration that declared it (D-101).
 const CaptureCommand = "capture-environment"
 
 // The methods an integration can claim. They ARE the subcommand names: what a
@@ -22,11 +21,22 @@ const (
 	MethodRender    = "render"
 )
 
+// CoreRuns is whether a declared method is one core calls, as opposed to one
+// a person does (`install`). An integration declaring none of these is run by
+// something else — an agent's hooks, a keybinding — and core only asks.
+func CoreRuns(method string) bool {
+	switch method {
+	case CaptureCommand, MethodInterpret, MethodFocus, MethodFocused, MethodRender:
+		return true
+	}
+	return false
+}
+
 // Capabilities is everything core asks an integration about itself.
 //
 // It is methods rather than roles, and the difference is the whole point. A
 // role is a category a person infers and then writes down — in the table, in
-// `[container] order`, in a `roles` field — and each copy is somewhere it can
+// “containers“, in a `roles` field — and each copy is somewhere it can
 // be wrong. A method is what core is about to run. "Is a container" becomes
 // "answers `focus`", which is not an opinion.
 type Capabilities struct {
