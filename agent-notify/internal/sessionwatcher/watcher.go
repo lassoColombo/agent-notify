@@ -62,9 +62,11 @@ type Watcher struct {
 	// renderers is one per display core runs.
 	renderers map[string]*renderer
 
-	// derivations is how reconcile asks the deriving goroutine to look at the
-	// store; one pending ask is enough, as with woken.
+	// derivations is how reconcile asks the deriving goroutine to look at
+	// toDerive, the world the loop last read; one pending ask is enough, as
+	// with woken, and the goroutine takes the newest when it gets there.
 	derivations chan struct{}
+	toDerive    []session.Record
 }
 
 // Start takes the lock and opens the watches. Losing the race for the lock is
@@ -229,8 +231,11 @@ func (w *Watcher) reconcile(why string) {
 	}
 	world, ended := w.opened.WhatIsRunningAndWhatEnded(wantEnded)
 
-	// Derivation is asked for, not waited for; what it finds comes back as a
-	// store wake.
+	// Derivation is asked for, not waited for, and is handed this read rather
+	// than making its own; what it finds comes back as a store wake.
+	w.mu.Lock()
+	w.toDerive = world
+	w.mu.Unlock()
 	select {
 	case w.derivations <- struct{}{}:
 	default:
@@ -301,21 +306,20 @@ func (w *Watcher) resolveContainers() {
 	w.mu.Unlock()
 }
 
-// deriveWhenAsked is the deriving goroutine: each ask is one read of the
-// store and one derive over it. A newer ask that arrives while it works
-// waits in the channel, so a capture written mid-derive is seen next time.
+// deriveWhenAsked is the deriving goroutine: each ask is one derive over the
+// world the loop read. A newer ask that arrives while it works waits in the
+// channel with the newer world behind it, so a capture written mid-derive is
+// seen next time.
 func (w *Watcher) deriveWhenAsked(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-w.derivations:
-			live, err := w.opened.Store.List()
-			if err != nil {
-				w.logger.Warn("reading the store to derive", "problem", err.Error())
-				continue
-			}
-			w.derive(live)
+			w.mu.Lock()
+			world := w.toDerive
+			w.mu.Unlock()
+			w.derive(world)
 		}
 	}
 }
@@ -324,12 +328,18 @@ func (w *Watcher) deriveWhenAsked(ctx context.Context) {
 // captured, here rather than in the hook because this half talks to the tool
 // (D-27). A container is asked once per session per capture: replacing a
 // capture voids what was derived from it (§A7.4.1).
-func (w *Watcher) derive(live []session.Record) {
+func (w *Watcher) derive(world []session.Record) {
 	w.mu.Lock()
 	configured := w.containers
 	w.mu.Unlock()
 
-	for _, record := range live {
+	for _, record := range world {
+		if !record.Kernel.Live() {
+			// Ended sessions ride along when a display asked for them, and a
+			// dead agent the judgement just corrected is about to be filed:
+			// neither is worth asking a container about.
+			continue
+		}
 		for _, one := range configured {
 			captured, present := record.CapturedContext.By[one.Name]
 			if !present || isEmptyObject(captured) {
