@@ -194,6 +194,19 @@ SESSION="$2"
 	}
 
 	pretend := &pretendAgent{root: root, binary: built, session: "session-one"}
+
+	// A session-watcher first, and its report with it. The hook captures for
+	// the integrations the report names and asks nobody itself (D-104), so
+	// without one the four hooks below would capture nothing, as the first
+	// hooks after a reboot do.
+	if _, stderr, code := pretend.run(t, "watcher", "start"); code != 0 {
+		t.Fatalf("watcher start exited %d: %s", code, stderr)
+	}
+	waitFor(t, 5*time.Second, "the session-watcher's report", func() bool {
+		_, err := os.Stat(filepath.Join(root, "run", "integrations.json"))
+		return err == nil
+	})
+
 	agent := exec.Command(agentPath)
 	agent.Dir = root
 	agent.Env = append(os.Environ(),

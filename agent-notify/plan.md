@@ -5266,6 +5266,28 @@ of this section is that it prevents re-litigating.
   - **go-toml leaves core.** codex's own `config.toml` is still TOML and
     codex's integration still reads it; that is codex's file, not ours.
 
+- **D-104** (2026-10-12) — **The hook reads the report and never asks.**
+  *Amends* D-101's "the hook asks only those" to "the hook reads who those
+  are", and *restates* D-81: on the hook path a fact about other programs is a
+  file read or nothing, never a process. Found by the architecture review of
+  the same day.
+  - **What was wrong.** `whoCaptures` went through `handshake.ByIntegration`,
+    which asks every enabled integration when there is no report to read.
+    The report lives in the runtime directory, which does not survive a
+    reboot, so the first hook after every reboot forked every integration for
+    `capabilities`, up to two seconds, then capture, up to one more, on the
+    path the agent waits for (R1).
+  - **Now it reads the report or captures for nobody.** The first hooks after
+    a reboot capture nothing; the watcher the first hook starts writes the
+    report; the next hook finds every integration without an entry and asks
+    them, which is the D-90 top-up doing what it already does. The ancestry is
+    kept from the first hook, since `captured_at` is stamped on that write.
+  - **`ByIntegration` keeps its fallback** for `focus` and `doctor`, where a
+    fork off a keypress on a machine where nothing has run is the accepted
+    cost.
+  - **The end-to-end harness starts a watcher before its hooks fire**, which
+    is the state a real machine is in for every session but the first.
+
 **The payload discussion of 2026-09-17 is now ratified**
  in D-10 through D-18.
 What is still marked [proposed] elsewhere — the field list of §A7.4, the event

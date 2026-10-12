@@ -11,6 +11,9 @@ import (
 	"time"
 
 	"github.com/lassoColombo/agent-notify/internal/config"
+	"github.com/lassoColombo/agent-notify/internal/core"
+	"github.com/lassoColombo/agent-notify/internal/handshake"
+	"github.com/lassoColombo/agent-notify/internal/paths"
 	"github.com/lassoColombo/agent-notify/session"
 )
 
@@ -153,6 +156,36 @@ func TestOnlyWhatIsMissingIsCapturedForOneUnchangedSession(t *testing.T) {
 				t.Errorf("whoToAsk = %v, %v; want %v, %v", asked, stale, one.wantAsked, one.wantStale)
 			}
 		})
+	}
+}
+
+// TestTheHookReadsTheReportAndNeverAsks is R1 on the one question the hook
+// has about other programs: who captures. A fork per integration to find out
+// belongs to the session-watcher, so with no report the hook captures for
+// nobody and the next hook, with the report the watcher wrote, asks whoever
+// has no entry (D-104, D-90).
+func TestTheHookReadsTheReportAndNeverAsks(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PATH", dir+":/usr/bin:/bin")
+	t.Setenv(paths.TheVariableThatNamesTheRoot, dir)
+	// A program that answers `capabilities` with capture-environment and
+	// would be found by asking.
+	program(t, dir, "pane", `{"version":"0.0.0-dev","methods":["capture-environment"]}`, 0)
+
+	opened, err := core.OpenEverythingACommandNeeds("test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer opened.Close()
+
+	if asked := whoCaptures(opened); len(asked) != 0 {
+		t.Fatalf("with no report the hook would run %v", asked)
+	}
+
+	handshake.Write(opened.Layout, opened.Settings,
+		map[string]session.Capabilities{"pane": {Methods: []string{session.CaptureCommand}}}, nil)
+	if asked := whoCaptures(opened); !slices.Equal(asked, []string{"pane"}) {
+		t.Errorf("with a report naming pane the hook would run %v", asked)
 	}
 }
 

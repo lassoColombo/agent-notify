@@ -173,14 +173,22 @@ func askEveryoneWhoCaptures(
 }
 
 // whoCaptures is every enabled integration that declared `capture-environment`
-// (D-101): read from the session-watcher's report, or asked when there is none
-// yet, which is the first hook on a machine and no other.
+// (D-101), read from the session-watcher's report and never asked: a fork
+// per integration is not a thing to do on the path the agent waits on (R1,
+// D-104). With no report yet, which is the first hooks after a reboot, nobody
+// is asked; the watcher this hook starts writes the report, and the next hook
+// asks whoever has no entry (D-90).
 func whoCaptures(opened *core.Core) []string {
-	answers := handshake.ByIntegration(opened.Layout, opened.Settings)
+	report, found := handshake.Read(opened.Layout)
+	if !found {
+		return nil
+	}
+	enabled := opened.Settings.Enabled()
 	var names []string
-	for _, name := range opened.Settings.Enabled() {
-		if slices.Contains(answers[name].Methods, session.CaptureCommand) {
-			names = append(names, name)
+	for _, one := range report.Integrations {
+		if slices.Contains(enabled, one.Name) &&
+			slices.Contains(one.Answers.Methods, session.CaptureCommand) {
+			names = append(names, one.Name)
 		}
 	}
 	return names
