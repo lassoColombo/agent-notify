@@ -30,9 +30,10 @@ import (
 // the binary, the SDK still documents a custom title as one that "skips
 // automatic title generation", and other surfaces still write the line — so
 // this is a path that stopped firing, not a field that went away. It is read
-// anyway: it costs one open and one read of a file `usage.go` has just read
-// from the other end, and the day it comes back every unnamed session is better
-// named for nothing.
+// anyway, on `UserPromptSubmit` and no other hook (D-107): once a turn rather
+// than once a tool call, since a title is appended once and never rewritten,
+// and the day it comes back every unnamed session is better named for one
+// read a turn.
 //
 // [verified 2026-10-09, 2.1.285] Still dark. None of the 206 transcripts on
 // this machine holds one — the 26 above have since been cleaned away by age —
@@ -55,7 +56,7 @@ const (
 	// The other 8 are between 316 KiB and 2.2 MB in, at no fixed distance from
 	// either end, and they are deliberately not chased: they are sessions
 	// titled long after they started, the scan to reach them is unbounded, and
-	// it would run on every hook of every session that has no title at all —
+	// it would run on every prompt of every session that has no title at all —
 	// which today is all of them. A title that is missed costs the session its
 	// name, and core's guess is what a missed name has always cost.
 	theHeadOfTheTranscript = 64 << 10

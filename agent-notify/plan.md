@@ -5347,6 +5347,29 @@ of this section is that it prevents re-litigating.
     for ended at all. That changes what an idle pane looks like, and is a
     decision of its own.
 
+- **D-107** (2026-10-12) — **The claude adapter reads the transcript head
+  once a turn, not once a tool call.** *Amends* `sessiontitle.go`'s "it is
+  read anyway" (it still is, on `UserPromptSubmit` alone). Found by the
+  architecture review of the same day.
+  - **What was wrong.** Three file reads ran before every `Translate`, on
+    every one of the hundreds of hooks a turn produces. The tail read is
+    right: core cannot read the transcript, and `CountedThrough`
+    deduplicates what comes back. The head read was 64KB per tool call for
+    `ai-title`, a line Claude appends once near the start and never
+    rewrites, verified dark since 2.1.231, and discarded by `Apply` whenever
+    the record already has a name. The largest per-hook read served the
+    field least likely to carry anything, at the cadence least suited to it.
+  - **Now `main.go` reads the head on `UserPromptSubmit` and hands `""` on
+    every other hook.** A title written after the first prompt has landed by
+    the next one, and an empty name leaves the stored one alone, so nothing
+    is lost but the reads. `Translate` stays pure; which hook reads is the
+    policy beside the other policies in `main.go`.
+  - **Not taken**: handing `translate` what core already holds, the stored
+    name and the usage cursor, so the adapter could skip the head read when
+    a name exists and stop the tail read exactly at what was counted. That
+    changes the adapter signature and §A4's wording, and is a decision of its
+    own.
+
 **The payload discussion of 2026-09-17 is now ratified**
  in D-10 through D-18.
 What is still marked [proposed] elsewhere — the field list of §A7.4, the event
