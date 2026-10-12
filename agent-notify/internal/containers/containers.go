@@ -86,7 +86,7 @@ func Configured(settings config.Config, answers map[string]session.Capabilities)
 	var problems []error
 	for _, name := range order {
 		switch {
-		case !slices.Contains(settings.Installed, name):
+		case !slices.Contains(settings.OnPath(), name):
 			problems = append(problems, fmt.Errorf(
 				"`containers` names %q, and there is no %s on PATH", name, config.Program(name)))
 			continue

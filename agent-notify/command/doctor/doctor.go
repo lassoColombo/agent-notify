@@ -83,12 +83,13 @@ func doctor() int {
 	defer closer.Close()
 
 	settings, problems := config.Load(layout)
+	problems = append(problems, settings.WrittenAndNotOnPath(layout.ConfigFile)...)
 	for _, problem := range problems {
 		logger.Warn("configuration", "problem", problem.Error())
 	}
 
 	summary := fmt.Sprintf("%d integration(s) on PATH, %d enabled, keep-ended-sessions %s",
-		len(settings.Installed), len(settings.Enabled()), settings.KeepEndedSessions)
+		len(settings.OnPath()), len(settings.Enabled()), settings.KeepEndedSessions)
 
 	switch {
 	case len(problems) > 0:

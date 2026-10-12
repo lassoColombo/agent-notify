@@ -230,9 +230,13 @@ func TestWhatIsOnPATHIsWhatRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	settings, problems := config.Load(layout)
+	if len(problems) != 0 {
+		t.Errorf("Load complained %v, and it has not looked at PATH (D-108)", problems)
+	}
 	if got := settings.Enabled(); !reflect.DeepEqual(got, []string{"painter"}) {
 		t.Errorf("Enabled = %v, want painter alone: placer is turned off and ghost is not there", got)
 	}
+	problems = settings.WrittenAndNotOnPath(layout.ConfigFile)
 	if len(problems) != 1 || !strings.Contains(problems[0].Error(), "ghost") {
 		t.Errorf("problems = %v, want one naming ghost, which is written and not on PATH", problems)
 	}

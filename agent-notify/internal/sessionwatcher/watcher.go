@@ -289,8 +289,11 @@ func (w *Watcher) reconcile(why string) {
 // what came back is logged and kept under the mutex for the renderers, the
 // containers and the report.
 func (w *Watcher) askWhatEachIntegrationAnswers() {
-	settings := w.opened.Settings
-	answers, unanswered := handshake.Ask(settings)
+	settings := &w.opened.Settings
+	for _, problem := range settings.WrittenAndNotOnPath(w.opened.Layout.ConfigFile) {
+		w.complainOnce(problem.Error())
+	}
+	answers, unanswered := handshake.Ask(*settings)
 
 	for _, name := range settings.Enabled() {
 		if problem, failed := unanswered[name]; failed {

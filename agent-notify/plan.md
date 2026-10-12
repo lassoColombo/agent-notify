@@ -5370,6 +5370,25 @@ of this section is that it prevents re-litigating.
     changes the adapter signature and §A4's wording, and is a decision of its
     own.
 
+- **D-108** (2026-10-12) — **PATH is scanned by the processes that act on
+  it, and not by the ones that merely open the configuration.** *Amends*
+  D-102's cost note ("per hook and per watcher start") so that it is true:
+  those are now the only two. Found by the architecture review of the same
+  day.
+  - **What was wrong.** `config.Load` scanned PATH, and `core.OpenAt` calls
+    `Load`, so every process paid for it: `list`, every `render` child the
+    watcher forks, every `--preview` the picker runs per cursor move,
+    `tail`, `focus` and the notifier's `hold`. Of those, none reads
+    `Installed`. The two that do are the watcher and the hook's
+    `whoCaptures`.
+  - **Now `Load` leaves PATH alone and `Config.OnPath` scans on first ask**,
+    once per value; `Enabled` goes through it. A test hands over its own list
+    by setting `Installed`, which is why the field stays exported.
+  - **The complaint about a name written and not on PATH moved with the
+    scan**, to `WrittenAndNotOnPath`, asked by `doctor` and by the watcher's
+    handshake and nowhere else. `Load`'s problems are now about the file
+    alone, which is what a render child or a preview has any use for.
+
 **The payload discussion of 2026-09-17 is now ratified**
  in D-10 through D-18.
 What is still marked [proposed] elsewhere — the field list of §A7.4, the event

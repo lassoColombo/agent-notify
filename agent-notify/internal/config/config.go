@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -47,9 +48,13 @@ type Config struct {
 	// (plan.md §A11); with one container the order is that one (D-101).
 	Containers []string `yaml:"containers"`
 
-	// Installed is every agent-notify-<name> on PATH when the file was read:
-	// the set the file's opinions apply to (D-102). Not a key.
+	// Installed is every agent-notify-<name> on PATH: the set the file's
+	// opinions apply to (D-102). Not a key, and not read with the file: PATH
+	// is scanned the first time something asks, through OnPath, and most
+	// processes never ask (D-108). A test hands over its own list by setting
+	// it.
 	Installed []string `yaml:"-"`
+	scanned   bool
 }
 
 // Integration is one program's entry, and everything in it is the user's to
@@ -71,17 +76,45 @@ func (i Integration) IsEnabled() bool { return i.Enabled == nil || *i.Enabled }
 // (D-101). A bare name, so that exec resolves it where the process runs.
 func Program(name string) string { return "agent-notify-" + name }
 
+// OnPath is Installed, scanning PATH the first time and not before. The
+// scan is one ReadDir per PATH entry, and the two processes that act on the
+// answer are the session-watcher and the hook; a render, a preview and
+// `list` open the configuration and never ask (D-108).
+func (c *Config) OnPath() []string {
+	if !c.scanned && c.Installed == nil {
+		c.Installed, c.scanned = onpath.Integrations(), true
+	}
+	return c.Installed
+}
+
 // Enabled is every installed integration that is not turned off, sorted:
 // what core may run.
-func (c Config) Enabled() []string {
+func (c *Config) Enabled() []string {
 	var names []string
-	for _, name := range c.Installed {
+	for _, name := range c.OnPath() {
 		if c.Integrations[name].IsEnabled() {
 			names = append(names, name)
 		}
 	}
 	slices.Sort(names)
 	return names
+}
+
+// WrittenAndNotOnPath is every integration the file has an opinion about
+// with no program behind it: a misspelling, or something uninstalled. It is
+// asked by `doctor` and the session-watcher, the two that look at PATH, and
+// not by Load, which does not (D-108).
+func (c *Config) WrittenAndNotOnPath(file string) []error {
+	installed := c.OnPath()
+	var problems []error
+	for _, name := range slices.Sorted(maps.Keys(c.Integrations)) {
+		if !slices.Contains(installed, name) {
+			problems = append(problems, fmt.Errorf(
+				"%s: integrations.%s is written, and there is no %s on PATH",
+				file, name, Program(name)))
+		}
+	}
+	return problems
 }
 
 // Defaults is the configuration of a machine with no configuration file.
@@ -94,8 +127,8 @@ func Defaults() Config {
 	}
 }
 
-// Load reads the user's file and PATH. An absent file is not a complaint;
-// one that does not parse is the one refusal.
+// Load reads the user's file. An absent file is not a complaint; one that
+// does not parse is the one refusal. PATH is left for OnPath.
 func Load(layout paths.Layout) (Config, []error) {
 	data, err := os.ReadFile(layout.ConfigFile)
 	var problems []error
@@ -104,14 +137,6 @@ func Load(layout paths.Layout) (Config, []error) {
 		data = nil
 	}
 	config, parseProblems := Parse(data, layout.ConfigFile)
-	config.Installed = onpath.Integrations()
-	for name := range config.Integrations {
-		if !slices.Contains(config.Installed, name) {
-			problems = append(problems, fmt.Errorf(
-				"%s: integrations.%s is written, and there is no %s on PATH",
-				layout.ConfigFile, name, Program(name)))
-		}
-	}
 	return config, append(problems, parseProblems...)
 }
 
@@ -120,7 +145,7 @@ func Load(layout paths.Layout) (Config, []error) {
 // answer from "your entry is not there".
 var ErrRefused = errors.New("configuration refused")
 
-// Parse is Load for one file's bytes, with PATH left unread. A file that does
+// Parse is Load for one file's bytes. A file that does
 // not parse as YAML is refused whole; one that parses but says something
 // unrecognised keeps everything it got right.
 func Parse(data []byte, name string) (Config, []error) {
