@@ -1,7 +1,10 @@
 package sessionwatcher_test
 
 import (
+	"encoding/json"
+	"os"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -87,4 +90,49 @@ func TestARendererIsHandedWhatEndedRecentlyAndNotWhatIsRetained(t *testing.T) {
 	if !slices.Equal(handed, []string{"recent"}) {
 		t.Errorf("the renderer was handed %v, want the one that ended recently and not the retained one", handed)
 	}
+}
+
+// TestAReplacedCaptureIsInterpretedAgainAfterGivingUp is D-109: giving up
+// is per capture. A container that failed three times against one pane is
+// asked again when the session comes back in a new process with a new
+// capture, because nothing about the old failures is about the new pane.
+func TestAReplacedCaptureIsInterpretedAgainAfterGivingUp(t *testing.T) {
+	atATestablePace(t, 100*time.Millisecond)
+	root := shortRoot(t)
+	placer := root + "/agent-notify-placer"
+	attempts := root + "/placer.attempts"
+	write(t, placer, "#!/bin/sh\ncase \"$1\" in\n"+
+		"  capabilities) printf '%s\\n' '{\"version\":\"0.0.0-dev\",\"methods\":[\"interpret-environment\",\"focus\",\"focused\"]}' ;;\n"+
+		"  interpret-environment) echo x >> "+attempts+"; exit 1 ;;\n  *) exit 1 ;;\nesac\n")
+	if err := os.Chmod(placer, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	attemptsSoFar := func() int {
+		content, _ := os.ReadFile(attempts)
+		return strings.Count(string(content), "x")
+	}
+
+	layout := running(t, root)
+	key := session.Key{Host: "mac", Agent: "fake", SessionID: "back"}
+	applyToTheStore(t, layout, session.Report{
+		Key: key, Event: session.TurnFinished, Process: session.Process{PID: os.Getpid()},
+		CapturedContext: &session.CapturedContext{
+			By: map[string]json.RawMessage{"placer": json.RawMessage(`{"pane":"1"}`)},
+		},
+	})
+	waitFor(t, "the placer to be given up on", func() bool { return attemptsSoFar() >= 3 })
+	time.Sleep(500 * time.Millisecond)
+	if got := attemptsSoFar(); got != 3 {
+		t.Fatalf("the placer was asked %d times, want 3 and then nothing", got)
+	}
+
+	// The session comes back in another process: a new capture, and
+	// everything derived from the old one void (D-90).
+	applyToTheStore(t, layout, session.Report{
+		Key: key, Event: session.TurnFinished, Process: session.Process{PID: os.Getppid()},
+		CapturedContext: &session.CapturedContext{
+			By: map[string]json.RawMessage{"placer": json.RawMessage(`{"pane":"2"}`)},
+		},
+	})
+	waitFor(t, "the placer to be asked about the new capture", func() bool { return attemptsSoFar() >= 4 })
 }

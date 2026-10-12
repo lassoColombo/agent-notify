@@ -55,8 +55,11 @@ type Watcher struct {
 	logger *slog.Logger
 
 	mu sync.Mutex
-	// refused counts how often a container failed to interpret one session, so
-	// that a broken one stops being run every sweep. Cleared on reload.
+	// refused counts how often a container failed to interpret one capture,
+	// so that a broken one stops being run every sweep. Keyed on the
+	// capture and not the session: a session back in a new process has a
+	// new capture, and failures against the old pane say nothing about the
+	// new one (D-109). Cleared on reload.
 	refused map[string]int
 	// complained remembers a configuration mistake already reported.
 	complained map[string]bool
@@ -410,7 +413,7 @@ func (w *Watcher) derive(world []session.Record) {
 			if _, already := record.DerivedContext[one.Name]; already {
 				continue
 			}
-			if w.gaveUpOn(record.Key.String(), one.Name) {
+			if w.gaveUpOn(record, one.Name) {
 				continue
 			}
 			if !slices.Contains(one.Methods, session.MethodInterpret) {
@@ -419,7 +422,7 @@ func (w *Watcher) derive(world []session.Record) {
 
 			coordinates, err := containers.Interpret(one, record.CapturedContext, interpretTimeout)
 			if err != nil {
-				failures := w.giveUpOn(record.Key.String(), one.Name)
+				failures := w.giveUpOn(record, one.Name)
 				level := w.logger.Warn
 				if failures >= attemptsBeforeGivingUp {
 					level = w.logger.Error
@@ -464,19 +467,27 @@ func isEmptyObject(captured json.RawMessage) bool {
 // the session-watcher asking zellij about a pane a moment before it exists.
 const attemptsBeforeGivingUp = 3
 
-func (w *Watcher) gaveUpOn(session, container string) bool {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.refused[session+"\x00"+container] >= attemptsBeforeGivingUp
+// oneCapture names what a container was asked to interpret: this session's
+// capture, which `captured_at` dates once per capture and a top-up leaves
+// alone (D-90).
+func oneCapture(record session.Record, container string) string {
+	return record.Key.String() + "\x00" + container + "\x00" +
+		record.CapturedContext.CapturedAt.Format(time.RFC3339Nano)
 }
 
-func (w *Watcher) giveUpOn(session, container string) int {
+func (w *Watcher) gaveUpOn(record session.Record, container string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.refused[oneCapture(record, container)] >= attemptsBeforeGivingUp
+}
+
+func (w *Watcher) giveUpOn(record session.Record, container string) int {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.refused == nil {
 		w.refused = map[string]int{}
 	}
-	key := session + "\x00" + container
+	key := oneCapture(record, container)
 	w.refused[key]++
 	return w.refused[key]
 }

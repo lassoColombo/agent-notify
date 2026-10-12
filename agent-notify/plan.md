@@ -5389,6 +5389,24 @@ of this section is that it prevents re-litigating.
     handshake and nowhere else. `Load`'s problems are now about the file
     alone, which is what a render child or a preview has any use for.
 
+- **D-109** (2026-10-12) — **Giving up on a container is per capture, not
+  per session.** *Amends* D-91's "a broken one stops being run every sweep",
+  which is still true and now stops at the capture it was broken against.
+  Found by the architecture review of the same day.
+  - **What was wrong.** `derive` counted a container's failed
+    `interpret-environment` runs under `session + container`, and cleared the
+    count on reload alone. The key outlived the thing that failed: a session
+    resumed in a new process got a fresh capture and its `derived_context`
+    voided (D-90), `derive` tried again, and `gaveUpOn` refused it on the
+    strength of three failures against a pane that no longer existed. That
+    session was never placed, so never focused, until a reload, and nothing
+    said why.
+  - **Now the key is `session + container + captured_at`.** `captured_at` is
+    stamped once per capture and a top-up leaves it alone, so a replaced
+    capture is a new key and the same capture is the same key, which is
+    exactly the lifetime of what was interpreted. The map grows by one entry
+    per capture rather than per session; reload still clears it.
+
 **The payload discussion of 2026-09-17 is now ratified**
  in D-10 through D-18.
 What is still marked [proposed] elsewhere — the field list of §A7.4, the event
