@@ -5288,6 +5288,34 @@ of this section is that it prevents re-litigating.
   - **The end-to-end harness starts a watcher before its hooks fire**, which
     is the state a real machine is in for every session but the first.
 
+- **D-105** (2026-10-12) — **The sweep notices what is installed.** *Amends*
+  D-102 ("what is on PATH is what runs" now holds for a watcher that is
+  already running) and D-81 ("asked at startup and on reload — never on a
+  sweep": the asking is still never on a sweep; the sweep asks whether there
+  is anything new to ask). *Restates* D-23 for the loop that replaced
+  supervision: the reconciler makes reload free. Found by the architecture
+  review of the same day.
+  - **What was wrong.** PATH was scanned by every process at `config.Load`,
+    so the hook and every command saw a freshly installed integration at
+    once, while the watcher froze `Settings` and the answers at startup. A
+    program installed while it ran was in `Enabled()` everywhere and in the
+    report nowhere: the hook never captured for it, `Configured` never
+    listed it, no renderer ran for it, and nothing said so until somebody
+    knew to run `watcher reload`. The same held for an edited file.
+  - **Now the handshake takes a fingerprint beside the answers**: the
+    configuration file and every `agent-notify-<name>` on PATH, each with
+    its mtime. The sweep takes it again and a difference is
+    `reloadConfiguration`, the same path SIGHUP takes. One stat per PATH
+    directory and one per integration, every five seconds.
+  - **Binary mtimes are in it on purpose.** `make install` is the upgrade
+    path, so a rebuilt integration is re-asked, which is also what retries a
+    `capabilities` that timed out on a slow first start — the case the
+    review of 2026-10-09 left open.
+  - **A half-saved file is refused whole and reloaded again** on the next
+    tick when its mtime moves again, which is what `Parse` already does for
+    a file it finds malformed (§A14). SIGHUP stays for the person who will
+    not wait an interval.
+
 **The payload discussion of 2026-09-17 is now ratified**
  in D-10 through D-18.
 What is still marked [proposed] elsewhere — the field list of §A7.4, the event

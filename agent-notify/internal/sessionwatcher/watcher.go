@@ -8,8 +8,10 @@ import (
 	"encoding/json"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
 	"slices"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -19,6 +21,7 @@ import (
 	"github.com/lassoColombo/agent-notify/internal/core"
 	"github.com/lassoColombo/agent-notify/internal/handshake"
 	"github.com/lassoColombo/agent-notify/internal/onewatcher"
+	"github.com/lassoColombo/agent-notify/internal/onpath"
 	"github.com/lassoColombo/agent-notify/internal/paths"
 	"github.com/lassoColombo/agent-notify/internal/process"
 	"github.com/lassoColombo/agent-notify/internal/storewatch"
@@ -55,6 +58,9 @@ type Watcher struct {
 	// startup and on reload; unanswered is why one did not say.
 	answers    map[string]session.Capabilities
 	unanswered map[string]string
+	// asked is whatIsInstalled as it was when the answers were taken. The
+	// sweep compares it, and a difference is a reload (D-105).
+	asked string
 	// containers is `containers` resolved against those answers, which
 	// is the one piece of configuration the deriving goroutine reads.
 	containers []containers.Container
@@ -175,6 +181,9 @@ func (w *Watcher) Run(ctx context.Context) error {
 					"state", w.opened.Layout.State)
 				return nil
 			}
+			if w.whatIsInstalledMoved() {
+				w.reloadConfiguration(ctx)
+			}
 			w.prune()
 			w.reconcile("sweep")
 		}
@@ -279,8 +288,42 @@ func (w *Watcher) askWhatEachIntegrationAnswers() {
 	}
 
 	w.mu.Lock()
-	w.answers, w.unanswered = answers, unanswered
+	w.answers, w.unanswered, w.asked = answers, unanswered, whatIsInstalled(w.opened.Layout)
 	w.mu.Unlock()
+}
+
+// whatIsInstalled is the configuration file and every agent-notify-<name> on
+// PATH, each with when it was last written, as one string to compare. It is
+// what the answers are a property of: a program rebuilt, installed or removed,
+// or an opinion changed, is a different answer (D-105).
+func whatIsInstalled(layout paths.Layout) string {
+	var seen []string
+	if info, err := os.Stat(layout.ConfigFile); err == nil {
+		seen = append(seen, layout.ConfigFile+"@"+info.ModTime().String())
+	}
+	for _, name := range onpath.Integrations() {
+		found, err := exec.LookPath(config.Program(name))
+		if err != nil {
+			continue
+		}
+		info, err := os.Stat(found)
+		if err != nil {
+			continue
+		}
+		seen = append(seen, found+"@"+info.ModTime().String())
+	}
+	return strings.Join(seen, "\n")
+}
+
+// whatIsInstalledMoved is the sweep's question: is what is on disk still what
+// the answers were taken from? It costs one stat per PATH directory and one
+// per integration, which makes `watcher reload` something nobody has to know
+// about.
+func (w *Watcher) whatIsInstalledMoved() bool {
+	w.mu.Lock()
+	asked := w.asked
+	w.mu.Unlock()
+	return whatIsInstalled(w.opened.Layout) != asked
 }
 
 // writeReport files what was answered where `doctor` and a focus read it.
@@ -461,8 +504,9 @@ func (w *Watcher) prune() {
 	}
 }
 
-// reloadConfiguration re-reads the file on SIGHUP, asks every integration
-// again, and retries anything that had failed.
+// reloadConfiguration re-reads the file, asks every integration again, and
+// retries anything that had failed: on SIGHUP, and on the sweep that finds
+// the file or PATH moved (D-105).
 func (w *Watcher) reloadConfiguration(ctx context.Context) {
 	settings, problems := config.Load(w.opened.Layout)
 	for _, problem := range problems {

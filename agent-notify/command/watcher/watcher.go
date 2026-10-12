@@ -150,9 +150,9 @@ func watcherStop() int {
 	return 0
 }
 
-// watcherReload sends SIGHUP. There is no file watching: picking up a
-// half-saved file mid-write is a real failure (§A14). Asking is also how a
-// person retries a container that was broken or misspelled.
+// watcherReload sends SIGHUP: the sweep notices a changed file or PATH on its
+// own within one interval (D-105), and this is for the person who will not
+// wait that long.
 func watcherReload() int {
 	layout, err := paths.FromEnvironment()
 	if err != nil {
