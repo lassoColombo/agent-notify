@@ -37,6 +37,13 @@ var SweepInterval = 5 * time.Second
 // tool it is asking about (§A11.1).
 const interpretTimeout = 5 * time.Second
 
+// recentlyEnded bounds the ended sessions a renderer is handed. A display
+// wants an ended record to give a pane back (D-26), on the next render or on
+// the first one after a restart; it never wants the week retention keeps,
+// read and diffed on every wake (D-106). The cold read is unbounded: a
+// picker offers everything retained.
+const recentlyEnded = time.Hour
+
 // Watcher is the one long-lived process: it watches agents for death, derives
 // coordinates from what the hook captured, and runs displays when the store
 // moves.
@@ -239,6 +246,15 @@ func (w *Watcher) reconcile(why string) {
 		wantEnded = wantEnded || drawing.asked.WantEnded
 	}
 	world, ended := w.opened.WhatIsRunningAndWhatEnded(wantEnded)
+	if wantEnded {
+		// One not yet filed has no ended_at, and is what the next wake
+		// hands over as filed; it stays.
+		now := time.Now().UTC()
+		world = slices.DeleteFunc(world, func(record session.Record) bool {
+			return record.Kernel == session.Ended && !record.EndedAt.IsZero() &&
+				now.Sub(record.EndedAt) > recentlyEnded
+		})
+	}
 
 	// Derivation is asked for, not waited for, and is handed this read rather
 	// than making its own; what it finds comes back as a store wake.

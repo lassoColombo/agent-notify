@@ -5316,6 +5316,37 @@ of this section is that it prevents re-litigating.
     a file it finds malformed (§A14). SIGHUP stays for the person who will
     not wait an interval.
 
+- **D-106** (2026-10-12) — **A renderer is handed what ended recently, not
+  what is retained.** *Amends* D-26 and D-81's `want_ended` (it means "ended
+  within the last hour" to a display core runs) and D-92 (the one read per
+  wake is still one read; what a renderer is handed out of it is bounded).
+  The cold read is untouched. Found by the architecture review of the same
+  day.
+  - **What was wrong.** `reconcile` asked for ended sessions whenever any
+    renderer wanted them, and zellij does, so every hook-driven wake listed
+    `ended/`, parsed every record in it, sorted them, and ran `Differs` over
+    them in that renderer, which marshals each one twice. With a week of
+    retention that is tens to hundreds of records per tool call, the one
+    cost in the system that grew with `keep-ended-sessions` rather than with
+    activity. zellij needs an ended record for seconds, to give one pane
+    back; it never needs a week of them.
+  - **Now `recentlyEnded`, an hour, bounds what a renderer is handed**: a
+    record filed longer ago than that is dropped from the world before the
+    renderers and the deriving goroutine see it. One not yet filed has no
+    `ended_at` and stays, so the draw that shows a death before the store
+    does (D-92) is unchanged.
+  - **An hour, not a sweep interval**, because the case that needs the
+    record is a watcher stopped for an upgrade while a session ended, and a
+    pane does not wear a stale title for longer than that in practice.
+  - **The filter is in the watcher and not in `WhatIsRunningAndWhatEnded`**,
+    because that read is the picker's too, and a picker offers everything
+    retained. The listing of `ended/` still happens per wake; what grew was
+    the diffing in every renderer that asked, and that is what this removes.
+  - **Not taken**: zellij writing a mark on every title it owns, idle
+    included, so that `ours` recognises its own writing and it stops asking
+    for ended at all. That changes what an idle pane looks like, and is a
+    decision of its own.
+
 **The payload discussion of 2026-09-17 is now ratified**
  in D-10 through D-18.
 What is still marked [proposed] elsewhere — the field list of §A7.4, the event
