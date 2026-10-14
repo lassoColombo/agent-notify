@@ -136,3 +136,139 @@ func TestAReplacedCaptureIsInterpretedAgainAfterGivingUp(t *testing.T) {
 	})
 	waitFor(t, "the placer to be asked about the new capture", func() bool { return attemptsSoFar() >= 4 })
 }
+
+// TestARebuiltDisplayIsWokenForWhatItNowAsks is D-111: a display rebuilt
+// with another `wake_on` is re-asked on the sweep (D-105), and what it now
+// answers is what gates its renders, without the watcher restarting.
+func TestARebuiltDisplayIsWokenForWhatItNowAsks(t *testing.T) {
+	atATestablePace(t, 100*time.Millisecond)
+	root := shortRoot(t)
+	_, painted := aDisplay(t, root, "painter", "kernel")
+
+	layout := running(t, root)
+	waitFor(t, "the first render", func() bool {
+		return len(everythingPainted(t, painted)) > 0
+	})
+
+	key := session.Key{Host: "mac", Agent: "fake", SessionID: "one"}
+	said := "first"
+	applyToTheStore(t, layout, session.Report{Key: key, Event: session.UserSentPrompt, Message: &said})
+	waitFor(t, "the session to arrive", func() bool {
+		views := everythingPainted(t, painted)
+		return len(views[len(views)-1].Sessions) == 1
+	})
+
+	// Rebuilt: the same program, answering that it wakes on the message now.
+	// The reconcile that follows the reload draws it afresh: a first view,
+	// with nothing having changed.
+	drawn := len(everythingPainted(t, painted))
+	aDisplay(t, root, "painter", "message")
+	waitFor(t, "the rebuilt display to be re-asked", func() bool {
+		one, found := reported(t, layout, "painter")
+		return found && slices.Equal(one.Answers.WakeOn, []string{"message"})
+	})
+	waitFor(t, "the fresh renderer's first view", func() bool {
+		views := everythingPainted(t, painted)
+		return len(views) > drawn && len(views[len(views)-1].Changed) == 0
+	})
+
+	said = "second"
+	applyToTheStore(t, layout, session.Report{Key: key, Event: session.AgentProgressed, Message: &said})
+	waitFor(t, "a render for the message alone", func() bool {
+		for _, view := range everythingPainted(t, painted) {
+			for _, change := range view.Changed {
+				if change.Record.Message == "second" {
+					return true
+				}
+			}
+		}
+		return false
+	})
+}
+
+// TestAReloadMovesRetention is D-117: `keep-ended-sessions` edited and picked
+// up by the sweep takes effect without a restart, and at the reload rather
+// than at the hour.
+func TestAReloadMovesRetention(t *testing.T) {
+	atATestablePace(t, 100*time.Millisecond)
+	root := shortRoot(t)
+
+	t.Setenv(paths.TheVariableThatNamesTheRoot, root)
+	layout, err := paths.FromEnvironment()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := layout.Create(); err != nil {
+		t.Fatal(err)
+	}
+	settings, _ := config.Load(layout)
+	store, err := sessionstore.Open(layout, settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := session.Key{Host: "mac", Agent: "fake", SessionID: "old"}
+	twoHoursAgo := time.Now().UTC().Add(-2 * time.Hour)
+	for _, event := range []session.Event{session.TurnFinished, session.SessionEnded} {
+		if _, err := store.Apply(session.Report{Key: key, Event: event}, twoHoursAgo); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	running(t, root)
+	waitFor(t, "the first report", func() bool {
+		_, found := handshake.Read(layout)
+		return found
+	})
+	if _, err := os.Stat(layout.EndedFile(key.String())); err != nil {
+		t.Fatalf("forgotten under the default week of retention: %v", err)
+	}
+
+	write(t, layout.ConfigFile, "keep-ended-sessions: 1h\n")
+	waitFor(t, "the session to be forgotten on the reload", func() bool {
+		_, err := os.Stat(layout.EndedFile(key.String()))
+		return os.IsNotExist(err)
+	})
+}
+
+// TestTwoRendersOfOneDisplayAreNeverInFlightTogether is D-111's other half: a
+// display rebuilt while its render is in flight is drawn afresh by the same
+// goroutine, after that render, and never beside it.
+func TestTwoRendersOfOneDisplayAreNeverInFlightTogether(t *testing.T) {
+	atATestablePace(t, 100*time.Millisecond)
+	root := shortRoot(t)
+	painter, log := root+"/agent-notify-painter", root+"/painter.log"
+	slowPainter := func(wakeOn string) {
+		t.Helper()
+		script := "#!/bin/sh\ncase \"$1\" in\n" +
+			"  capabilities) printf '%s\\n' '{\"version\":\"0.0.0-dev\",\"methods\":[\"render\"],\"wake_on\":[\"" + wakeOn + "\"]}' ;;\n" +
+			"  render) echo start >> " + log + "; cat > /dev/null; sleep 1; echo end >> " + log + " ;;\n" +
+			"  *) exit 1 ;;\nesac\n"
+		// Renamed into place rather than rewritten: the first render is
+		// still running the old file when the second is written, and the
+		// temporary is named so that the PATH scan does not take it for an
+		// integration.
+		if err := os.WriteFile(root+"/painter.next", []byte(script), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(root+"/painter.next", painter); err != nil {
+			t.Fatal(err)
+		}
+	}
+	logged := func() []string {
+		content, _ := os.ReadFile(log)
+		return strings.Fields(string(content))
+	}
+
+	slowPainter("kernel")
+	running(t, root)
+	waitFor(t, "the first render to start", func() bool { return len(logged()) == 1 })
+
+	// Rebuilt mid-render with another answer: the sweep re-asks, and the
+	// reconcile after the reload wakes it again.
+	slowPainter("message")
+	waitFor(t, "the second render to end", func() bool { return len(logged()) == 4 })
+
+	if got := logged(); !slices.Equal(got, []string{"start", "end", "start", "end"}) {
+		t.Errorf("the painter saw %v, want one render finished before the next started", got)
+	}
+}

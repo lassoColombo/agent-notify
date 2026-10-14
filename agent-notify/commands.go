@@ -49,7 +49,7 @@ func theWholeCommandTree() *cobra.Command {
 		Use:   "agent-notify",
 		Short: "the semaphore over your coding agents",
 		Long: `agent-notify keeps one answer up to date — which of your agents wants you —
-and hands it to whatever displays it: a menu bar, a pane title, a notification.
+and hands it to whatever displays it: a pane title, a notification, a picker.
 
 This command is the client half of the same library an integration links, and
 never a second implementation of anything.`,

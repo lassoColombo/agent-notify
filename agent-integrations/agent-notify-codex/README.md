@@ -251,9 +251,11 @@ session *is* — the ancestor core records the pid of
 and judges liveness by — is found by walking this hook's own ancestry for a
 process called `codex`. That name is a constant of this program: `main.go`
 hands it to `hook.Main` beside the usage string, and core matches it against
-the kernel's command name for each ancestor, the executable path, and that
-path's basename. There is no key for it, because no file could know codex's
-process name better than the program written for codex.
+the name the kernel keeps for each ancestor, which the kernel takes from the
+last component of the path handed to exec, so a symlink called `codex` to a
+versioned binary still reads `codex` (D-118). There is no key for it, because
+no file could know codex's process name better than the program written for
+codex.
 
 Everything in that file — `keep-ended-sessions: 168h`, the `integrations:`
 map, the `containers:` list — belongs to core and to the tools, and this

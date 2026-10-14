@@ -1,6 +1,8 @@
 package core
 
 import (
+	"time"
+
 	"github.com/lassoColombo/agent-notify/internal/process"
 	"github.com/lassoColombo/agent-notify/session"
 )
@@ -22,7 +24,7 @@ import (
 // `includeEnded` asks for the sessions that are over and still resumable, which
 // is the set a picker exists to offer (§A7.5) and the set a bar does not want.
 func (c *Core) WhatIsRunning(includeEnded bool) []session.Record {
-	records, _ := c.WhatIsRunningAndWhatEnded(includeEnded)
+	records, _ := c.WhatIsRunningAndWhatEnded(includeEnded, time.Time{})
 	return records
 }
 
@@ -32,12 +34,21 @@ func (c *Core) WhatIsRunning(includeEnded bool) []session.Record {
 // what the verdicts name (D-92). It is the same read and the same decision —
 // process.Ended, superseded sessions included — so a display the watcher runs
 // and one reading cold through the SDK see one world.
-func (c *Core) WhatIsRunningAndWhatEnded(includeEnded bool) ([]session.Record, []process.Ending) {
-	list := c.Store.List
+//
+// `endedSince` bounds the ended sessions: a renderer needs the one that ended
+// a moment ago and never the week retention keeps (D-106), and the store
+// skips the rest before reading them (D-113). Zero is everything retained,
+// which is what a picker offers.
+func (c *Core) WhatIsRunningAndWhatEnded(
+	includeEnded bool, endedSince time.Time,
+) ([]session.Record, []process.Ending) {
+	var records []session.Record
+	var err error
 	if includeEnded {
-		list = c.Store.ListIncludingEnded
+		records, err = c.Store.ListIncludingEnded(endedSince)
+	} else {
+		records, err = c.Store.List()
 	}
-	records, err := list()
 	if err != nil {
 		// One unreadable record costs its own row and nothing else.
 		c.Logger.Warn("reading sessions", "problem", err.Error())

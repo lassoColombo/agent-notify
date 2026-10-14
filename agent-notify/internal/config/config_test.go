@@ -266,3 +266,31 @@ func TestUnreadableFileIsAComplaintNotACrash(t *testing.T) {
 		t.Errorf("an unreadable file did not fall back to defaults")
 	}
 }
+
+// TestACopyOfTheConfigurationSharesTheOneScan is D-115: the configuration is
+// passed by value, and a copy asked before the original was does the scan
+// for both, so PATH is read once per process rather than once per copy.
+func TestACopyOfTheConfigurationSharesTheOneScan(t *testing.T) {
+	bin := t.TempDir()
+	program := func(name string) {
+		if err := os.WriteFile(filepath.Join(bin, "agent-notify-"+name), []byte("#!/bin/sh\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	program("painter")
+	t.Setenv("PATH", bin)
+
+	settings := config.Defaults()
+	copied := settings
+	if got := copied.OnPath(); !reflect.DeepEqual(got, []string{"painter"}) {
+		t.Fatalf("the copy saw %v on PATH, want painter", got)
+	}
+	program("placer")
+	if got := settings.OnPath(); !reflect.DeepEqual(got, []string{"painter"}) {
+		t.Errorf("the original scanned again and saw %v; the copy's scan was the one scan", got)
+	}
+	settings.Installed = []string{"handed"}
+	if got := settings.OnPath(); !reflect.DeepEqual(got, []string{"handed"}) {
+		t.Errorf("a list handed over was not what OnPath answered: %v", got)
+	}
+}

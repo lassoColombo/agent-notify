@@ -75,7 +75,7 @@ Words used in exactly one sense throughout this document.
 | **session** | one run of one agent, identified by the id that agent assigns it. Survives being resumed. |
 | **agent-integration** | the small program an agent execs as a hook. One per agent, one repo each. |
 | **hook event** | what an agent-integration reports to core: what happened, plus a detail label, plus captured context. |
-| **record-agent-event** | the core entry point that receives a hook event, updates the store and pokes the session-watcher. Runs *inside the hook process*. |
+| **record-agent-event** | the core entry point that receives a hook event, writes the record and makes sure a session-watcher exists. Runs *inside the hook process*. |
 | **session-watcher** | the single long-lived core process per user. Watches for death, fans out, supervises integrations. |
 | **session record** | the stored description of one session. |
 | **session store** | the on-disk set of session records. The only source of truth. |
@@ -179,32 +179,39 @@ day agent-notify does get published.
 
 ### A3.2 The shape of the system
 
+**[amended 2026-10-13 — D-120]** The diagram describes the bus D-83 chose: the
+store, watched. The shape with a poke, a stream per display and a watcher that
+supervised displays held until 2026-09-28, and D-83 says why it went.
+
 ```
   claude ── fires hook ──▶ agent-notify-claude          (a Go binary; imports the core library)
                              │  translates: this agent's event  ──▶  what-happened + detail
-                             │  captures:   allowlisted env vars + process ancestry
+                             │  captures:   runs each integration's capture-environment, as a child
                              ▼
-                          record-agent-event                          (core library, in the same process)
-                             │  1. identify the session and the agent process
+                          hook.Record                                  (core library, in the same process)
+                             │  1. find the agent's process in this process's ancestry
                              │  2. reduce (previous kernel state, what-happened) ──▶ kernel state
-                             │  3. write the session record        ── the truth
-                             │  4. ensure a session-watcher exists          ── detached spawn, never waited on
-                             │  5. poke the session-watcher                 ── a hint, losable by design
+                             │  3. write the session record        ── the truth, and the bus
+                             │  4. make sure a session-watcher exists      ── detached spawn, never waited on
                              ▼
+                  the store: sessions/ and ended/           (watched with kqueue by everything below)
+                             │
                           session-watcher                        (one per user, long-lived)
                              ├─ watches each agent process for exit  (kqueue / pidfd)
                              ├─ sweeps the store for what died unobserved
                              ├─ derives container-coordinates from captured-context
-                             ├─ coalesces changes and fans them out
-                             └─ spawns and supervises the DISPLAYS
-                                     │   (one unix stream connection each, for its whole life)
+                             └─ runs `render` on each display that answers it,
+                                when a field the display named moved
                       ┌──────────────┴───────────────┐
                       ▼                              ▼
-          agent-notify-zellij-display        agent-notify-sketchybar
-          pane and tab titles                counters and chips
+          agent-notify-zellij                agent-notify-macos-notifier
+          pane and tab titles                a banner
 
-                          the CONTAINERS                  (run when asked, never connected)
-                             ├─ agent-notify-zellij-container     which pane, and go there
+          a display that owns its process — the picker, `tail` — watches the
+          store itself, through subscribe.Run, and is run by nobody
+
+                          the CONTAINERS                  (run when asked, never resident)
+                             ├─ agent-notify-zellij               which pane, and go there
                              └─ agent-notify-aerospace-container  which window, and go there
 ```
 
@@ -236,26 +243,30 @@ Numbered because each step has a rule attached to it.
    (a free string it alone chooses). It never decides what state the session is
    now in, because that answer depends on the previous state and it does not
    have one. **[decided]**
-3. **record-agent-event captures context** — the allowlisted environment
-   variables and the process ancestry chain — and resolves which ancestor is the
-   agent process.
+3. **record-agent-event captures context** — each integration's
+   `capture-environment`, run as a child, and the process ancestry chain — and
+   resolves which ancestor is the agent process.
 4. **record-agent-event takes the session's lock**, reads the previous record,
    reduces `(previous kernel state, what happened) → new kernel state`, merges
    the detail and the captured context, stamps time and sequence, and writes the
    record atomically.
-5. **record-agent-event ensures a session-watcher exists**: it sends the poke,
-   and if nothing is listening it spawns a detached session-watcher and returns
-   immediately. It never waits for the session-watcher to come up, because the
-   session-watcher reconciles from the store on startup and therefore loses
-   nothing. **[decided]**
+5. **record-agent-event ensures a session-watcher exists**: if nothing holds
+   the lock it spawns a detached session-watcher and returns immediately. It
+   never waits for the session-watcher to come up, because the session-watcher
+   reconciles from the store on startup and therefore loses nothing.
+   **[decided]** **[amended 2026-10-13 — D-120]** There is no poke: the write
+   in step 4 is what wakes the watcher (D-83).
 6. **record-agent-event exits 0**, having written nothing to stdout.
-7. **The session-watcher wakes**, re-reads the changed record, and if this
-   session is new to it, registers a process-exit watch on the agent pid and
-   asks the containers to derive container-coordinates from the
-   captured-context.
-8. **The session-watcher coalesces and fans out.** Each connected display gets,
-   at its own pace, the fact that this session changed.
-9. **Each display renders** from the event, or from the store, or from both.
+7. **The session-watcher wakes**, because a directory it watches changed,
+   re-reads the store, registers a process-exit watch on any agent pid it is
+   not yet watching, and asks the containers to derive container-coordinates
+   from a captured-context nothing has interpreted yet.
+8. **The session-watcher hands every display it runs the whole world**, once
+   per wake, and each decides from what it last showed whether anything it
+   asked to be woken for moved (R22, R23). A display that owns its process
+   watches the store itself and does the same.
+9. **Each display renders** the view it was handed: the whole world, and what
+   moved in it.
 
 ## A5. The state model: closed kernel, open detail
 
@@ -5340,7 +5351,8 @@ of this section is that it prevents re-litigating.
     pane does not wear a stale title for longer than that in practice.
   - **The filter is in the watcher and not in `WhatIsRunningAndWhatEnded`**,
     because that read is the picker's too, and a picker offers everything
-    retained. The listing of `ended/` still happens per wake; what grew was
+    retained. The listing of `ended/` still happens per wake (a stat per
+    file since D-113); what grew was
     the diffing in every renderer that asked, and that is what this removes.
   - **Not taken**: zellij writing a mark on every title it owns, idle
     included, so that `ours` recognises its own writing and it stops asking
@@ -5406,6 +5418,211 @@ of this section is that it prevents re-litigating.
     capture is a new key and the same capture is the same key, which is
     exactly the lifetime of what was interpreted. The map grows by one entry
     per capture rather than per session; reload still clears it.
+
+- **D-110** (2026-10-13) — **Superseded is decided on which session the
+  agent last reported on, not on when the records were last written.**
+  *Amends* §A8.6's "superseded inside that process (`/clear`)" with how the
+  one the process is running is told from the one it left. Found by the
+  architecture review of the same day, and revised by the second review the
+  same day, before it was committed.
+  - **What was wrong.** `supersededBy` compared `updated_at`, which every
+    write moves. The deriving goroutine writes coordinates on a session after
+    its hook, and `annotate` writes whenever a person asks; either landing on
+    the old session after the `/clear` hook had written the new one made the
+    old record the later one, and `Ended` filed the NEW session as
+    `superseded` while keeping the old one live. A probe showed it. It healed
+    on the new session's next hook, which resurrects it, and until then the
+    bar was wrong about both.
+  - **`created_at` was the first answer, and it is wrong the other way.** It
+    says which session was born later, and the question is which one the
+    process is running now: an older session resumed inside the same process
+    after a `/clear` is the live one and was born first. Both adapters file
+    the replaced session on their own end hook, so the watcher's rule only
+    sees two live records when that hook was missed — a write abandoned
+    under lock patience, a crashed hook, Claude's decoy on `--resume` whose
+    end was lost — and then birth order ended the active session on every
+    sweep, each of its hooks resurrected it, and nothing healed.
+  - **Now the record carries `reported_at`**, stamped by `session.Apply` and
+    so moved by a report and by nothing else: a hook's, or the watcher's own
+    ending. A derive or an annotate goes through `Update` and leaves it
+    alone. A hook speaks from inside the process about the session it is in,
+    which is exactly the witness the question wants. It is a stamp
+    (`stampFields`): no display reads it, and a display with an empty
+    `wake_on` is not woken by it. A record from before the stamp existed is
+    never newer than one with it, and two of them end nobody (R5).
+
+- **D-111** (2026-10-13) — **Reload does what D-105 promised: a rebuilt
+  display is gated by what it answers now, and a program replaced during the
+  ask is asked again.** *Amends* D-105 and D-92's "a renderer keeps the newest
+  it was given". Found by the architecture review of the same day.
+  - **What was wrong, twice.** `startRenderers` skipped a name it already had,
+    so the `wake_on` and `want_ended` frozen at first start gated every render
+    after a reload: D-105 re-asked a rebuilt display and the answer never
+    reached the renderer. The dropped renderer's goroutine also ran on until
+    the watcher stopped, one per removed display per reload. And the
+    fingerprint the sweep compares was taken after the handshake returned, so
+    `make install` writing six binaries while the ask ran (up to two seconds)
+    left answers from the old programs under a fingerprint of the new ones,
+    and nothing asked again.
+  - **Now a renderer is redeclared in place when its answer differs** from
+    the one it holds: it takes the new answer and forgets what it was shown,
+    under its own mutex, so the reconcile that follows the reload hands it a
+    first view, which is the cold path (§A7.6) and correct. The goroutine
+    stays, one per display name for as long as the display is configured,
+    which is what makes two renders of one display in flight together
+    impossible: the first design replaced the goroutine, and the replacement
+    rendered beside a render the old one still had in flight, the overlap
+    the one-slot `woken` channel exists to prevent. A display that left the
+    configuration has its cancel called, as before, and `Run` waits for every
+    renderer as it already waited for derivation, so a restart cannot have
+    the old watcher's last render land after the new one's first draw. The
+    waits are deferred before the context's cancel so that a return no signal
+    caused — the state directory gone — cancels first; it did not, and the
+    derive wait would have hung that exit. **And the fingerprint is taken
+    before the ask**: whatever moves during it moves the fingerprint on the
+    next sweep.
+
+- **D-112** (2026-10-13) — **Pruning runs at startup and once an hour, not
+  on every sweep.** *Amends* D-84's "the sweep prunes". Found by the
+  architecture review of the same day.
+  - **What was wrong.** `prune` ran before every sweep's reconcile, and
+    `ForgetWhatIsTooOld` lists and decodes every record in `ended/` and stats
+    every lock file. With a week of retention that was hundreds of files
+    read every five seconds, for a deadline measured in days: the one cost
+    D-106 left that grew with `keep-ended-sessions` rather than with
+    activity.
+  - **Now `pruneInterval` is an hour**, on its own ticker, each prune followed
+    by a reconcile whose draw shows the departures; and once at startup, so a
+    watcher restarted after a long stop forgets what it should before its
+    first draw. `doctor` still prunes when it is run, for a machine where no
+    watcher does.
+
+- **D-113** (2026-10-13) — **The store leaves out what ended before a cutoff
+  without reading it.** *Amends* D-106's "the listing of `ended/` still
+  happens per wake" (it happens, and it is a stat per file rather than a read
+  and a decode) and moves D-106's filter from the watcher into the store.
+  Found by the architecture review of the same day.
+  - **What was wrong.** With zellij present every hook-driven wake listed
+    `ended/`, read and decoded every record in it, and then the watcher
+    dropped all but the last hour's. The decode was the cost, and it grew
+    with retention.
+  - **Now `ListIncludingEnded(endedSince)` skips a file last written before
+    the cutoff on its mtime**, before opening it, and skips a record whose
+    `ended_at` is before the cutoff after reading it. The first is safe
+    because a file is never written earlier than the `ended_at` it carries;
+    the second catches a record written since — an annotation — about a
+    session that ended long ago. One with no `ended_at` is skipped by the
+    first check when its file is old and never by the second, since nothing
+    dates it; this is a listing and not a deletion, so R5 is not in play. A
+    session not yet filed is in `sessions/`, which the cutoff never touches. `WhatIsRunningAndWhatEnded` takes the cutoff;
+    zero is everything retained, which is what `WhatIsRunning` and so the
+    picker ask for.
+
+- **D-114** (2026-10-13) — **The hook matches the agent on the facts the
+  walk already read.** Found by the architecture review of the same day.
+  - **What was wrong.** `Ancestry` read the facts of up to ten processes and
+    kept three fields of each; `FindAgent` then read every ancestor again, a
+    second sysctl and a `procargs2` per rung, to see the path it had thrown
+    away. Twice the process reads on the path the agent waits on (R1), by
+    construction.
+  - **Now the walk keeps what it read** (`climb`), `FindAgent` matches on
+    that, and `Ancestry` is the same walk narrowed to what a record carries.
+    What a record stores is unchanged: the path was never stored and still is
+    not (Facts.Path).
+
+- **D-115** (2026-10-13) — **The PATH scan is shared by every copy of the
+  configuration.** *Amends* D-108's "once per value". Found by the
+  architecture review of the same day.
+  - **What was wrong.** `Config` cached the scan in the value and was passed
+    by value — to `Configured`, `Ask`, `Write`, `FocusSession` — so the cache
+    was lost at every call boundary and a callee that asked scanned again.
+    The watcher and the hook scanned once only because they happened to ask
+    through the pointer first; `focus-session` scanned up to three times. It
+    worked by call order, which stops working silently.
+  - **Now the cache is a pointer `Defaults` sets**, shared by every copy, with
+    a `sync.Once` around the one scan; the methods take the value. A `Config`
+    built as a literal has no scan to share and scans each time, which is what
+    a test that set nothing asked for; one that set `Installed` is answered
+    with it, as before. `onpath.Integrations` also stops calling `LookPath`,
+    which walks the whole of PATH, for an entry it has just listed: one stat
+    of the entry says whether it is an executable file, and it answers the
+    path beside the name, so the sweep's fingerprint stats that path rather
+    than walking PATH again per name, and a PATH that names a directory
+    twice has it read once.
+
+- **D-116** (2026-10-13) — **The hook reads the watcher's report and never
+  scans PATH.** *Amends* D-108, whose "the two processes that act on the
+  answer are the session-watcher and the hook" is now the watcher, `doctor`
+  and `install`. Found by the second architecture review of the same day.
+  - **What was wrong.** `whoCaptures` took `Settings.Enabled()`, which is
+    the PATH scan intersected with the file, to filter a report the watcher
+    had written from its own `Enabled()`: every name in it was on PATH and
+    enabled when written. The scan bought a disable written in the last five
+    seconds, since the sweep reloads on the file's mtime, and cost one
+    ReadDir per PATH entry on the path the agent waits on (R1). Measured on
+    a PATH of seventeen entries, one of them listed twice: 2.0ms per hook,
+    against the 4.9 to 9.3ms the whole hook measured at.
+  - **Now the hook checks the file's opinion alone**,
+    `Integrations[name].IsEnabled()`, which it has read anyway. A program
+    removed since the report fails to run and contributes nothing (R13), and
+    the next sweep rewrites the report.
+
+- **D-117** (2026-10-13) — **A reload reaches the store.** *Amends* D-105 and
+  `watcher reload`, both of which promised that an edited file takes effect
+  without a restart. Found by the second architecture review of the same day.
+  - **What was wrong.** `sessionstore.Open` copied `history-messages`,
+    `history-changes` and `keep-ended-sessions` at open, and
+    `reloadConfiguration` replaced `Settings` and left the store as it was,
+    so an edit to any of the three was ignored until a restart. The deriving
+    goroutine writes through the store concurrently, so swapping the store
+    would have been a race.
+  - **Now the store keeps the three behind an atomic pointer**, swapped whole
+    by `Reconfigure`, and `Core.Reload` is the one place a reload happens: it
+    re-reads the file, replaces `Settings` and reconfigures the store, so
+    nobody can do the first and forget the second. A write already under way
+    finishes with the configuration it started with. The watcher prunes at
+    the reload, so a shortened retention takes effect then rather than at
+    the hour (D-112).
+
+- **D-118** (2026-10-13) — **The ancestry walk matches on the name the kernel
+  keeps, and reads nothing else about a process.** *Amends* D-114's "the path
+  was never stored" to "the path is never read". Found by the second
+  architecture review of the same day.
+  - **What was wrong.** `isBinary` matched a process on its command name,
+    its executable path and the path's basename, and said the three were
+    spellings a person writes in a config file. There is no such file since
+    D-101: both adapters hand over a short constant, and the two path
+    branches could only have mattered for a name the kernel truncates, which
+    `claude` and `codex` never reach. Reading the path cost a
+    `kern.procargs2` per probe, which copies the target's whole argument and
+    environment block to take a path off the front of it: five microseconds,
+    and not the reason it went. Weight is.
+  - **Now `Facts` has no path**, `FindAgent` compares `Command` to the
+    constant, and `hook.Main` says what the constant is: the name the kernel
+    keeps, taken from the last component of the path handed to exec, so a
+    symlink called `claude` to a versioned binary still reads `claude`;
+    sixteen characters on macOS and fifteen on Linux, so an agent with a
+    longer name is handed the truncated spelling.
+
+- **D-119** (2026-10-13) — **The cold read creates nothing it does not have
+  to.** Found by the second architecture review of the same day.
+  - **What was wrong.** `sessionstore.Open` calls `layout.Create`, which did
+    `MkdirAll` and `Chmod` on six directories, and every command opens the
+    store: `list`, which documents itself as writing nothing and which a
+    statusline polls three times a second, chmodded six directories per
+    poll.
+  - **Now `Create` leaves alone a directory that is there with the right
+    mode**, one stat each, and still makes or restricts one that is not.
+    Nothing about who creates directories moves: the first hook on a fresh
+    machine still creates them before the log opens.
+
+- **D-120** (2026-10-13) — **The design prose describes the bus that
+  exists.** *Amends* D-84's "the prose describes the bus that exists", which
+  was true of the code's comments and not of §A2, §A3.2 and §A4, which still
+  had a poke, a unix stream per display and a watcher that supervised
+  displays. Found by the second architecture review of the same day. The
+  three are amended in place and dated; the decision log is history and
+  keeps every name it had.
 
 **The payload discussion of 2026-09-17 is now ratified**
  in D-10 through D-18.

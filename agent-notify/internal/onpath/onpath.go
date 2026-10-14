@@ -6,39 +6,46 @@ package onpath
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 )
 
 // Integrations is every agent-notify-<name> a person could run, by the name you
-// would type after `agent-notify install`.
+// would type after `agent-notify install`, and where each one is: the first
+// executable file of that name along PATH, which is the one exec resolves.
 //
 // The naming convention is the only thing core knows about an integration, and
 // deliberately so (R10) — this cannot tell a display from an adapter, and does
 // not need to.
-func Integrations() []string {
+func Integrations() map[string]string {
 	const prefix = "agent-notify-"
-	seen := map[string]bool{}
-	var found []string
+	found := map[string]string{}
+	visited := map[string]bool{}
 	for _, directory := range filepath.SplitList(os.Getenv("PATH")) {
+		if visited[directory] {
+			// A PATH that names a directory twice is the ordinary case, and
+			// the directory is read once (D-116).
+			continue
+		}
+		visited[directory] = true
 		entries, err := os.ReadDir(directory)
 		if err != nil {
 			continue
 		}
 		for _, entry := range entries {
 			name, isOne := strings.CutPrefix(entry.Name(), prefix)
-			if !isOne || seen[name] {
+			if !isOne || name == "" || found[name] != "" {
 				continue
 			}
-			if _, err := exec.LookPath(entry.Name()); err != nil {
+			// One stat, of the entry itself, rather than LookPath walking the
+			// whole of PATH again for a name this directory just listed.
+			path := filepath.Join(directory, entry.Name())
+			info, err := os.Stat(path)
+			if err != nil || !info.Mode().IsRegular() || info.Mode()&0o111 == 0 {
 				continue
 			}
-			seen[name] = true
-			found = append(found, name)
+			found[name] = path
 		}
 	}
-	slices.Sort(found)
 	return found
 }

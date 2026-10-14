@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"os"
-	"os/exec"
 	"os/signal"
 	"slices"
 	"strings"
@@ -16,7 +15,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/lassoColombo/agent-notify/internal/config"
 	"github.com/lassoColombo/agent-notify/internal/containers"
 	"github.com/lassoColombo/agent-notify/internal/core"
 	"github.com/lassoColombo/agent-notify/internal/handshake"
@@ -40,9 +38,16 @@ const interpretTimeout = 5 * time.Second
 // recentlyEnded bounds the ended sessions a renderer is handed. A display
 // wants an ended record to give a pane back (D-26), on the next render or on
 // the first one after a restart; it never wants the week retention keeps,
-// read and diffed on every wake (D-106). The cold read is unbounded: a
-// picker offers everything retained.
+// read and diffed on every wake (D-106). The store skips what was filed
+// earlier before reading it (D-113). The cold read is unbounded: a picker
+// offers everything retained.
 const recentlyEnded = time.Hour
+
+// pruneInterval is how often what has outlived keep-ended-sessions is
+// forgotten. Retention is days, so an hour loses nothing, and pruning lists
+// and reads the whole of ended/, which the sweep must not do every five
+// seconds (D-112).
+const pruneInterval = time.Hour
 
 // Watcher is the one long-lived process: it watches agents for death, derives
 // coordinates from what the hook captured, and runs displays when the store
@@ -75,8 +80,11 @@ type Watcher struct {
 	// is the one piece of configuration the deriving goroutine reads.
 	containers []containers.Container
 
-	// renderers is one per display core runs.
+	// renderers is one per display core runs, for as long as it is
+	// configured; rendering is how Run waits for the last render to finish
+	// before the process goes (D-111).
 	renderers map[string]*renderer
+	rendering sync.WaitGroup
 
 	// derivations is how reconcile asks the deriving goroutine to look at
 	// toDerive, the world the loop last read; one pending ask is enough, as
@@ -128,12 +136,12 @@ func Start(layout paths.Layout, toTerminal bool) (*Watcher, error) {
 	}, nil
 }
 
-// Run is the loop. It returns when the context is cancelled or a signal says so.
+// Run is the loop. It returns when the context is cancelled, a signal says
+// so, or the state directory is gone.
 func (w *Watcher) Run(ctx context.Context) error {
 	defer w.close()
 
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGTERM, syscall.SIGINT)
-	defer stop()
 
 	reload := make(chan os.Signal, 1)
 	signal.Notify(reload, syscall.SIGHUP)
@@ -145,6 +153,11 @@ func (w *Watcher) Run(ctx context.Context) error {
 
 	w.askWhatEachIntegrationAnswers()
 	w.resolveContainers()
+	// Waited for before close, as derivation is below: a render in flight
+	// when the watcher stops finishes before the process goes, so a restart
+	// cannot have the old watcher's last render land after the new one's
+	// first draw (D-111).
+	defer w.rendering.Wait()
 	w.startRenderers(ctx)
 	// The answers are a property of the programs on disk, asked here and on
 	// reload, so the report is written at those two moments and no other.
@@ -162,9 +175,14 @@ func (w *Watcher) Run(ctx context.Context) error {
 		w.deriveWhenAsked(ctx)
 	}()
 	defer deriving.Wait()
+	// Deferred after the two waits so that it runs before them: a return no
+	// signal caused — the state directory gone — has to cancel the goroutines
+	// first, or the waits never end.
+	defer stop()
 
 	// Reconciling from the store at startup is what makes every missed wake-up
-	// harmless (§A9.1, R4).
+	// harmless (§A9.1, R4). Pruning first, so the draw shows the departures.
+	w.prune()
 	w.reconcile("startup")
 
 	// One pending wake is enough: reconcile reads the whole store whatever
@@ -175,6 +193,8 @@ func (w *Watcher) Run(ctx context.Context) error {
 
 	tick := time.NewTicker(SweepInterval)
 	defer tick.Stop()
+	forget := time.NewTicker(pruneInterval)
+	defer forget.Stop()
 
 	for {
 		select {
@@ -185,6 +205,9 @@ func (w *Watcher) Run(ctx context.Context) error {
 			w.reloadConfiguration(ctx)
 		case why := <-woken:
 			w.reconcile(why)
+		case <-forget.C:
+			w.prune()
+			w.reconcile("prune")
 		case <-tick.C:
 			if w.worldIsGone() {
 				w.logger.Info("the state directory is gone; nothing left to watch",
@@ -194,7 +217,6 @@ func (w *Watcher) Run(ctx context.Context) error {
 			if w.whatIsInstalledMoved() {
 				w.reloadConfiguration(ctx)
 			}
-			w.prune()
 			w.reconcile("sweep")
 		}
 	}
@@ -246,18 +268,13 @@ func (w *Watcher) reconcile(why string) {
 	// display asked for them; the others drop them as they render.
 	wantEnded := false
 	for _, drawing := range w.renderers {
+		// Read without the renderer's lock: this goroutine is the one that
+		// moves it, in startRenderers.
 		wantEnded = wantEnded || drawing.asked.WantEnded
 	}
-	world, ended := w.opened.WhatIsRunningAndWhatEnded(wantEnded)
-	if wantEnded {
-		// One not yet filed has no ended_at, and is what the next wake
-		// hands over as filed; it stays.
-		now := time.Now().UTC()
-		world = slices.DeleteFunc(world, func(record session.Record) bool {
-			return record.Kernel == session.Ended && !record.EndedAt.IsZero() &&
-				now.Sub(record.EndedAt) > recentlyEnded
-		})
-	}
+	// One not yet filed has no ended_at and is in sessions/, so the bound
+	// never touches it: it is what the next wake hands over as filed.
+	world, ended := w.opened.WhatIsRunningAndWhatEnded(wantEnded, time.Now().UTC().Add(-recentlyEnded))
 
 	// Derivation is asked for, not waited for, and is handed this read rather
 	// than making its own; what it finds comes back as a store wake.
@@ -296,6 +313,10 @@ func (w *Watcher) askWhatEachIntegrationAnswers() {
 	for _, problem := range settings.WrittenAndNotOnPath(w.opened.Layout.ConfigFile) {
 		w.complainOnce(problem.Error())
 	}
+	// The fingerprint is taken before the ask, so a program replaced while
+	// the ask runs — `make install` writes six of them — is seen to have
+	// moved on the next sweep and asked again (D-111).
+	asked := whatIsInstalled(w.opened.Layout)
 	answers, unanswered := handshake.Ask(*settings)
 
 	for _, name := range settings.Enabled() {
@@ -310,7 +331,7 @@ func (w *Watcher) askWhatEachIntegrationAnswers() {
 	}
 
 	w.mu.Lock()
-	w.answers, w.unanswered, w.asked = answers, unanswered, whatIsInstalled(w.opened.Layout)
+	w.answers, w.unanswered, w.asked = answers, unanswered, asked
 	w.mu.Unlock()
 }
 
@@ -323,24 +344,20 @@ func whatIsInstalled(layout paths.Layout) string {
 	if info, err := os.Stat(layout.ConfigFile); err == nil {
 		seen = append(seen, layout.ConfigFile+"@"+info.ModTime().String())
 	}
-	for _, name := range onpath.Integrations() {
-		found, err := exec.LookPath(config.Program(name))
-		if err != nil {
-			continue
+	for _, found := range onpath.Integrations() {
+		if info, err := os.Stat(found); err == nil {
+			seen = append(seen, found+"@"+info.ModTime().String())
 		}
-		info, err := os.Stat(found)
-		if err != nil {
-			continue
-		}
-		seen = append(seen, found+"@"+info.ModTime().String())
 	}
+	// A map has no order, and this is compared as a string.
+	slices.Sort(seen)
 	return strings.Join(seen, "\n")
 }
 
 // whatIsInstalledMoved is the sweep's question: is what is on disk still what
-// the answers were taken from? It costs one stat per PATH directory and one
-// per integration, which makes `watcher reload` something nobody has to know
-// about.
+// the answers were taken from? It costs one directory read per PATH entry and
+// one stat per integration, which makes `watcher reload` something nobody has
+// to know about.
 func (w *Watcher) whatIsInstalledMoved() bool {
 	w.mu.Lock()
 	asked := w.asked
@@ -522,8 +539,8 @@ func (w *Watcher) end(ending process.Ending) {
 		"session", ending.Key.String(), "why", ending.Detail, "sequence", written.Sequence)
 }
 
-// prune forgets what has outlived keep-ended-sessions. It runs before the
-// sweep's reconcile, whose draw then shows the departures.
+// prune forgets what has outlived keep-ended-sessions: at startup and once
+// an hour, each followed by a reconcile whose draw shows the departures.
 func (w *Watcher) prune() {
 	removed, err := w.opened.Store.ForgetWhatIsTooOld(time.Now().UTC())
 	if err != nil {
@@ -538,11 +555,9 @@ func (w *Watcher) prune() {
 // retries anything that had failed: on SIGHUP, and on the sweep that finds
 // the file or PATH moved (D-105).
 func (w *Watcher) reloadConfiguration(ctx context.Context) {
-	settings, problems := config.Load(w.opened.Layout)
-	for _, problem := range problems {
+	for _, problem := range w.opened.Reload() {
 		w.logger.Warn("configuration", "problem", problem.Error())
 	}
-	w.opened.Settings = settings
 
 	w.askWhatEachIntegrationAnswers()
 	w.mu.Lock()
@@ -553,8 +568,11 @@ func (w *Watcher) reloadConfiguration(ctx context.Context) {
 
 	w.writeReport()
 	w.logger.Info("configuration re-read")
-	// A display started just now has a world to draw and no change to be
-	// told about: the cold path (§A7.6).
+	// Retention may have shortened, and is applied now rather than at the
+	// hour (D-117); the draw that follows shows the departures. A display
+	// started just now has a world to draw and no change to be told about:
+	// the cold path (§A7.6).
+	w.prune()
 	w.reconcile("reload")
 }
 

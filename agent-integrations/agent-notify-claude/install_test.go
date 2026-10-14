@@ -254,10 +254,16 @@ func TestTheHookNeverBlocks(t *testing.T) {
 		{"Notification", realIdle},
 		{"SessionStart", realStart},
 	}
+	// No agent-notify on PATH, so the hook starts no session-watcher: this
+	// is about the hook alone, and a detached watcher under a root the test
+	// is about to delete races the cleanup. Run from inside a Claude Code
+	// session the hook finds that `claude` above it, two sessions share its
+	// pid, and the watcher files one as superseded while the root goes.
+	nothingOnPath := "PATH=" + t.TempDir()
 	for _, attempt := range attempts {
 		command := exec.Command(binary)
 		command.Stdin = strings.NewReader(attempt.payload)
-		command.Env = append(os.Environ(), "AGENT_NOTIFY_ROOT="+root)
+		command.Env = append(os.Environ(), "AGENT_NOTIFY_ROOT="+root, nothingOnPath)
 		var out, errs strings.Builder
 		command.Stdout, command.Stderr = &out, &errs
 		err := command.Run()

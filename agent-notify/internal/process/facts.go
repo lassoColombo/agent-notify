@@ -36,14 +36,12 @@ type Facts struct {
 	// Linux it is not a date: it is the time since boot, counted from the Unix
 	// epoch, because that is the one form of it the kernel never moves (D-89).
 	StartedAt time.Time
-	// Command is the short name the kernel keeps, truncated to its own limit.
+	// Command is the short name the kernel keeps, truncated to its own limit:
+	// sixteen characters on macOS and fifteen on Linux. It is what an
+	// agent-integration's name is matched against (§A8.4), and the whole of
+	// what is read about a process beside its times and its parent (D-118).
 	Command string
-	// Path is the executable's full path where it could be read. It is used to
-	// match a configured binary and never stored: a record is about a kilobyte
-	// and rides in every delta (§A13.1), and six absolute paths would be a
-	// quarter of that for something nothing reads yet.
-	Path   string
-	Parent int
+	Parent  int
 }
 
 // ReadsProcessFacts is one question about one pid. The implementation that asks

@@ -4,10 +4,9 @@
 //
 // It is at the root of the module because it is the root of the dependency
 // graph: the one package nothing imports, sitting above everything that does
-// the work. The six directories beside it that an integration may import —
-// session, hook, subscribe, container, capture, tool, and the shared log — are
-// the other doors into the same library, and `internal/` holds what is behind
-// them.
+// the work. The five directories beside it that an integration may import —
+// session, hook, subscribe, container and tool (D-95) — are the other doors
+// into the same library, and `internal/` holds what is behind them.
 package main
 
 import (

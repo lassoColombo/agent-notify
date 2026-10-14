@@ -54,5 +54,17 @@ func OpenAt(layout paths.Layout, component string) (*Core, error) {
 	}, nil
 }
 
+// Reload re-reads the file and hands the store what a reload can move. It is
+// here so that nobody can replace Settings and leave the store with the
+// retention and history bounds it was opened with (D-117). What the loader
+// complained about is returned for the caller to log, and left in Problems as
+// OpenAt leaves it.
+func (c *Core) Reload() []error {
+	settings, problems := config.Load(c.Layout)
+	c.Settings, c.Problems = settings, problems
+	c.Store.Reconfigure(settings)
+	return problems
+}
+
 // Close releases the log file. Every other handle goes when the process does.
 func (c *Core) Close() { _ = c.closeLog.Close() }

@@ -44,21 +44,18 @@ var (
 //
 //	88251 the hook -> 88240 go -> 88236 zsh -> 38514 claude -> 99297 nu -> 3655 zellij
 func aRealLookingTree(self int) invented {
-	step := func(pid, parent int, command, path string) process.Facts {
-		return process.Facts{
-			PID: pid, Parent: parent, Command: command, Path: path,
-			StartedAt: started,
-		}
+	step := func(pid, parent int, command string) process.Facts {
+		return process.Facts{PID: pid, Parent: parent, Command: command, StartedAt: started}
 	}
 	return invented{
 		self: self,
 		processes: map[int]process.Facts{
-			88251: step(88251, 88240, "agent-notify", "/usr/local/bin/agent-notify"),
-			88240: step(88240, 88236, "go", "/usr/local/go/bin/go"),
-			88236: step(88236, 38514, "zsh", "/bin/zsh"),
-			38514: step(38514, 99297, "claude", "/opt/homebrew/bin/claude"),
-			99297: step(99297, 3655, "nu", "/opt/homebrew/bin/nu"),
-			3655:  step(3655, 1, "zellij", "/opt/homebrew/bin/zellij"),
+			88251: step(88251, 88240, "agent-notify"),
+			88240: step(88240, 88236, "go"),
+			88236: step(88236, 38514, "zsh"),
+			38514: step(38514, 99297, "claude"),
+			99297: step(99297, 3655, "nu"),
+			3655:  step(3655, 1, "zellij"),
 		},
 	}
 }
@@ -81,16 +78,13 @@ func TestTheAgentIsFoundHoweverManyShellsAreInTheWay(t *testing.T) {
 	}
 }
 
-// TestABinaryIsRecognisedHoweverItIsWritten: all three spellings are things a
-// person puts in a config file, and the absolute one is how you disambiguate
-// two claudes.
-func TestABinaryIsRecognisedHoweverItIsWritten(t *testing.T) {
+// TestTheAgentIsMatchedOnTheNameTheKernelKeeps: an adapter hands over the
+// short name its agent runs under, and nothing else about a process is read
+// (D-118). A path is not a name, and nothing matches nothing.
+func TestTheAgentIsMatchedOnTheNameTheKernelKeeps(t *testing.T) {
 	machine := aRealLookingTree(88251)
-	for _, binary := range []string{"claude", "/opt/homebrew/bin/claude"} {
-		found, _, ok := process.FindAgent(binary, 88251, machine)
-		if !ok || found.PID != 38514 {
-			t.Errorf("FindAgent(%q) found %d, %v", binary, found.PID, ok)
-		}
+	if _, _, ok := process.FindAgent("/opt/homebrew/bin/claude", 88251, machine); ok {
+		t.Error("a path matched a process whose name is claude")
 	}
 	if _, _, ok := process.FindAgent("", 88251, machine); ok {
 		t.Error("an unconfigured binary matched something")
@@ -220,14 +214,19 @@ func TestEndedFindsWhatNobodyAnnounced(t *testing.T) {
 
 	live := recordFor(500, started, boot)
 	live.Key = session.Key{Host: "mac", Agent: "claude", SessionID: "live"}
-	live.UpdatedAt = started.Add(time.Hour)
+	live.CreatedAt = started.Add(time.Hour)
+	live.ReportedAt = started.Add(2 * time.Hour)
 
 	killed := recordFor(999, started, boot)
 	killed.Key = session.Key{Host: "mac", Agent: "claude", SessionID: "killed"}
 
 	closed := recordFor(500, started, boot)
 	closed.Key = session.Key{Host: "mac", Agent: "claude", SessionID: "cleared"}
-	closed.UpdatedAt = started // older than live, same process: /clear happened
+	closed.CreatedAt = started // born before live, same process: /clear happened
+	closed.ReportedAt = started.Add(time.Hour)
+	// Written after live was: a derive or an annotate landed on it. That must
+	// not make it the live one (D-110).
+	closed.UpdatedAt = started.Add(4 * time.Hour)
 
 	already := recordFor(500, started, boot)
 	already.Key = session.Key{Host: "mac", Agent: "claude", SessionID: "already"}
@@ -250,6 +249,39 @@ func TestEndedFindsWhatNobodyAnnounced(t *testing.T) {
 	}
 	if _, ended := found["live"]; ended {
 		t.Error("the newest session in a living process was ended")
+	}
+}
+
+// TestTheSessionResumedInsideAProcessIsTheLiveOne is the case birth order gets
+// wrong (D-110): after a /clear the older session is resumed inside the same
+// process, and the one the agent reported on last is the one it is running,
+// however the two were born.
+func TestTheSessionResumedInsideAProcessIsTheLiveOne(t *testing.T) {
+	machine := invented{self: 1, processes: map[int]process.Facts{
+		1:   {PID: 1, StartedAt: started},
+		500: {PID: 500, StartedAt: started},
+	}}
+
+	resumed := recordFor(500, started, boot)
+	resumed.Key = session.Key{Host: "mac", Agent: "claude", SessionID: "resumed"}
+	resumed.CreatedAt = started
+	resumed.ReportedAt = started.Add(3 * time.Hour)
+
+	cleared := recordFor(500, started, boot)
+	cleared.Key = session.Key{Host: "mac", Agent: "claude", SessionID: "cleared"}
+	cleared.CreatedAt = started.Add(time.Hour)
+	cleared.ReportedAt = started.Add(2 * time.Hour)
+
+	ending := process.Ended([]session.Record{resumed, cleared}, boot, machine.self, machine)
+	if len(ending) != 1 || ending[0].Key.SessionID != "cleared" || ending[0].Detail != process.Superseded {
+		t.Fatalf("ended %+v, want the one born later and reported on earlier, as superseded", ending)
+	}
+
+	// Records from before the stamp existed end nobody: not knowing which is
+	// running must not become ending one of them (R5).
+	resumed.ReportedAt, cleared.ReportedAt = time.Time{}, time.Time{}
+	if ending := process.Ended([]session.Record{resumed, cleared}, boot, machine.self, machine); len(ending) != 0 {
+		t.Errorf("ended %+v with nothing to decide on", ending)
 	}
 }
 

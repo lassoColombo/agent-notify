@@ -23,14 +23,15 @@ func TestWakeOnOffersOnlyFieldsARecordHas(t *testing.T) {
 		t.Errorf("--wake-on offers something core refuses: %v", err)
 	}
 	for _, field := range offered {
-		// The two stamps that mean nothing to a renderer. Either one offered
-		// here is a subscriber woken by every write to render the same thing.
+		// The stamps that mean nothing to a renderer. Any one offered here
+		// is a subscriber woken by every write, or every hook, to render the
+		// same thing.
 		//
 		// `usage` is a stamp too and is deliberately not in this check: it
 		// means something, it is a stamp so that it does not wake a display
 		// that never asked about tokens, and naming it here is how a display
 		// asks (§A7.4.3).
-		if field == "sequence" || field == "updated_at" {
+		if field == "sequence" || field == "updated_at" || field == "reported_at" {
 			t.Errorf("--wake-on offers %q, which moves on every write", field)
 		}
 	}

@@ -187,6 +187,27 @@ func TestTheHookReadsTheReportAndNeverAsks(t *testing.T) {
 	if asked := whoCaptures(opened); !slices.Equal(asked, []string{"pane"}) {
 		t.Errorf("with a report naming pane the hook would run %v", asked)
 	}
+
+	// The report was written from the watcher's own scan, so the hook does
+	// not scan PATH to confirm it (D-116): with nothing on PATH at all, the
+	// report still names pane and the hook still asks it.
+	t.Setenv("PATH", t.TempDir())
+	again, err := core.OpenEverythingACommandNeeds("test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer again.Close()
+	if asked := whoCaptures(again); !slices.Equal(asked, []string{"pane"}) {
+		t.Errorf("with nothing on PATH and a report naming pane the hook would run %v: it scanned", asked)
+	}
+
+	// The file's own opinion is the one thing the hook checks, since it has
+	// read the file anyway.
+	off := false
+	again.Settings.Integrations["pane"] = config.Integration{Enabled: &off}
+	if asked := whoCaptures(again); len(asked) != 0 {
+		t.Errorf("with pane turned off in the file the hook would run %v", asked)
+	}
 }
 
 func owners(by map[string]json.RawMessage) []string {

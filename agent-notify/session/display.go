@@ -153,9 +153,10 @@ func MostUrgent(records []Record) (Record, bool) {
 // here or in any display.
 func (r Record) WantsYou() bool { return r.Rank > RankWorking }
 
-// stampFields move on every write and mean nothing to any renderer, so a change
-// in them alone is not worth waking anybody for — or offering around at all.
-var stampFields = map[string]bool{"sequence": true, "updated_at": true}
+// stampFields move on every write, or on every report, and mean nothing to any
+// renderer, so a change in them alone is not worth waking anybody for — or
+// offering around at all.
+var stampFields = map[string]bool{"sequence": true, "updated_at": true, "reported_at": true}
 
 // optInFields mean something, but they move as often as the agent thinks, so a
 // display is woken for them only if it named them. `usage` is the whole of

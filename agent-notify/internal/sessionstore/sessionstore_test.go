@@ -184,7 +184,7 @@ func TestListIncludingEndedSettlesTheSameTwoFiles(t *testing.T) {
 		t.Fatalf("Apply: %v", err)
 	}
 
-	listed, err := opened.ListIncludingEnded()
+	listed, err := opened.ListIncludingEnded(time.Time{})
 	if err != nil {
 		t.Fatalf("ListIncludingEnded: %v", err)
 	}
@@ -477,4 +477,68 @@ func age(t *testing.T, path string, at time.Time) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	_ = filepath.Base(path)
+}
+
+// TestListIncludingEndedSinceLeavesOutWhatEndedEarlier is D-113: a reader
+// that wants what ended recently is not handed a week of records, and the
+// ones it does not want are skipped on their file time before being read.
+func TestListIncludingEndedSinceLeavesOutWhatEndedEarlier(t *testing.T) {
+	opened, layout := open(t)
+
+	earlier := session.Key{Host: "mac", Agent: "claude", SessionID: "earlier"}
+	for _, one := range []struct {
+		key   session.Key
+		ended time.Time
+	}{
+		{earlier, when.Add(-2 * time.Hour)},
+		{key, when},
+	} {
+		if _, err := opened.Apply(session.Report{Key: one.key, Event: session.UserSentPrompt}, one.ended); err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+		if _, err := opened.Apply(session.Report{Key: one.key, Event: session.SessionEnded}, one.ended); err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+	}
+	// What was filed earlier is written earlier; the store is handed a file
+	// whose time says so, and never opens it.
+	if err := os.Chtimes(layout.EndedFile(earlier.String()), when.Add(-2*time.Hour), when.Add(-2*time.Hour)); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+	if err := os.Chmod(layout.EndedFile(earlier.String()), 0); err != nil {
+		t.Fatalf("Chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(layout.EndedFile(earlier.String()), 0o600) })
+
+	listed, err := opened.ListIncludingEnded(when.Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("ListIncludingEnded: %v", err)
+	}
+	if len(listed) != 1 || listed[0].Key != key {
+		t.Fatalf("listed %v, want the one that ended within the hour alone", listed)
+	}
+
+	// A file written recently about a session that ended earlier — an
+	// annotation, say — is read and still left out, on its ended_at.
+	if err := os.Chmod(layout.EndedFile(earlier.String()), 0o600); err != nil {
+		t.Fatalf("Chmod: %v", err)
+	}
+	if err := os.Chtimes(layout.EndedFile(earlier.String()), when, when); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+	listed, err = opened.ListIncludingEnded(when.Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("ListIncludingEnded: %v", err)
+	}
+	if len(listed) != 1 || listed[0].Key != key {
+		t.Fatalf("listed %v, want the one that ended within the hour alone", listed)
+	}
+
+	everything, err := opened.ListIncludingEnded(time.Time{})
+	if err != nil {
+		t.Fatalf("ListIncludingEnded: %v", err)
+	}
+	if len(everything) != 2 {
+		t.Fatalf("listed %d with no cutoff, want both", len(everything))
+	}
 }

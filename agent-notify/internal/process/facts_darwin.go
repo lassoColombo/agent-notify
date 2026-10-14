@@ -4,7 +4,6 @@ package process
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
 	"time"
 
@@ -48,17 +47,12 @@ func (ProcessesOnThisMachine) FactsAbout(pid int) (Facts, error) {
 	}
 
 	started := info.Proc.P_starttime
-	facts := Facts{
+	return Facts{
 		PID:       pid,
 		StartedAt: time.Unix(started.Sec, int64(started.Usec)*1000).UTC(),
 		Command:   commandName(info.Proc.P_comm[:]),
 		Parent:    int(info.Eproc.Ppid),
-	}
-	// Best effort, and deliberately not an error: another user's process
-	// refuses this, and a missing path only costs a configured absolute path
-	// its match.
-	facts.Path, _ = executablePath(pid)
-	return facts, nil
+	}, nil
 }
 
 // commandName truncates at the first NUL rather than trimming trailing ones.
@@ -73,28 +67,6 @@ func commandName(buffer []byte) string {
 		buffer = buffer[:end]
 	}
 	return string(buffer)
-}
-
-// executablePath reads KERN_PROCARGS2, whose layout begins with a 32-bit argc
-// and then the executable path, NUL-terminated, before the arguments.
-//
-// Only the path is taken. The arguments follow it and are deliberately left
-// alone: a command line holds whatever a user typed, and §A15 is about not
-// storing what nobody asked for.
-func executablePath(pid int) (string, error) {
-	raw, err := unix.SysctlRaw("kern.procargs2", pid)
-	if err != nil {
-		return "", err
-	}
-	if len(raw) < 4 {
-		return "", fmt.Errorf("kern.procargs2 for %d returned %d bytes", pid, len(raw))
-	}
-	rest := raw[4:]
-	_ = binary.LittleEndian.Uint32(raw[:4]) // argc, which we do not need
-	if end := bytes.IndexByte(rest, 0); end >= 0 {
-		rest = rest[:end]
-	}
-	return string(rest), nil
 }
 
 // BootIdentity names this boot, so that a record written before a reboot can be

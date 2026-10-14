@@ -346,10 +346,11 @@ things it would once have asked for are both answered elsewhere (D-101):
   judges liveness by — is found by walking this hook's own ancestry for a
   process called `claude`. That name is a constant of this program: `main.go`
   hands it to `hook.Main` beside the usage string, and it is matched against
-  the kernel's short name for each ancestor, its full path, and that path's
-  basename. There was never a file that could know Claude's process name better
-  than the program written for Claude, so there is no key for it and nothing
-  to get wrong.
+  the name the kernel keeps for each ancestor, which the kernel takes from the
+  last component of the path handed to exec, so a symlink called `claude` to
+  a versioned binary still reads `claude` (D-118). There was never a file
+  that could know Claude's process name better than the program written for
+  Claude, so there is no key for it and nothing to get wrong.
 
 The one key in that file that touches your Claude sessions is core's
 `keep-ended-sessions: 168h` (the default): how long an ended session's record

@@ -17,7 +17,12 @@ import (
 // word on the command line is refused with the usage. Otherwise this is a
 // hook: the payload on stdin is decoded into a fresh P, handed to translate,
 // and what comes back is recorded (D-97). agentProcess is the name the agent
-// runs under, for finding it in this process's ancestry (§A8.4).
+// runs under, for finding it in this process's ancestry (§A8.4): the name the
+// kernel keeps for the process, which it takes from the last component of the
+// path handed to exec, so a symlink called `claude` to a versioned binary
+// still reads `claude`. The kernel keeps sixteen characters on macOS and
+// fifteen on Linux, and an agent with a longer name is handed the truncated
+// spelling (D-118).
 //
 // A hook never exits non-zero and never writes to stdout. Claude and codex
 // both read exit code 2 as "block this" and stdout as a verdict, and a

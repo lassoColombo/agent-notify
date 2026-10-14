@@ -278,6 +278,11 @@ type Record struct {
 	StateSince time.Time `json:"state_since,omitzero"`
 	CreatedAt  time.Time `json:"created_at,omitzero"`
 	UpdatedAt  time.Time `json:"updated_at,omitzero"`
+	// ReportedAt is when the last report was applied: a hook's, or the
+	// watcher's own ending. Coordinates and annotations leave it alone, so of
+	// two sessions sharing a process it says which one the agent spoke about
+	// last (D-110). A stamp: no display reads it.
+	ReportedAt time.Time `json:"reported_at,omitzero"`
 	// EndedAt is when it went; retention counts from here, and resurrection
 	// clears it.
 	EndedAt time.Time `json:"ended_at,omitzero"`
@@ -333,7 +338,7 @@ type Record struct {
 var recordFields = []string{
 	"key", "sequence",
 	"kernel", "rank", "detail",
-	"state_since", "created_at", "updated_at", "ended_at",
+	"state_since", "created_at", "updated_at", "reported_at", "ended_at",
 	"name", "cwd", "branch", "model", "message", "usage",
 	"process", "captured_context", "derived_context",
 	"annotations",

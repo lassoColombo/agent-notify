@@ -19,6 +19,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lassoColombo/agent-notify/internal/onpath"
@@ -54,7 +55,17 @@ type Config struct {
 	// processes never ask (D-108). A test hands over its own list by setting
 	// it.
 	Installed []string `yaml:"-"`
-	scanned   bool
+	// scan is the one scan, shared by every copy of this value: a Config is
+	// passed by value and asked by whoever holds the copy, and a cache that
+	// a copy left behind would be PATH read once per copy (D-115).
+	scan *onceScanned
+}
+
+// onceScanned is the result of scanning PATH, taken the first time any copy
+// of the configuration asks and never again.
+type onceScanned struct {
+	once  sync.Once
+	found []string
 }
 
 // Integration is one program's entry, and everything in it is the user's to
@@ -76,20 +87,27 @@ func (i Integration) IsEnabled() bool { return i.Enabled == nil || *i.Enabled }
 // (D-101). A bare name, so that exec resolves it where the process runs.
 func Program(name string) string { return "agent-notify-" + name }
 
-// OnPath is Installed, scanning PATH the first time and not before. The
-// scan is one ReadDir per PATH entry, and the two processes that act on the
-// answer are the session-watcher and the hook; a render, a preview and
-// `list` open the configuration and never ask (D-108).
-func (c *Config) OnPath() []string {
-	if !c.scanned && c.Installed == nil {
-		c.Installed, c.scanned = onpath.Integrations(), true
+// OnPath is Installed, scanning PATH the first time any copy asks and not
+// before. The scan is one ReadDir per PATH entry, and the processes that act
+// on the answer are the session-watcher, `doctor` and `install`; the hook
+// reads the watcher's report instead (D-116), and a render, a preview and
+// `list` open the configuration and never ask (D-108). A Config built as a
+// literal rather than from Defaults has no scan to share and scans each time,
+// which is what a test that did not set Installed asked for.
+func (c Config) OnPath() []string {
+	if c.Installed != nil {
+		return c.Installed
 	}
-	return c.Installed
+	if c.scan == nil {
+		return slices.Sorted(maps.Keys(onpath.Integrations()))
+	}
+	c.scan.once.Do(func() { c.scan.found = slices.Sorted(maps.Keys(onpath.Integrations())) })
+	return c.scan.found
 }
 
 // Enabled is every installed integration that is not turned off, sorted:
 // what core may run.
-func (c *Config) Enabled() []string {
+func (c Config) Enabled() []string {
 	var names []string
 	for _, name := range c.OnPath() {
 		if c.Integrations[name].IsEnabled() {
@@ -104,7 +122,7 @@ func (c *Config) Enabled() []string {
 // with no program behind it: a misspelling, or something uninstalled. It is
 // asked by `doctor` and the session-watcher, the two that look at PATH, and
 // not by Load, which does not (D-108).
-func (c *Config) WrittenAndNotOnPath(file string) []error {
+func (c Config) WrittenAndNotOnPath(file string) []error {
 	installed := c.OnPath()
 	var problems []error
 	for _, name := range slices.Sorted(maps.Keys(c.Integrations)) {
@@ -124,6 +142,7 @@ func Defaults() Config {
 		HistoryMessages:   20,
 		HistoryChanges:    100,
 		Integrations:      map[string]Integration{},
+		scan:              &onceScanned{},
 	}
 }
 

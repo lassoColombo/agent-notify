@@ -172,9 +172,14 @@ func (l Layout) Directories() []string {
 }
 
 // Create makes every directory, mode 0700, chmod'ed after MkdirAll because
-// MkdirAll applies the umask.
+// MkdirAll applies the umask. One that is already there with that mode is
+// left alone: every command opens the store, and the cold read `list` is
+// polled by statuslines, so this is six stats and not six chmods (D-119).
 func (l Layout) Create() error {
 	for _, dir := range l.Directories() {
+		if info, err := os.Stat(dir); err == nil && info.IsDir() && info.Mode().Perm() == DirMode {
+			continue
+		}
 		if err := os.MkdirAll(dir, DirMode); err != nil {
 			return fmt.Errorf("cannot create %s: %w", dir, err)
 		}

@@ -73,18 +73,12 @@ func (ProcessesOnThisMachine) FactsAbout(pid int) (Facts, error) {
 		return Facts{}, fmt.Errorf("cannot read process %d: start time %q: %w", pid, fields[19], err)
 	}
 
-	facts := Facts{
+	return Facts{
 		PID:       pid,
 		StartedAt: time.Unix(0, 0).Add(time.Duration(ticks) * (time.Second / userHz)).UTC(),
 		Command:   string(stat[open+1 : end]),
 		Parent:    parent,
-	}
-	// Best effort, and deliberately not an error: another user's process
-	// refuses this, and a missing path only costs a configured absolute path
-	// its match. Unlike macOS this is the file the kernel ran, with symlinks
-	// resolved, not the path that was asked for.
-	facts.Path, _ = os.Readlink(fmt.Sprintf("/proc/%d/exe", pid))
-	return facts, nil
+	}, nil
 }
 
 // BootIdentity names this boot, so that a record written before a reboot can be

@@ -1,8 +1,6 @@
 package process
 
 import (
-	"path/filepath"
-
 	"github.com/lassoColombo/agent-notify/session"
 )
 
@@ -23,7 +21,14 @@ const MostAncestorsWorthClimbing = 10
 // It stops at whatever it cannot read rather than failing: a partial chain is
 // worth more than none, and the caller is a hook that may never fail (R2).
 func Ancestry(start int, prober ReadsProcessFacts) []session.Ancestor {
-	var chain []session.Ancestor
+	return recorded(climb(start, prober))
+}
+
+// climb is the walk itself, keeping everything it read about each rung, so
+// that whoever matches on the chain matches on what was read rather than
+// reading it again (D-114).
+func climb(start int, prober ReadsProcessFacts) []Facts {
+	var chain []Facts
 	seen := map[int]bool{}
 
 	for pid := start; pid > 1 && len(chain) < MostAncestorsWorthClimbing; {
@@ -39,14 +44,22 @@ func Ancestry(start int, prober ReadsProcessFacts) []session.Ancestor {
 		if err != nil {
 			break
 		}
-		chain = append(chain, session.Ancestor{
-			PID:       facts.PID,
-			StartedAt: facts.StartedAt,
-			Command:   facts.Command,
-		})
+		chain = append(chain, facts)
 		pid = facts.Parent
 	}
 	return chain
+}
+
+// recorded is the chain as a record carries it: the pid, when it started and
+// what it is called.
+func recorded(chain []Facts) []session.Ancestor {
+	ancestors := make([]session.Ancestor, 0, len(chain))
+	for _, facts := range chain {
+		ancestors = append(ancestors, session.Ancestor{
+			PID: facts.PID, StartedAt: facts.StartedAt, Command: facts.Command,
+		})
+	}
+	return ancestors
 }
 
 // FindAgent climbs from a pid looking for the process running the agent, and
@@ -58,44 +71,26 @@ func Ancestry(start int, prober ReadsProcessFacts) []session.Ancestor {
 // The nearest match wins, which is what makes a claude session running inside a
 // claude session resolve to the inner one — the session you are actually in.
 //
+// The match is on the name the kernel keeps for the process and on nothing
+// else (D-118): the adapter hands over the constant its agent runs under, and
+// the kernel takes the name from the last component of the path handed to
+// exec, so a symlink called `claude` to a versioned binary still reads
+// `claude`.
+//
 // Not finding it is not a failure. A shell wrapper that re-execs, or a renamed
 // binary, leaves the chain recorded and the agent unknown; liveness then has
 // nothing to judge and says so (§A8.4, §A8.5).
 func FindAgent(
 	binary string, start int, prober ReadsProcessFacts,
 ) (session.Process, []session.Ancestor, bool) {
-	chain := Ancestry(start, prober)
-
-	for _, ancestor := range chain {
-		facts, err := prober.FactsAbout(ancestor.PID)
-		if err != nil {
-			continue
+	chain := climb(start, prober)
+	for _, facts := range chain {
+		if binary != "" && facts.Command == binary {
+			return session.Process{
+				PID:       facts.PID,
+				StartedAt: facts.StartedAt,
+			}, recorded(chain), true
 		}
-		if !isBinary(facts, binary) {
-			continue
-		}
-		return session.Process{
-			PID:       facts.PID,
-			StartedAt: facts.StartedAt,
-		}, chain, true
 	}
-	return session.Process{}, chain, false
-}
-
-// isBinary decides whether a process is the one the user configured.
-//
-// Three spellings are accepted because all three are things a person writes in
-// a config file: the short name the kernel reports, the full path, and the
-// basename of that path. Accepting only the first would make
-// `binary = "/opt/homebrew/bin/claude"` — the way you disambiguate two claudes
-// — silently match nothing.
-func isBinary(facts Facts, binary string) bool {
-	if binary == "" {
-		return false
-	}
-	switch binary {
-	case facts.Command, facts.Path, filepath.Base(facts.Path):
-		return true
-	}
-	return false
+	return session.Process{}, recorded(chain), false
 }

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/lassoColombo/agent-notify/internal/config"
@@ -22,8 +23,17 @@ import (
 type SessionStore struct {
 	layout   paths.Layout
 	patience time.Duration
-	bounds   session.Bounds
-	keep     time.Duration
+	// kept is the two settings a reload can move, swapped whole so that a
+	// writer on another goroutine sees one configuration or the other
+	// (D-117).
+	kept atomic.Pointer[kept]
+}
+
+// kept is what the store takes from the configuration: how much history to
+// keep per session, and how long an ended session is remembered.
+type kept struct {
+	bounds session.Bounds
+	keep   time.Duration
 }
 
 // LockPatience bounds how long a writer waits for another writer to finish with
@@ -42,12 +52,19 @@ func Open(layout paths.Layout, settings config.Config) (*SessionStore, error) {
 	if err := layout.Create(); err != nil {
 		return nil, err
 	}
-	return &SessionStore{
-		layout:   layout,
-		patience: LockPatience,
-		bounds:   session.Bounds{Messages: settings.HistoryMessages, Changes: settings.HistoryChanges},
-		keep:     settings.KeepEndedSessions.Duration(),
-	}, nil
+	opened := &SessionStore{layout: layout, patience: LockPatience}
+	opened.Reconfigure(settings)
+	return opened, nil
+}
+
+// Reconfigure hands the store what a reload moved: the history bounds and
+// `keep-ended-sessions`. A write already under way finishes with the
+// configuration it started with (D-117).
+func (s *SessionStore) Reconfigure(settings config.Config) {
+	s.kept.Store(&kept{
+		bounds: session.Bounds{Messages: settings.HistoryMessages, Changes: settings.HistoryChanges},
+		keep:   settings.KeepEndedSessions.Duration(),
+	})
 }
 
 // Read returns the record for a key, whether it is live or ended.
@@ -184,7 +201,8 @@ func (s *SessionStore) fileFor(record session.Record) string {
 func (s *SessionStore) recordHistory(
 	key session.Key, previous, next session.Record,
 ) error {
-	if s.bounds.Messages <= 0 && s.bounds.Changes <= 0 {
+	bounds := s.kept.Load().bounds
+	if bounds.Messages <= 0 && bounds.Changes <= 0 {
 		return nil
 	}
 	path := s.layout.HistoryFile(key.String())
@@ -196,7 +214,7 @@ func (s *SessionStore) recordHistory(
 		history = session.History{}
 	}
 
-	history, changed := history.Record(previous, next, s.bounds)
+	history, changed := history.Record(previous, next, bounds)
 	if !changed {
 		return nil
 	}
@@ -218,22 +236,27 @@ func (s *SessionStore) History(key session.Key) (session.History, error) {
 // with no session-watcher running, because `agent-notify list` and an agent's
 // own statusline both depend on it (§A7.6).
 func (s *SessionStore) List() ([]session.Record, error) {
-	return s.listDir(s.layout.Sessions())
+	return s.listDir(s.layout.Sessions(), time.Time{})
 }
 
 // ListEnded returns the sessions that have ended and are still remembered —
 // what a picker offers you to resume.
 func (s *SessionStore) ListEnded() ([]session.Record, error) {
-	return s.listDir(s.layout.Ended())
+	return s.listDir(s.layout.Ended(), time.Time{})
 }
 
 // ListIncludingEnded returns both, each session once. A session being filed
 // is written into ended/ before it leaves sessions/, so a read that falls
 // between the two directories sees it twice; the higher sequence is the newer,
 // which is how Read settles the same two files.
-func (s *SessionStore) ListIncludingEnded() ([]session.Record, error) {
+//
+// `endedSince` leaves out what ended before it, and leaves it out before
+// reading it: a file is never written earlier than the ended_at it carries,
+// so one last written before the cutoff cannot hold a session that ended
+// after it (D-113). Zero keeps everything retained.
+func (s *SessionStore) ListIncludingEnded(endedSince time.Time) ([]session.Record, error) {
 	records, liveErr := s.List()
-	ended, endedErr := s.ListEnded()
+	ended, endedErr := s.listDir(s.layout.Ended(), endedSince)
 	at := make(map[session.Key]int, len(records))
 	for i, record := range records {
 		at[record.Key] = i
@@ -250,7 +273,12 @@ func (s *SessionStore) ListIncludingEnded() ([]session.Record, error) {
 	return records, errors.Join(liveErr, endedErr)
 }
 
-func (s *SessionStore) listDir(dir string) ([]session.Record, error) {
+// listDir reads every record in one directory. A non-zero `endedSince` skips
+// a file last written before it with one stat, and after the read a record
+// whose ended_at is before it. A record with no ended_at is skipped by the
+// first when its file is old and never by the second, since nothing dates it;
+// this is a listing and not a deletion, so R5 is not in play.
+func (s *SessionStore) listDir(dir string, endedSince time.Time) ([]session.Record, error) {
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
 		return nil, nil
@@ -266,6 +294,11 @@ func (s *SessionStore) listDir(dir string) ([]session.Record, error) {
 			// .write-* temporaries live here for microseconds at a time.
 			continue
 		}
+		if !endedSince.IsZero() {
+			if info, err := entry.Info(); err == nil && info.ModTime().Before(endedSince) {
+				continue
+			}
+		}
 		var record session.Record
 		found, err := readJSON(filepath.Join(dir, entry.Name()), &record)
 		if err != nil {
@@ -275,9 +308,10 @@ func (s *SessionStore) listDir(dir string) ([]session.Record, error) {
 			problems = append(problems, err)
 			continue
 		}
-		if found {
-			records = append(records, record)
+		if !found || !record.EndedAt.IsZero() && record.EndedAt.Before(endedSince) {
+			continue
 		}
+		records = append(records, record)
 	}
 	return records, errors.Join(problems...)
 }
@@ -292,6 +326,7 @@ func (s *SessionStore) listDir(dir string) ([]session.Record, error) {
 func (s *SessionStore) ForgetWhatIsTooOld(
 	now time.Time,
 ) (removed []session.Key, err error) {
+	keep := s.kept.Load().keep
 	ended, listErr := s.ListEnded()
 	var problems []error
 	if listErr != nil {
@@ -299,7 +334,7 @@ func (s *SessionStore) ForgetWhatIsTooOld(
 	}
 
 	for _, record := range ended {
-		if record.EndedAt.IsZero() || now.Sub(record.EndedAt) < s.keep {
+		if record.EndedAt.IsZero() || now.Sub(record.EndedAt) < keep {
 			continue
 		}
 		if err := s.forget(record.Key, record.Sequence); err != nil {
@@ -309,7 +344,7 @@ func (s *SessionStore) ForgetWhatIsTooOld(
 		removed = append(removed, record.Key)
 	}
 
-	problems = append(problems, s.pruneLocks(now))
+	problems = append(problems, s.pruneLocks(now, keep))
 	return removed, errors.Join(problems...)
 }
 
@@ -350,7 +385,7 @@ func (s *SessionStore) forget(key session.Key, expected uint64) error {
 // The lock file is never deleted while it could be referenced, which is why
 // this is a separate pass with a second condition: a lock created moments ago
 // may belong to a writer that has not written its first record yet.
-func (s *SessionStore) pruneLocks(now time.Time) error {
+func (s *SessionStore) pruneLocks(now time.Time, keep time.Duration) error {
 	entries, err := os.ReadDir(s.layout.Locks())
 	if os.IsNotExist(err) {
 		return nil
@@ -366,7 +401,7 @@ func (s *SessionStore) pruneLocks(now time.Time) error {
 			continue
 		}
 		info, err := entry.Info()
-		if err != nil || now.Sub(info.ModTime()) < s.keep {
+		if err != nil || now.Sub(info.ModTime()) < keep {
 			continue
 		}
 		key, err := session.ParseKey(name)

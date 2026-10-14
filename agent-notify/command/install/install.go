@@ -10,6 +10,7 @@ package install
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"slices"
@@ -84,7 +85,7 @@ func run(verb string, arguments []string) int {
 		names, rest = arguments[:1], arguments[1:]
 	}
 	if len(names) == 0 {
-		for _, name := range onpath.Integrations() {
+		for _, name := range slices.Sorted(maps.Keys(onpath.Integrations())) {
 			if answers(name, verb) {
 				names = append(names, name)
 			}
@@ -112,7 +113,7 @@ func completeThem(
 	if len(arguments) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	return onpath.Integrations(), cobra.ShellCompDirectiveNoFileComp
+	return slices.Sorted(maps.Keys(onpath.Integrations())), cobra.ShellCompDirectiveNoFileComp
 }
 
 // answers is whether the program lists the verb among its methods. One that

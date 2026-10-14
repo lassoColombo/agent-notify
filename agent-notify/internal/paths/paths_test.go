@@ -122,6 +122,11 @@ func TestCreateRestrictsMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
+	// One already there with the wrong mode is still put right: leaving a
+	// directory alone is only for one that is as it should be (D-119).
+	if err := os.MkdirAll(layout.State, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
 	if err := layout.Create(); err != nil {
 		t.Fatalf("Create: %v", err)
 	}

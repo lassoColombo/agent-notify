@@ -110,9 +110,10 @@ func Ended(
 			continue
 		}
 
-		// The process is alive. It runs one session at a time, so a newer
-		// record naming the same process — the same pid started at the same
-		// moment, not merely the same number — means this one is finished.
+		// The process is alive. It runs one session at a time, so a record
+		// the agent reported on later from the same process — the same pid
+		// started at the same moment, not merely the same number — means
+		// this one is finished.
 		if supersededBy(record, judgeable) {
 			ending = append(ending, Ending{Key: record.Key, Detail: Superseded})
 		}
@@ -120,6 +121,14 @@ func Ended(
 	return ending
 }
 
+// supersededBy compares when the two sessions were last reported on, which
+// is the one thing that says which of them the process is running: a hook
+// speaks from inside the process about the session it is in. Not
+// `updated_at`, which a derive or an annotate landing on the older session
+// moves; not `created_at`, which the older session keeps when it is resumed
+// inside the same process after the newer one (D-110). A record from before
+// the stamp existed is never newer than one with it, and two of them end
+// nobody (R5).
 func supersededBy(record session.Record, others []session.Record) bool {
 	for _, other := range others {
 		if other.Key == record.Key {
@@ -131,7 +140,7 @@ func supersededBy(record session.Record, others []session.Record) bool {
 		}) {
 			continue
 		}
-		if other.UpdatedAt.After(record.UpdatedAt) {
+		if other.ReportedAt.After(record.ReportedAt) {
 			return true
 		}
 	}
