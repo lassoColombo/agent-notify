@@ -5624,6 +5624,37 @@ of this section is that it prevents re-litigating.
   three are amended in place and dated; the decision log is history and
   keeps every name it had.
 
+- **D-121** (2026-10-14) — **A banner closes itself after ten seconds.**
+  *Amends* D-86's "one process per outstanding banner, bounded by the number
+  of live sessions and reaped by the next banner for the same one": it is
+  reaped by the clock as well now, unless a person asked otherwise.
+  - **What was wrong.** A banner nobody touched stayed in the corner of the
+    screen until somebody closed it. The plist alerter carries declares
+    `NSUserNotificationAlertStyle = alert`, macOS keeps an alert until it is
+    dismissed, and this program never passed `--timeout`. The README listed it
+    as unfinished. There was no per-app style to change instead: this
+    machine's `com.apple.ncprefs` has no entry for `fr.vjeantet.alerter` or for
+    the `com.apple.Terminal` it posts as [measured 2026-10-14, macOS 26.6.2].
+  - **Now `integrations.macos-notifier.settings.timeout`** is a
+    `session.Duration`, ten seconds when absent, with `0` meaning a banner
+    that stays. A pointer, so that absent and zero are different requests.
+    Anything unreadable, negative or finer than a second is refused at
+    startup, naming the key, rather than rounded: alerter counts whole
+    seconds, and the rounding that matters is the one that turns half a
+    second into a banner that never closes.
+  - **alerter does the closing** [measured 2026-10-14, alerter 26.5]: with
+    `--timeout 3` and `--app-icon` it printed `@TIMEOUT` three seconds later
+    and exited, and `check` with the default left no holder behind after ten.
+    That it leaves Notification Centre too is read from alerter's source,
+    which calls `removeDeliveredNotification` on timeout, and not measured:
+    `alerter --list` from another process comes back empty even while a
+    banner is up. `hold` already ignored `@TIMEOUT`. alerter before 26.5
+    ignored `--timeout` alongside `--app-icon`, and every banner here has one.
+  - **What it costs**: a banner that timed out while you were away is not in
+    Notification Centre to find later. What is still waiting is still on
+    zellij, aerospace and the picker, which show state rather than announce
+    it.
+
 **The payload discussion of 2026-09-17 is now ratified**
  in D-10 through D-18.
 What is still marked [proposed] elsewhere — the field list of §A7.4, the event

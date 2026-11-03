@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lassoColombo/agent-notify/subscribe"
 )
@@ -49,7 +50,7 @@ func scriptCalled(t *testing.T, name, body string) string {
 // alerter holding the previous banner.
 func TestTheArgumentsAreOneBannerPerSession(t *testing.T) {
 	notice := Notice{Key: "a/b/c", Title: "lenny", Subtitle: "blocked on you", Body: "Shall I?"}
-	got := theArgumentsFor(notice, "/tmp/love.png", Sound{Plays: true})
+	got := theArgumentsFor(notice, "/tmp/love.png", Sound{Plays: true}, 10*time.Second)
 
 	for _, want := range [][2]string{
 		{"--group", "a/b/c"},
@@ -60,6 +61,8 @@ func TestTheArgumentsAreOneBannerPerSession(t *testing.T) {
 		{"--content-image", "/tmp/love.png"},
 		{"--app-icon", "/tmp/love.png"},
 		{"--sound", "default"},
+		// In whole seconds, which is all alerter reads.
+		{"--timeout", "10"},
 	} {
 		if at := slices.Index(got, want[0]); at < 0 || at+1 >= len(got) || got[at+1] != want[1] {
 			t.Errorf("%v does not say %s %s", got, want[0], want[1])
@@ -70,16 +73,24 @@ func TestTheArgumentsAreOneBannerPerSession(t *testing.T) {
 // TestNothingIsSaidAboutASoundThatIsNotPlaying. alerter has no way to spell
 // silence, so silence is the flag being absent.
 func TestSilenceIsTheFlagBeingAbsent(t *testing.T) {
-	got := theArgumentsFor(Notice{Key: "k"}, "", Sound{Plays: false})
+	got := theArgumentsFor(Notice{Key: "k"}, "", Sound{Plays: false}, 0)
 	if slices.Contains(got, "--sound") {
 		t.Errorf("%v asks for a sound when the config said not to", got)
 	}
 	if slices.Contains(got, "--content-image") {
 		t.Errorf("%v attaches a picture there is no colour for", got)
 	}
-	named := theArgumentsFor(Notice{Key: "k"}, "", Sound{Plays: true, Name: "Submarine.aiff"})
+	named := theArgumentsFor(Notice{Key: "k"}, "", Sound{Plays: true, Name: "Submarine.aiff"}, 0)
 	if at := slices.Index(named, "--sound"); at < 0 || named[at+1] != "Submarine.aiff" {
 		t.Errorf("%v does not ask for the sound the config named", named)
+	}
+}
+
+// TestABannerThatStaysHasNoTimeout. alerter's own default is a banner that
+// stays, so a timeout of zero is the flag being absent, the way silence is.
+func TestABannerThatStaysHasNoTimeout(t *testing.T) {
+	if got := theArgumentsFor(Notice{Key: "k"}, "", Sound{}, 0); slices.Contains(got, "--timeout") {
+		t.Errorf("%v closes a banner the config said should stay", got)
 	}
 }
 

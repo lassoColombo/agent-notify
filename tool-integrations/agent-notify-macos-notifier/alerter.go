@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/lassoColombo/agent-notify/tool"
 )
@@ -59,7 +61,7 @@ func Alerter(configured string) (string, error) {
 }
 
 // theArgumentsFor is one banner, in alerter's spelling.
-func theArgumentsFor(notice Notice, mark string, sound Sound) []string {
+func theArgumentsFor(notice Notice, mark string, sound Sound, timeout time.Duration) []string {
 	arguments := []string{
 		// The session, which is also the identity of the banner: a second
 		// notice about one session replaces the first rather than stacking
@@ -83,6 +85,12 @@ func theArgumentsFor(notice Notice, mark string, sound Sound) []string {
 	default:
 		arguments = append(arguments, "--sound", sound.Name)
 	}
+	if timeout > 0 {
+		// alerter closes the banner itself, takes it out of Notification
+		// Centre, and says @TIMEOUT, which hold ignores: somebody who did not
+		// look has not asked to go anywhere.
+		arguments = append(arguments, "--timeout", strconv.Itoa(int(timeout/time.Second)))
+	}
 	return arguments
 }
 
@@ -93,13 +101,13 @@ func theArgumentsFor(notice Notice, mark string, sound Sound) []string {
 // to return before core kills it. Nothing is waited for and nothing is
 // remembered: the child is reparented to launchd and answers for its own
 // banner.
-func Post(alerter string, notice Notice, mark string, sound Sound) error {
+func Post(alerter string, notice Notice, mark string, sound Sound, timeout time.Duration) error {
 	self, err := os.Executable()
 	if err != nil {
 		return err
 	}
 	held := exec.Command(self, append([]string{holdCommand, notice.Key, alerter},
-		theArgumentsFor(notice, mark, sound)...)...)
+		theArgumentsFor(notice, mark, sound, timeout)...)...)
 	// Its own session, so that it survives this process and whatever started
 	// it, and no inherited pipes, so that core's render is not waiting on a
 	// file descriptor a banner is holding open.

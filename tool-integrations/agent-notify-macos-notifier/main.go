@@ -65,7 +65,7 @@ func paint(view session.View) error {
 	logger := me.Logger()
 	for _, notice := range notifier.Fresh(view.Changed) {
 		if err := Post(settings.Alerter, notice,
-			invaderPNGs.PathOfTheInvaderDrawnIn(notice.Colour), settings.Sound); err != nil {
+			invaderPNGs.PathOfTheInvaderDrawnIn(notice.Colour), settings.Sound, settings.Timeout); err != nil {
 			logger.Warn("posting", "session", notice.Key, "problem", err.Error())
 		}
 	}
@@ -96,6 +96,11 @@ func check(arguments []string) int {
 	}
 	fmt.Printf("%-16s %s\n", "focus-session", core)
 	fmt.Printf("%-16s %s\n", "sound", settings.Sound.Describe())
+	closes := "stays until it is dismissed (timeout = 0)"
+	if settings.Timeout > 0 {
+		closes = "closes itself after " + settings.Timeout.String()
+	}
+	fmt.Printf("%-16s %s\n", "timeout", closes)
 
 	notice := Notice{
 		Key:      "agent-notify-check",
@@ -106,7 +111,7 @@ func check(arguments []string) int {
 	}
 	invaderPNGs := &InvaderPNGs{}
 	if err := Post(settings.Alerter, notice,
-		invaderPNGs.PathOfTheInvaderDrawnIn(notice.Colour), settings.Sound); err != nil {
+		invaderPNGs.PathOfTheInvaderDrawnIn(notice.Colour), settings.Sound, settings.Timeout); err != nil {
 		fmt.Printf("%-16s %v\n", "notifications", err)
 		return 1
 	}

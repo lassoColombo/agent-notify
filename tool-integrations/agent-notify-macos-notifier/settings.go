@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/lassoColombo/agent-notify/session"
 	"github.com/lassoColombo/agent-notify/subscribe"
@@ -66,6 +67,21 @@ type Settings struct {
 	// silence whatever is written here.
 	Sound any `yaml:"sound"`
 
+	// Timeout is how long a banner stays up before it closes itself: "10s",
+	// "1m", or 0 for one that stays until somebody dismisses it. Absent is
+	// ten seconds.
+	//
+	// It has to be decided here because nothing else decides it. The plist
+	// alerter carries declares it an alert-style app, and macOS keeps an alert
+	// on the screen until somebody closes it, so a banner nobody touched sat in
+	// the corner, held by a process, until a later banner for the same
+	// session replaced it. A banner that closes itself is taken out of
+	// Notification Centre as well. What is still waiting for you is still on
+	// zellij, aerospace and the picker.
+	//
+	// A pointer, so that absent and 0 are different requests.
+	Timeout *session.Duration `yaml:"timeout"`
+
 	// Colors is the invader's colour per state, as `0xAARRGGBB`. Hex only, and
 	// not AppKit's colour names: the invader is drawn into a PNG that macOS
 	// composites onto a surface of its own, where a colour that adapts to the
@@ -85,6 +101,9 @@ type Resolved struct {
 	Preview Preview
 	Sound   Sound
 	Colours session.Palette
+	// Timeout is how long a banner stays before it closes itself, and zero
+	// for one that stays until it is dismissed.
+	Timeout time.Duration
 	// Alerter is the program that posts, found once here so that a missing one
 	// is a refusal at startup rather than a banner that never arrives.
 	Alerter string
@@ -95,6 +114,10 @@ type Resolved struct {
 // whether what it last said is the thing you are waiting for.
 var defaultPreview = Preview{Lines: 8, Width: 60}
 
+// The default timeout: long enough to read who a banner is about and what it
+// said, short enough that it is not still in the corner when you come back.
+var defaultTimeout = 10 * time.Second
+
 func Read(given subscribe.Integration) (Resolved, error) {
 	var settings Settings
 	if err := given.Settings(&settings); err != nil {
@@ -104,6 +127,7 @@ func Read(given subscribe.Integration) (Resolved, error) {
 	resolved := Resolved{
 		Preview: defaultPreview,
 		Colours: session.NewPalette(DefaultColours, settings.Colors),
+		Timeout: defaultTimeout,
 	}
 
 	// Loud unless somebody says otherwise: a notification is the one thing in
@@ -136,6 +160,23 @@ func Read(given subscribe.Integration) (Resolved, error) {
 	}
 	if problem := resolved.Preview.sane(); problem != "" {
 		return Resolved{}, fmt.Errorf("integrations.%s.settings.preview %s", Name, problem)
+	}
+	// Refused rather than rounded: alerter counts whole seconds, and the
+	// rounding that matters is the one that turns half a second into zero,
+	// which is a banner that never closes.
+	if timeout := settings.Timeout; timeout != nil {
+		switch {
+		case timeout.Unreadable() != "":
+			return Resolved{}, fmt.Errorf("integrations.%s.settings.timeout = %s; write it as 10s "+
+				"or 1m, or 0 for a banner that stays until it is dismissed", Name, timeout)
+		case timeout.Duration() < 0:
+			return Resolved{}, fmt.Errorf("integrations.%s.settings.timeout = %s cannot be negative",
+				Name, timeout)
+		case timeout.Duration()%time.Second != 0:
+			return Resolved{}, fmt.Errorf("integrations.%s.settings.timeout = %s is not a whole "+
+				"number of seconds, and alerter counts nothing smaller", Name, timeout)
+		}
+		resolved.Timeout = timeout.Duration()
 	}
 
 	// Refused now rather than when somebody taps a banner.

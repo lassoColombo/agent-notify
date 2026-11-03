@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lassoColombo/agent-notify/session"
 	"github.com/lassoColombo/agent-notify/subscribe"
@@ -52,6 +53,40 @@ func TestAUserWithNoOpinionGetsTheDefaults(t *testing.T) {
 	}
 	if settings.Sound != (Sound{Plays: true}) {
 		t.Errorf("sound = %+v for a file that says nothing, want the default chime", settings.Sound)
+	}
+	if settings.Timeout != defaultTimeout {
+		t.Errorf("timeout = %s for a file that says nothing, want %s", settings.Timeout, defaultTimeout)
+	}
+}
+
+// TestTheTimeoutCanBeChangedAndCanBeWrong. Zero is a request, for a banner that
+// stays, and so is different from saying nothing. What alerter cannot be handed
+// is refused by name rather than rounded, because the rounding that matters
+// turns half a second into a banner that never closes.
+func TestTheTimeoutCanBeChangedAndCanBeWrong(t *testing.T) {
+	for _, shape := range []struct {
+		written string
+		want    time.Duration
+	}{
+		{"timeout: 30s", 30 * time.Second},
+		{"timeout: 2m", 2 * time.Minute},
+		{"timeout: 0", 0},
+	} {
+		settings, err := settingsIn(t, "integrations:\n  macos-notifier:\n    settings:\n      "+shape.written)
+		if err != nil {
+			t.Fatalf("%s: %v", shape.written, err)
+		}
+		if settings.Timeout != shape.want {
+			t.Errorf("%s gave %s, want %s", shape.written, settings.Timeout, shape.want)
+		}
+	}
+	// A bare number is refused for wanting a unit, which is what keeps 10 from
+	// meaning ten nanoseconds.
+	for _, written := range []string{"timeout: ten", "timeout: 10", "timeout: -5s", "timeout: 1500ms"} {
+		_, err := settingsIn(t, "integrations:\n  macos-notifier:\n    settings:\n      "+written)
+		if err == nil || !strings.Contains(err.Error(), "settings.timeout") {
+			t.Errorf("%s: err = %v, want a refusal naming the key", written, err)
+		}
 	}
 }
 

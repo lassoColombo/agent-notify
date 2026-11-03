@@ -37,6 +37,7 @@
   - [`integrations.macos-notifier` — core's half](#integrationsmacos-notifier--cores-half)
   - [`settings` — this display's half](#settings--this-displays-half)
   - [`sound`](#sound)
+  - [`timeout`](#timeout)
   - [`preview`](#preview)
   - [`colors`](#colors)
   - [`alerter`](#alerter)
@@ -77,10 +78,12 @@ The notification's identifier is the session's key, so **a second notice about o
 replaces the first** rather than stacking under it. A semaphore with eight banners about
 one agent is a worse semaphore than no banners at all.
 
-Everything else about how a banner is presented — banner or alert, grouping, Do Not
-Disturb, whether it shows on the lock screen — is macOS's, in System Settings →
-Notifications → **alerter**, which is whose identity these arrive under. This is not the
-place to reimplement System Settings.
+A banner closes itself after ten seconds; [`timeout`](#timeout) changes that. Everything
+else about how a banner is presented — grouping, Do Not Disturb, whether it shows on the
+lock screen — is macOS's, in System Settings → Notifications → **alerter**, which is whose
+identity these arrive under. So is which screen it appears on: always the main display, the
+one System Settings → Displays draws the menu bar on, whichever screen you are working on.
+This is not the place to reimplement System Settings.
 
 ### What earns one
 
@@ -152,8 +155,9 @@ apart from.
 - **macOS.** Verified on macOS 26.6.2, arm64.
 - **[alerter](https://github.com/vjeantet/alerter)**, which is what actually puts the banner
   on the screen: `brew install vjeantet/tap/alerter`. It is a small Swift program on
-  `UNUserNotificationCenter`, code-signed and notarised by Apple, and it needs macOS 13 or
-  newer.
+  `NSUserNotificationCenter`, code-signed and notarised by Apple, and it needs macOS 13 or
+  newer. Version 26.5 or newer: an older one ignores `--timeout` on a banner that carries an
+  icon, and every banner here carries one.
 - **Go 1.26 or newer.** If your shell exported `GOROOT` from an outer context it overrides
   the toolchain pinned in `.tool-versions`; `env -u GOROOT go build ./...` is the fix.
 - **agent-notify itself**, built and on your PATH.
@@ -226,6 +230,7 @@ $ agent-notify-macos-notifier check
 alerter          /opt/homebrew/bin/alerter
 focus-session    /opt/homebrew/bin/agent-notify
 sound            with the default chime
+timeout          closes itself after 10s
 notifications    a test banner has been posted
 ```
 
@@ -300,6 +305,7 @@ integrations:
     settings:
       alerter: /opt/homebrew/bin/alerter   # only when alerter is not on the process's PATH
       sound: Submarine                     # true, false, or the name of a sound
+      timeout: 10s                         # 0 for a banner that stays until you close it
       preview:
         lines: 8
         width: 60
@@ -311,13 +317,14 @@ integrations:
 | --- | --- | --- | --- |
 | `integrations.macos-notifier.settings.alerter` | string | looked up on PATH | where alerter is, absolute, for a process started without your PATH. See [below](#alerter) |
 | `integrations.macos-notifier.settings.sound` | bool or string | `true` | what a banner plays. See below |
+| `integrations.macos-notifier.settings.timeout` | duration | `10s` | how long a banner stays before it closes itself; `0` keeps it until it is dismissed. See [below](#timeout) |
 | `integrations.macos-notifier.settings.preview.lines` | int, ≥ 1 | `8` | how many lines of the agent's last message the body carries |
 | `integrations.macos-notifier.settings.preview.width` | int, ≥ 16 | `60` | characters per line before it wraps |
 | `integrations.macos-notifier.settings.colors.<state>` | string, `0xAARRGGBB` | the table below | the colour the invader beside the text is drawn in |
 
 Everything that can fail is resolved **once, at startup, where there is still somebody to
-tell**: a sound macOS cannot find, a colour that is not hex, a preview too small to read, a
-core binary that cannot be located. Each of those is a refusal with a message, not a banner
+tell**: a sound macOS cannot find, a timeout that is not a duration, a colour that is not
+hex, a preview too small to read, a core binary that cannot be located. Each of those is a refusal with a message, not a banner
 that quietly comes out wrong forever.
 
 ### `sound`
@@ -369,6 +376,34 @@ those a person decides per **machine** rather than once: the same config wants o
 the desktop and none on the laptop you take into meetings, and macOS's own switch is per-app
 with nothing between chime and silence. System Settings still has the last word — sound
 turned off there is silence whatever this file says.
+
+### `timeout`
+
+```yaml
+integrations:
+  macos-notifier:
+    settings:
+      timeout: 30s     # or 0, for a banner that stays until you close it
+```
+
+How long a banner stays on the screen before it closes itself. **Ten seconds when the key is
+absent.** `0` is a request of its own: a banner that stays until somebody closes it or a later
+banner for the same session replaces it, which is what every banner did before this key
+existed.
+
+It is a setting because nothing else decides it. alerter declares itself an alert-style app,
+and macOS keeps an alert on the screen until somebody dismisses it.
+
+A banner that closes itself is taken out of Notification Centre as well, so one that timed
+out while you were away is not there to find later. The session is still marked on zellij,
+aerospace and the picker, which show what every session is doing rather than announce it.
+Closing on its own never takes you anywhere: alerter says `@TIMEOUT`, and only a tap focuses
+a session.
+
+It is written the way every duration in this system is written, `10s` or `1m`. A bare number
+is refused for wanting a unit, and so is anything that is not a whole number of seconds,
+because alerter counts nothing smaller and rounding half a second down would make a banner
+that never closes.
 
 ### `preview`
 
@@ -575,6 +610,5 @@ repeat that.
 - **macOS only.** There is no Linux notifier, and this module is not the place one would go.
 - **No notification actions.** A banner can be tapped and that focuses the session; it
   carries no buttons and no reply field, although alerter has both.
-- **Nothing bounds an undismissed banner.** alerter has `--timeout` and this does not pass
-  it, so a banner nobody touches is held by a process until a later banner for the same
-  session replaces it. Bounded by the number of live sessions, and unbounded in time.
+- **A banner cannot follow you to another screen.** macOS puts every notification on the
+  main display, and neither alerter nor the API under it has a way to name a screen.
