@@ -8,5 +8,6 @@ use (
 	./tool-integrations/agent-notify-macos-notifier
 	./tool-integrations/agent-notify-picker
 	./tool-integrations/agent-notify-tmux
+	./tool-integrations/agent-notify-tmux-manager
 	./tool-integrations/agent-notify-zellij
 )

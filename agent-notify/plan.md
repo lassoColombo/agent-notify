@@ -5702,6 +5702,30 @@ of this section is that it prevents re-litigating.
     or focused. The suite passed because it ran from a UTF-8 shell, and
     `TestReadingWithNoLocale` now runs it without one.
 
+- **D-124** (2026-11-19) — **agent-notify-tmux-manager mirrors an agent's pane
+  rather than moving it.** It is zellij's inbox for tmux: an `agents` tab with
+  this server's agents listed by state on the left, and the selected agent's
+  pane on the right, which you can type into.
+  - **A mirror, not a swap.** `swap-pane` would put the real pane in the tab,
+    with native scrolling and no lag, but it rearranges the tab the agent
+    lives in, and killing the manager's tab would kill the agent. The mirror
+    reads `capture-pane` about ten times a second and types with `send-keys`
+    (`-H` for ASCII bytes, `-l` for the rest, pastes through
+    `paste-buffer -p`). Nothing it does can lose an agent. **The cost:** the
+    agent's screen is re-wrapped to the mirror's width rather than laid out
+    for it, Shift+Enter arrives as Enter, and scrolling is the mirror's own,
+    through the pane's tmux history.
+  - **Two panes, talking through tmux.** The list writes `@agents_selected`
+    on the tab, and the mirror reads it in the same call that reads the
+    screen. There is no socket and no file, so either half can be restarted
+    alone, and the tmux bindings (`Alt Tab`, `Alt v`) recognise the halves by
+    `@agents_role`.
+  - **This server only.** An agent is listed when its record's tmux capture
+    names this server and the pane still exists. Agents elsewhere cannot be
+    mirrored, and the picker already lists everything.
+  - **Started by the user, never by core**, like the picker: it answers
+    nothing core calls.
+
 **The payload discussion of 2026-09-17 is now ratified**
  in D-10 through D-18.
 What is still marked [proposed] elsewhere — the field list of §A7.4, the event
