@@ -5655,6 +5655,53 @@ of this section is that it prevents re-litigating.
     zellij, aerospace and the picker, which show state rather than announce
     it.
 
+- **D-122** (2026-11-19) — **tmux is a second multiplexer integration, and
+  it marks user options instead of renaming.** `agent-notify-tmux` does what
+  `agent-notify-zellij` does — capture, interpret, focus, focused, render —
+  against tmux, which is §A1's third promise kept for the first time.
+  - **Placed by socket and pane id.** `$TMUX` names the server by its socket
+    and `$TMUX_PANE` is unique per server, so those are the coordinate and
+    every invocation passes `-S`. The session index in `$TMUX` is where the
+    pane was started, which `move-pane` makes stale, so the session and
+    window are asked of tmux at interpretation and again at focus.
+  - **Render writes `@agent-notify-pane` and `@agent-notify-window`, and
+    leaves names alone.** A pane title is the program's to rewrite, and an
+    agent rewrites its terminal title constantly; `rename-window` turns
+    `automatic-rename` off for good, which nothing could give back. Options
+    nobody else writes have neither problem, and they make giving back
+    `set-option -u` rather than a heuristic strip — so a mark that no live
+    agent claims is taken off whether or not a record remembers it. **The
+    cost**: nothing shows until the tmux configuration names the options in
+    a format, which the README documents.
+  - **Focus is zellij's three cases**: move an attached session's window and
+    pane; else switch the client this was asked from, when it is on the same
+    server (the picker in a popup has `$TMUX` and no pane); else
+    `not-attached`. tmux answers once it has acted, so nothing is waited for,
+    and the state is still read back.
+  - **What it cannot see**: whether a popup is open over the pane, so
+    `focused` can answer yes under one.
+
+- **D-123** (2026-11-19) — **tmux focus moves a terminal whenever the server
+  has one, and every tmux call says `-u`.** *Amends* D-122's focus order.
+  - **The asker first.** When focus is asked from inside the pane's server
+    (the picker), that terminal is switched there even if another terminal
+    already shows the pane's session. D-122 tried the attached session
+    first, which moved the other terminal and reported success to a person
+    whose screen had not changed.
+  - **Then the attached session, then the latest client.** If nobody is on
+    the pane's session but somebody is on the server, the most recently
+    active client is switched there, which is the client tmux itself would
+    pick. zellij cannot move a client it was not asked from, which is why
+    D-122 copied its `not-attached` here. tmux can, so a notification
+    clicked under launchd now lands. `not-attached` is left for a server with
+    no clients.
+  - **`-u` on every invocation.** The session-watcher has no `LANG`. A tmux
+    started like that prints control and non-ASCII characters as `_`,
+    including the unit separator its formats are split on, so every
+    `list-panes` was refused as unparseable and nothing was placed, painted
+    or focused. The suite passed because it ran from a UTF-8 shell, and
+    `TestReadingWithNoLocale` now runs it without one.
+
 **The payload discussion of 2026-09-17 is now ratified**
  in D-10 through D-18.
 What is still marked [proposed] elsewhere — the field list of §A7.4, the event
