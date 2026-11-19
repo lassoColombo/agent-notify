@@ -30,7 +30,7 @@ it.
 
 | Where | Key | Does |
 | --- | --- | --- |
-| list | `j` `k`, arrows, `Ctrl j/k/n/p` | move; the mirror follows |
+| list | `j` `k`, arrows, `Ctrl j/k/n/p`, `Alt j/k` | move; the mirror follows |
 | list | `g` `G` | first, last |
 | list | `Enter` | into the mirror, like `Alt Tab` |
 | list | `o` | go to the agent's own pane, leaving the tab |
@@ -85,10 +85,13 @@ Every tmux call says `-u`, for the same reason agent-notify-tmux does (D-123).
 bind -n M-i if -F "#{W:#{?#{==:#{window_name},agents},1,}}" { select-window -t :=agents } { new-window -n agents agent-notify-tmux-manager }
 bind -n M-Tab if -F "#{@agents_role}" { if -F "#{==:#{@agents_role},list}" { select-pane -R } { select-pane -L } } { send-keys M-Tab }
 bind -n M-v if -F "#{==:#{@agents_role},view}" { send-keys M-v } { copy-mode }
+bind -n M-j if -F "#{==:#{@agents_role},list}" { send-keys M-j } { select-pane -Z -D }
+bind -n M-k if -F "#{==:#{@agents_role},list}" { send-keys M-k } { select-pane -Z -U }
 ```
 
-Outside the tab, `Alt Tab` reaches the program in the pane as usual, and
-`Alt v` is copy mode.
+Outside the tab, `Alt Tab` reaches the program in the pane as usual, `Alt v`
+is copy mode, and `Alt j/k` move between panes. In the list they move between
+agents instead; in the mirror they still move between panes.
 
 ## Building
 

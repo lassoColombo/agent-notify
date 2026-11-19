@@ -141,9 +141,9 @@ func (l *list) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (l *list) key(key string) tea.Cmd {
 	switch key {
-	case "j", "down", "ctrl+j", "ctrl+n":
+	case "j", "down", "ctrl+j", "ctrl+n", "alt+j", "alt+down":
 		return l.move(1)
-	case "k", "up", "ctrl+k", "ctrl+p":
+	case "k", "up", "ctrl+k", "ctrl+p", "alt+k", "alt+up":
 		return l.move(-1)
 	case "g", "home":
 		return l.moveTo(0)
