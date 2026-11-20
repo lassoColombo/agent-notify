@@ -14,61 +14,75 @@ func placed(name string, kernel session.Kernel, server, pane string) session.Rec
 	return session.Record{
 		Name:            name,
 		Kernel:          kernel,
+		Rank:            kernel.Rank(),
 		CapturedContext: session.CapturedContext{By: map[string]json.RawMessage{"tmux": blob}},
 	}
 }
 
-func TestOnlyThisServersLivePanesAreListed(t *testing.T) {
+func names(agents []Agent) []string {
+	var names []string
+	for _, agent := range agents {
+		names = append(names, agent.Record.Name)
+	}
+	return names
+}
+
+func TestOnlyWhatTheStageCouldShowIsListed(t *testing.T) {
 	records := []session.Record{
-		placed("here", session.Working, socket, "%1"),
-		placed("elsewhere", session.Working, "/tmp/tmux-501/other", "%1"),
-		placed("ended", session.Ended, socket, "%2"),
-		placed("gone", session.Working, socket, "%9"),
-		placed("the tab", session.Working, socket, "%5"),
+		placed("here", session.Working, socket, "%5"),
+		placed("on the stage", session.Working, socket, "%6"),
+		placed("elsewhere", session.Working, "/tmp/tmux-501/other", "%5"),
+		placed("ended", session.Ended, socket, "%7"),
+		placed("gone", session.Working, socket, "%99"),
+		placed("in the tab", session.Working, socket, "%8"),
+		placed("the list", session.Working, socket, "%1"),
 		{Name: "zellij", Kernel: session.Working},
 	}
-	panes := map[string]string{"%1": "home:1", "%2": "home:2", "%5": "home:3"}
-	agents := Agents(records, socket, panes, map[string]bool{"%5": true})
-	if len(agents) != 1 || agents[0].Record.Name != "here" || agents[0].Where != "home:1" {
-		t.Errorf("agents = %+v, want only `here`, at home:1", agents)
+	w := world(true, theList,
+		at("%5", "@1"), at("%7", "@1"), at("%8", tab),
+		at("%6", tab).awayFrom("%2"), at("%2", "@3").as(roleStandIn),
+	)
+	agents := Agents(records, socket, w, "%1")
+	if got := names(agents); len(got) != 2 || got[0] != "here" || got[1] != "on the stage" {
+		t.Fatalf("agents = %v, want `here` and `on the stage`", got)
+	}
+	if agents[0].Where != "home:1" || agents[1].Where != "home:3" {
+		t.Errorf("where = %q and %q; a borrowed pane is where it lives, not in the tab", agents[0].Where, agents[1].Where)
 	}
 }
 
 func TestTheMoreUrgentSessionKeepsAContestedPane(t *testing.T) {
 	records := []session.Record{
-		placed("blocked", session.BlockedOnYou, socket, "%1"),
-		placed("stale", session.Idle, socket, "%1"),
+		placed("stale", session.Idle, socket, "%5"),
+		placed("blocked", session.BlockedOnYou, socket, "%5"),
 	}
-	agents := Agents(records, socket, map[string]string{"%1": "home:1"}, nil)
-	if len(agents) != 1 || agents[0].Record.Name != "blocked" {
-		t.Errorf("agents = %+v", agents)
+	agents := Agents(records, socket, world(true, theList, at("%5", "@1")), "%1")
+	if got := names(agents); len(got) != 1 || got[0] != "blocked" {
+		t.Errorf("agents = %v", got)
 	}
 }
 
-func TestSectionsGoMostUrgentFirstAndSkipEmptyOnes(t *testing.T) {
-	agents := []Agent{
-		{Record: session.Record{Name: "w", Kernel: session.Working}},
-		{Record: session.Record{Name: "b", Kernel: session.BlockedOnYou}},
-		{Record: session.Record{Name: "?", Kernel: session.Kernel("pondering")}},
-		{Record: session.Record{Name: "w2", Kernel: session.Working}},
+// TestSectionsGoMostUrgentFirst, and a state this build has never heard of is
+// placed by the rank it came with rather than dropped (R5, R21).
+func TestSectionsGoMostUrgentFirst(t *testing.T) {
+	pondering := placed("p", session.Kernel("pondering-deeply"), socket, "%8")
+	pondering.Rank = 35
+	records := []session.Record{
+		placed("w", session.Working, socket, "%5"),
+		pondering,
+		placed("b", session.BlockedOnYou, socket, "%6"),
+		placed("w2", session.Working, socket, "%7"),
 	}
-	sections := Sections(agents)
+	w := world(true, theList, at("%5", "@1"), at("%6", "@1"), at("%7", "@1"), at("%8", "@1"))
+	sections := Sections(Agents(records, socket, w, "%1"))
 	var titles []string
 	for _, section := range sections {
 		titles = append(titles, section.Title)
 	}
-	if len(titles) != 3 || titles[0] != "needs you" || titles[1] != "working" || titles[2] != "other" {
+	if len(titles) != 3 || titles[0] != "needs you" || titles[1] != "pondering deeply" || titles[2] != "working" {
 		t.Errorf("sections = %v", titles)
 	}
-	flat := Flatten(sections)
-	if flat[0].Record.Name != "b" || flat[1].Record.Name != "w" || flat[2].Record.Name != "w2" {
-		t.Errorf("order = %v", flat)
-	}
-}
-
-func TestPanesOf(t *testing.T) {
-	panes := PanesOf("%1" + separator + "home:1\n%12" + separator + "work:3\n")
-	if panes["%1"] != "home:1" || panes["%12"] != "work:3" || len(panes) != 2 {
-		t.Errorf("panes = %v", panes)
+	if got := names(Flatten(sections)); got[0] != "b" || got[1] != "p" || len(got) != 4 {
+		t.Errorf("order = %v", got)
 	}
 }

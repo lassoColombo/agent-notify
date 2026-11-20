@@ -2,64 +2,72 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"os"
-	"os/exec"
 	"strings"
+	"time"
+
+	"github.com/lassoColombo/agent-notify/tool"
 )
 
-// The options the tab is held together by. The window ones say which pane is
-// which half and what is selected; the pane one is what tmux.conf's Alt Tab
-// and Alt j/k test, so that they do something else in every other tab.
+// What this program writes into tmux, which is all it remembers: a tab that
+// is restarted, or a stand-in left alone, reads the state back from here.
 const (
-	optionSelected = "@agents_selected"
-	optionList     = "@agents_list"
-	optionView     = "@agents_view"
-	optionRole     = "@agents_role"
-	roleList       = "list"
-	roleView       = "view"
+	// tabSession is the hidden session the tab is born in. Every session that
+	// shows the tab has it linked, so killing one of those only unlinks it;
+	// and since tmux refuses a second session of the same name, making it is
+	// also what keeps two tabs from being opened at once.
+	tabSession = "_agents"
+	tabName    = "agents"
+
+	// tabOption is on the tab's window, for the tmux configuration's keys.
+	tabOption = "@agent-notify-tab"
+	// roleOption is on the tab's own two panes.
+	roleOption  = "@agent-notify-tab-role"
+	roleList    = "list"
+	roleStandIn = "stand-in"
+
+	// The two a borrowed pane carries while it is away: the pane holding its
+	// place, and the session that place is in, where an agent whose place is
+	// lost is given a window of its own.
+	standInOption     = "@agent-notify-stand-in"
+	homeSessionOption = "@agent-notify-home-session"
 )
 
-// noAgent is the mirror's title while nothing is selected. Its title is
-// otherwise the agent's name; an empty one would show the host's.
-const noAgent = "no agent"
-
-// separator splits the fields of a format. A control character, which no name
+// separator splits the fields of a format: a control character, which no name
 // contains, and which tmux prints as itself because every call says -u.
 const separator = "\x1f"
 
-// Tmux is the server this program runs in. Every call names it with -S,
-// rather than leaning on $TMUX, and says -u: without it a tmux that finds no
-// UTF-8 locale prints every control and non-ASCII character as `_`.
-type Tmux struct{ Socket string }
+// tmuxTimeout bounds one tmux invocation (R18). On expiry the step is given
+// up, and the next look at the server decides what is still to do.
+const tmuxTimeout = 2 * time.Second
 
-// here is this program's server and pane. Both halves of the tab are panes, so
-// both variables are always there; outside tmux there is nothing to do.
-func here() (Tmux, string, error) {
-	socket, found := SocketOf(os.Getenv("TMUX"))
-	pane := os.Getenv("TMUX_PANE")
-	if !found || !IsPaneID(pane) {
-		return Tmux{}, "", errors.New("this runs in a tmux pane, and $TMUX or $TMUX_PANE says it is not in one")
-	}
-	return Tmux{Socket: socket}, pane, nil
+// Tmux is one server. Every call names it with -S rather than leaning on
+// $TMUX, and says -u: without it a tmux that finds no UTF-8 locale prints
+// every control and non-ASCII character as `_`, the separator included
+// (D-123).
+type Tmux struct {
+	Binary string
+	Socket string
 }
 
 // run is one tmux invocation; a `;` argument separates commands within it, as
-// on tmux's own command line.
+// on tmux's own command line, and a command that fails stops the ones after
+// it.
 func (t Tmux) run(arguments ...string) (string, error) {
-	command := exec.Command("tmux", append([]string{"-u", "-S", t.Socket}, arguments...)...)
-	out, err := command.Output()
-	if err != nil {
-		var exited *exec.ExitError
-		if errors.As(err, &exited) {
-			return string(out), fmt.Errorf("tmux %s: %s", arguments[0], strings.TrimSpace(string(exited.Stderr)))
-		}
-		return string(out), err
-	}
-	return string(out), nil
+	out, err := tool.Run(t.Binary, tmuxTimeout, append([]string{"-u", "-S", t.Socket}, arguments...)...)
+	return strings.TrimRight(string(out.Stdout), "\n"), err
 }
 
-func trimmed(s string) string { return strings.TrimRight(s, "\n") }
+// here is the server and pane this process runs in. Outside a pane there is
+// nothing for the tab's own two programs to do.
+func here() (socket, pane string, err error) {
+	socket, found := SocketOf(os.Getenv("TMUX"))
+	pane = os.Getenv("TMUX_PANE")
+	if !found || !IsPaneID(pane) {
+		return "", "", errors.New("this runs in a tmux pane, and $TMUX or $TMUX_PANE says it is not in one")
+	}
+	return socket, pane, nil
+}
 
 // SocketOf is the socket path out of a $TMUX value, `<socket>,<pid>,<session>`,
 // cut from the right because the path is whatever TMUX_TMPDIR made it.

@@ -2,13 +2,16 @@ package main
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 
 	"github.com/lassoColombo/agent-notify/session"
 )
 
+// This file is pure: which sessions the list shows, and in what groups.
+
 // Agent is one row of the list: a live session whose agent runs in a pane of
-// this server, and where that pane is now.
+// this server, and where that pane lives.
 type Agent struct {
 	Record session.Record
 	Pane   string
@@ -26,7 +29,7 @@ type captured struct {
 }
 
 // placeOf is the server socket and pane a session was captured in.
-func placeOf(record session.Record) (string, string, bool) {
+func placeOf(record session.Record) (socket, pane string, found bool) {
 	blob, present := record.CapturedContext.By["tmux"]
 	if !present {
 		return "", "", false
@@ -35,85 +38,80 @@ func placeOf(record session.Record) (string, string, bool) {
 	if err := json.Unmarshal(blob, &given); err != nil {
 		return "", "", false
 	}
-	socket, found := SocketOf(given.Server)
+	socket, found = SocketOf(given.Server)
 	if !found || !IsPaneID(given.Pane) {
 		return "", "", false
 	}
 	return socket, given.Pane, true
 }
 
-// Agents is every live session in a pane of this server that still exists,
-// in the order the records came in (most urgent first). `panes` is the
-// server's panes and where each one is; a session whose pane is gone is left
-// out rather than guessed about, and so is anything in `own`, the tab's own
-// two panes. When two sessions claim one pane, the more urgent one has it.
-func Agents(records []session.Record, socket string, panes map[string]string, own map[string]bool) []Agent {
+// Agents is every live session in a pane of this server that the stage could
+// show, most urgent first. A session whose pane is gone is left out rather
+// than guessed about, and so is one that lives in the tab's own window, which
+// cannot be borrowed into itself. When two sessions claim one pane, the more
+// urgent has it.
+func Agents(records []session.Record, socket string, world World, list string) []Agent {
+	tab := world.Panes[list].Window
+	// Sorted here rather than trusted from the caller, by the one rule every
+	// display orders with (R24).
+	ordered := slices.Clone(records)
+	session.ByUrgency(ordered)
+
 	var agents []Agent
 	claimed := map[string]bool{}
-	for _, record := range records {
+	for _, record := range ordered {
 		if !record.Kernel.Live() {
 			continue
 		}
-		server, pane, found := placeOf(record)
-		if !found || server != socket || own[pane] || claimed[pane] {
+		server, id, found := placeOf(record)
+		if !found || server != socket || claimed[id] {
 			continue
 		}
-		where, exists := panes[pane]
-		if !exists {
+		pane, exists := world.Panes[id]
+		if !exists || pane.Dead || pane.Role != "" || (pane.Window == tab && pane.StandIn == "") {
 			continue
 		}
-		claimed[pane] = true
-		agents = append(agents, Agent{Record: record, Pane: pane, Where: where})
+		claimed[id] = true
+		agents = append(agents, Agent{Record: record, Pane: id, Where: world.Where(id)})
 	}
 	return agents
 }
 
-// Section is one group of the list.
+// Section is one group of the list: the agents in one state.
 type Section struct {
 	Title  string
 	Kernel session.Kernel
 	Agents []Agent
 }
 
-// order is the list's sections, top to bottom: what costs you most to leave
-// waiting first, which is core's own urgency order.
-var order = []struct {
-	kernel session.Kernel
-	title  string
-}{
-	{session.BlockedOnYou, "needs you"},
-	{session.Broke, "broke"},
-	{session.FinishedATurn, "finished"},
-	{session.Working, "working"},
-	{session.Idle, "idle"},
+// titles say a state the way the list does: by what it wants from you.
+var titles = map[session.Kernel]string{
+	session.BlockedOnYou:  "needs you",
+	session.Broke:         "broke",
+	session.FinishedATurn: "finished",
+	session.Working:       "working",
+	session.Idle:          "idle",
 }
 
-// Sections groups agents by state, in `order`, leaving out empty groups. A
-// state this build does not know still gets a group, at the bottom, rather
-// than disappearing (R5).
+// Sections groups agents by state, in the order they came in, which is by
+// urgency. A state this build has never heard of gets a group like any other,
+// placed by the rank its records carry and named as it is spelled (R5, R21).
 func Sections(agents []Agent) []Section {
 	var sections []Section
-	known := map[session.Kernel]bool{}
-	for _, one := range order {
-		known[one.kernel] = true
-		section := Section{Title: one.title, Kernel: one.kernel}
-		for _, agent := range agents {
-			if agent.Record.Kernel == one.kernel {
-				section.Agents = append(section.Agents, agent)
-			}
-		}
-		if len(section.Agents) > 0 {
-			sections = append(sections, section)
-		}
-	}
-	other := Section{Title: "other"}
+	at := map[session.Kernel]int{}
 	for _, agent := range agents {
-		if !known[agent.Record.Kernel] {
-			other.Agents = append(other.Agents, agent)
+		kernel := agent.Record.Kernel
+		i, seen := at[kernel]
+		if !seen {
+			title, known := titles[kernel]
+			if !known {
+				title = strings.ReplaceAll(string(kernel), "-", " ")
+			}
+			i = len(sections)
+			at[kernel] = i
+			sections = append(sections, Section{Title: title, Kernel: kernel})
 		}
-	}
-	if len(other.Agents) > 0 {
-		sections = append(sections, other)
+		sections[i].Agents = append(sections[i].Agents, agent)
 	}
 	return sections
 }
@@ -126,16 +124,4 @@ func Flatten(sections []Section) []Agent {
 		agents = append(agents, section.Agents...)
 	}
 	return agents
-}
-
-// PanesOf parses `list-panes -a -F "#{pane_id}<sep>#{session_name}:#{window_index}"`.
-func PanesOf(output string) map[string]string {
-	panes := map[string]string{}
-	for _, line := range strings.Split(trimmed(output), "\n") {
-		pane, where, found := strings.Cut(line, separator)
-		if found && IsPaneID(pane) {
-			panes[pane] = where
-		}
-	}
-	return panes
 }

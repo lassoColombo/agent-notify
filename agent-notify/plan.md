@@ -5726,6 +5726,45 @@ of this section is that it prevents re-litigating.
   - **Started by the user, never by core**, like the picker: it answers
     nothing core calls.
 
+- **D-125** (2026-11-20) — **agent-notify-tmux-manager borrows an agent's
+  pane rather than mirroring it.** *Reverses* D-124's first point, and with it
+  the two-panes-talking-through-an-option design; *keeps* this server only,
+  and started by the user. The mirror was a terminal drawn inside a terminal:
+  lines laid out for another width, keys re-encoded on the way through
+  (Shift+Enter arrived as Enter), a scroll of its own, a read of the screen
+  ten times a second, and a `focused` that said no about the agent in front
+  of you.
+  - **A swap with a stand-in, not a move.** D-124 refused `swap-pane` because
+    it rearranges the window the agent lives in. It does not, when what the
+    pane is swapped with holds its place: `swap-pane -d -Z` against a pane of
+    this program's leaves that window's cells, sizes, zoom and active pane as
+    they were, and the same swap gives the agent back [measured on 3.8].
+  - **Away only while the tab is on screen.** Some terminal has the tab as
+    its current window, or everything is home. The cursor has to rest about a
+    tenth of a second before its pane is swapped, and while the focus is on
+    the stage the cursor does not move by itself, so no agent arrives under a
+    hand that is typing.
+  - **The state is in tmux, and every action starts from a read of it**
+    (R17, R22). A borrowed pane carries its stand-in, its window and its
+    session as options; the list plans one step from what `list-panes` says,
+    runs it and reads again. Each swap is conditional on those options,
+    tested by tmux as it runs the command, because the list, a stand-in and
+    `restore` may all act on one pane and a swap done twice is a swap undone.
+  - **No failure takes an agent with it** (R5). The list dying closes the
+    socket its stand-in holds, and the stand-in gives the agent back. A
+    stand-in whose program dies keeps its pane (`remain-on-exit`) and is
+    respawned in it. An agent whose window was killed while it was on the
+    stage survives that window and gets one of its own. The tab lives in a
+    hidden session, `_agents`, linked into whichever session asks for it, so
+    killing a session unlinks the tab instead of killing what it shows.
+  - **agent-notify-tmux reads `@agent-notify-home`**, and counts a borrowed
+    pane in the window it lives in, so a window's mark does not follow the
+    pane to the tab and back.
+  - **What it costs.** An agent is resized on its way onto the stage and
+    again on its way home. `kill-window` on the tab kills the agent it is
+    showing, which is why the tab has a `close` of its own for a binding to
+    call. One tab per server.
+
 **The payload discussion of 2026-09-17 is now ratified**
  in D-10 through D-18.
 What is still marked [proposed] elsewhere — the field list of §A7.4, the event
