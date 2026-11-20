@@ -1,15 +1,15 @@
 # agent-notify-tmux
 
-tmux's integration for [agent-notify](../../agent-notify). It marks what every
-agent on your machine is doing on tmux's panes and windows, works out which
-pane a session lives in, brings that pane to the front when somebody asks, and
-says whether you are already looking at it.
+tmux's integration for [agent-notify](../../agent-notify). It writes what every
+agent on your machine is doing on the tmux pane it runs in, works out which
+pane a session lives in, brings that pane in front of a terminal when somebody
+asks, and says whether you are looking at it.
 
 ```
-  pane %3   ↻ monomodules      working
-  pane %5   ▢ lenny            finished a turn, your move
-  pane %7     notes-8e         idle — a quiet agent shows its name and nothing else
-  window 1  ▲                  the most urgent thing inside it
+  pane %3     ↻ monomodules     working
+  pane %5     ▢ lenny           finished a turn, your move
+  pane %7       notes-8e        idle — a quiet agent shows its name and nothing else
+  window 1    ▲ ↻ api           every agent in it, looped out of its panes by tmux
 
 $ agent-notify focus-session lenny
   aerospace-container    skipped — aerospace-container has no coordinates for this session
@@ -20,11 +20,10 @@ lenny is in front.
 (The glyphs that ship are Nerd Font marks; the ASCII above is for a README.)
 
 It is the tmux half of plan.md's third promise — switch tool and nothing else
-changes — and it is built the way `agent-notify-zellij` is: one program for
-both halves (D-83), because they read the same two environment variables and
-drive the same tool. Titles without focus is a configuration, not a separate
-install — leave `tmux` out of `containers` and nothing will ever ask it to move
-you.
+changes — and one program for both halves (D-83), because they read the same
+two environment variables and drive the same tool. Marks without focus is a
+configuration, not a separate install: leave `tmux` out of `containers` and
+nothing will ever ask it to move you.
 
 Core runs it. There is no daemon: the hook runs `capture-environment` inside
 the agent, the session-watcher runs `render` when something a mark shows moves
@@ -33,7 +32,7 @@ runs `focus`. Each is one JSON object on stdin, one on stdout.
 
 ## Installation
 
-- **tmux 3.2 or later** (pane options, `set-option -p`; measured on 3.8).
+- **tmux 3.2 or later** (pane options, `#{P:}` loops; measured on 3.8).
 - **agent-notify core**, built and on your PATH.
 - **Go 1.26** to build. A **Nerd Font** if you want the default glyphs.
 
@@ -49,35 +48,62 @@ If this is your only container it is the whole of `containers`, and you need
 not write one. Otherwise write the list, outermost first, then
 `agent-notify watcher reload` and `agent-notify doctor`.
 
-## Drawing the marks
+## The marks
 
-**This program writes two user options and nothing else**, so what it says
-shows only where your tmux configuration asks for it:
+**This program writes three user options, on panes only**, and only on a pane
+that holds a live agent:
 
-| Option | Set on | Holds |
-| --- | --- | --- |
-| `@agent-notify-pane` | a pane holding a live agent | `<glyph> <name>`, or just the name for a state whose glyph is empty |
-| `@agent-notify-window` | a window holding one | the glyph of the most urgent agent in it |
+| Option | Holds |
+| --- | --- |
+| `@agent-notify-state` | the agent's state: `blocked-on-you`, `broke`, `finished-a-turn`, `working` or `idle` |
+| `@agent-notify-glyph` | the glyph for that state, and unset when the glyph is empty, as idle's is |
+| `@agent-notify-name` | the session's name |
 
-Both are unset again when there is nothing to say. For example:
+They are unset again when the agent ends, or whenever a pane carries them and
+no live agent claims it. Nothing shows until your tmux configuration names them
+in a format. For example:
 
 ```tmux
-# the window list: the glyph in front of the window's own name
-set -g window-status-format         '#{?#{@agent-notify-window},#{@agent-notify-window} ,}#I #W'
-set -g window-status-current-format '#{?#{@agent-notify-window},#{@agent-notify-window} ,}#I #W'
-
-# pane borders: the agent's mark, or the pane's own title
+# a pane's border: the agent's glyph and name, or the pane's own title
+set -g @agent "#{?#{@agent-notify-glyph},#{@agent-notify-glyph} ,}#{@agent-notify-name}"
 set -g pane-border-status top
-set -g pane-border-format ' #{?#{@agent-notify-pane},#{@agent-notify-pane},#{pane_title}} '
+set -g pane-border-format ' #{?#{@agent-notify-name},#{E:@agent},#{pane_title}} '
+
+# the window list: the glyph of every agent in the window, before its name
+set -g @agents "#{P:#{?#{@agent-notify-glyph},#{@agent-notify-glyph} ,}}"
+set -g window-status-format         '#{E:@agents}#I #W'
+set -g window-status-current-format '#{E:@agents}#I #W'
+
+# a colour for an agent waiting on you
+set -g @agent_style "#{?#{==:#{@agent-notify-state},blocked-on-you},#[fg=red],}"
 ```
 
-Why options rather than renames, which is what zellij's integration does:
-a pane title is the program's to rewrite, and an agent rewrites its terminal
-title constantly, so a title painted on a render would be gone by the next
-one; and `rename-window` turns the window's `automatic-rename` off for good,
-which nothing could give back. Nobody else writes these options, so there is
-nothing to strip off a name and nothing to recover — giving a pane back is
+**Nothing is written on a window, and that is the design** (D-126). What a
+window shows is looped out of the panes it holds while tmux draws it, and a
+pane's options go wherever the pane goes. So a pane moved with `break-pane`,
+`join-pane` or `swap-pane` — or borrowed onto the stage of
+`agent-notify-tmux-manager`'s tab — takes its glyph with it at once, and the
+window it left shows nothing of it, with no render in between. A mark computed
+for a window by this program would be right only until the next move, and
+nothing would wake it to put it right.
+
+**The cost**: a window with two agents shows both glyphs, in pane order, rather
+than only the most urgent one. "The most urgent" is a maximum, and a tmux loop
+can be sorted by index, name or time but not by an option.
+
+Why options rather than renames, which is what zellij's integration does: a
+pane title is the program's to rewrite, and an agent rewrites its terminal
+title constantly; and `rename-window` turns the window's `automatic-rename`
+off for good. Nobody else writes these options, so giving a pane back is
 `set-option -u`.
+
+**How a render writes them.** For each tmux server it reads every pane's
+options in one `list-panes`, plans the difference from what the records say,
+and runs every `set-option` in one invocation. tmux stops at the first command
+of an invocation that fails — a pane that closed between the read and the
+write — so a refused write is read and planned again, once. A record whose
+capture names another server — the same socket, but a server started again
+since, with its pane ids handed out again from `%0` — marks nothing.
 
 ## Configuration
 
@@ -96,51 +122,61 @@ and a focus answers `not-running`.
 
 ## Where a session lives
 
-`$TMUX` is `<socket>,<server pid>,<session index>` and `$TMUX_PANE` is `%<n>`;
-both are captured as they are. The socket names the server, and every tmux
-invocation here passes it as `-S`, because the session-watcher's own `$TMUX`
-— if it has one — is whatever pane happened to start it. The pane id is unique
-per server for the life of the pane, which makes it the coordinate. The session
-index is NOT used to place anything: it is where the pane was started, and
-`move-pane` makes it stale, so the session and window are always asked of tmux.
+`$TMUX` is `<socket>,<server pid>,<session index>` and `$TMUX_PANE` is
+`%<n>`; both are captured as they are. The coordinates are the socket, the
+server's pid and the pane id, read out of the capture without asking tmux
+anything, so placing a session cannot fail because tmux was slow. Every tmux
+invocation passes the socket as `-S`, because the session-watcher's own
+`$TMUX` — if it has one — is whatever pane happened to start it. Which session
+and window hold the pane is never stored: `move-pane` would make it wrong. It
+is asked of tmux when it is needed, and so is whether the server is still the
+one with that pid.
 
 A process of tmux that is not in a pane — a popup, a `run-shell` — has `$TMUX`
 and no `$TMUX_PANE`, and is nowhere.
 
 ## Focus
 
-`focus` re-reads where the pane is, asks whether you are already there, acts,
-and reads the state back, because an exit code says nothing about whether
-anybody's screen changed. In order:
+A focus is somebody wanting to see a pane, so it starts by deciding whose
+screen that is:
 
-- **Asked from inside the same server** (the picker in a pane or a popup):
-  the terminal that asked is the screen you are looking at, and
-  `switch-client -c <it> -t <pane>` takes it there, session, window and pane
-  in one command. This holds even when another terminal already shows the
-  pane's session.
-- **Somebody is attached to a session holding the pane**: that session's
-  window is selected, then the pane, in the terminal that shows it.
-- **Somebody is attached to the server at all**: the most recently active
-  client is switched to the pane. This is how a notification clicked outside
-  tmux still lands somewhere (D-123).
-- **Nobody is**: `not-attached`, naming the `tmux attach` that would help.
+- **Asked from inside the pane's server**, the terminal it was asked from: the
+  one showing `$TMUX_PANE` when it was asked from a pane, or, from a popup like
+  the picker's, the one on the session `$TMUX` names. Even when another
+  terminal already shows the agent, because that one is not in front of the
+  person asking.
+- **Asked from anywhere else** (a banner, a script), the terminal that has the
+  focus, and failing that the one used last.
+- **No terminal at all**: `not-attached`, naming the `tmux attach` that would
+  help.
+
+If that terminal already shows the pane, that is it. Otherwise
+`switch-client -c <terminal> -t <pane>` brings the session, the window and the
+pane in one command, unzooming a window zoomed on another pane; and it keeps
+the terminal on its own session when that session holds the window too, as
+with the agents tab, which is also linked into a hidden session. Then the
+terminal is read back, because an exit code says nothing about whether anybody's
+screen changed.
+
+**Focused** is yes when a terminal shows the pane — its current window's
+active pane — and that terminal has the focus. tmux knows the last from the
+terminal's focus reports, which `focus-events on` turns on; without them it
+never hears the focus leave, and answers as if the terminal had it. What no
+format says is whether a popup is open over the pane.
 
 Every tmux invocation passes `-u` as well as `-S`. The session-watcher runs
 with no `LANG`, and a tmux that doesn't believe its output is UTF-8 prints
-control characters and every non-ASCII character as `_`. That includes the
-field separator, so nothing it answered would parse.
+control characters and every non-ASCII character as `_`, including the field
+separator, so nothing it answered would parse (D-123).
 
-"In front" means: some session holding the pane has a client, has the pane's
-window as its current one, and has the pane as that window's active one. What
-no format says is whether a popup is open over it.
-
-Failures are words core can act on: `place-is-gone`, `not-running`,
-`never-placed`, `refused`, and this program's own `not-attached`.
+Failures are words core can act on: `place-is-gone` (the pane, or the server
+it was in, is gone), `not-running`, `never-placed`, `refused`, and this
+program's own `not-attached`.
 
 ## Testing
 
-`env -u GOROOT go test ./...`. The planning and the focus rule are tables, the
-focus paths also run against a stand-in tmux that records what it was asked,
-and the rest runs against real tmux servers on private sockets with no
-configuration file — a client for them is a pane of a second server running
-`tmux attach` — and skips without tmux.
+`env -u GOROOT go test ./...`. The planning, the choice of terminal and the
+focused rule are tables. The rest runs against real tmux servers on private
+sockets with no configuration file, and skips without tmux. A terminal there
+is a pane of a second server running `tmux attach`, and its focus reports are
+the escape sequences a terminal sends, typed into that pane.

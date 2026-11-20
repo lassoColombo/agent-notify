@@ -23,12 +23,9 @@ func main() {
 			}
 			return (&Display{Tmux: settings.Tmux, Glyphs: settings.Glyphs, Logger: me.Logger()}).Render(view)
 		},
+		// Interpretation asks tmux nothing, so it needs no settings.
 		Interpret: func(captured json.RawMessage, _ []session.Ancestor) (any, error) {
-			settings, err := resolved()
-			if err != nil {
-				return nil, err
-			}
-			return Interpret(settings.Tmux, captured)
+			return Interpret(captured)
 		},
 		Focus: func(coordinates json.RawMessage) (container.Outcome, error) {
 			settings, err := resolved()

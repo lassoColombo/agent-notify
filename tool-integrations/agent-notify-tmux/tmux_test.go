@@ -1,14 +1,17 @@
 package main
 
 import (
+	"encoding/json"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/lassoColombo/agent-notify/container"
 	"github.com/lassoColombo/agent-notify/session"
 )
 
@@ -35,7 +38,7 @@ func realTmux(t *testing.T) Tmux {
 // socket. The directory is made by hand rather than by t.TempDir, because a
 // unix socket path is limited to about a hundred bytes and t.TempDir's are
 // longer than that on macOS.
-func aServer(t *testing.T, tmux Tmux, session string) string {
+func aServer(t *testing.T, tmux Tmux, name string) string {
 	t.Helper()
 	directory, err := os.MkdirTemp("", "an-tmux-")
 	if err != nil {
@@ -46,11 +49,16 @@ func aServer(t *testing.T, tmux Tmux, session string) string {
 		_, _ = bare(tmux, socket, "kill-server")
 		_ = os.RemoveAll(directory)
 	})
-	if out, err := bare(tmux, socket, "new-session", "-d", "-s", session, "-x", "120", "-y", "40",
+	start(t, tmux, socket, name)
+	return socket
+}
+
+func start(t *testing.T, tmux Tmux, socket, name string) {
+	t.Helper()
+	if out, err := bare(tmux, socket, "new-session", "-d", "-s", name, "-x", "120", "-y", "40",
 		"sleep", "600"); err != nil {
 		t.Skipf("cannot start a tmux server (%v): %s", err, out)
 	}
-	return socket
 }
 
 // bare runs tmux the way a person would set a server up: with no
@@ -75,35 +83,45 @@ func must(t *testing.T, tmux Tmux, socket string, arguments ...string) string {
 func stripped(environment []string) []string {
 	var kept []string
 	for _, variable := range environment {
-		if strings.HasPrefix(variable, "TMUX") {
-			continue
+		if !strings.HasPrefix(variable, "TMUX") {
+			kept = append(kept, variable)
 		}
-		kept = append(kept, variable)
 	}
 	return kept
 }
 
-// twoPanes is a server with one window split in two, and the two panes' ids.
-func twoPanes(t *testing.T, tmux Tmux) (string, string, string) {
+func pidOf(t *testing.T, tmux Tmux, socket string) int {
 	t.Helper()
-	socket := aServer(t, tmux, "an-test")
-	first := must(t, tmux, socket, "display-message", "-p", "-t", "an-test", "#{pane_id}")
-	second := must(t, tmux, socket, "split-window", "-P", "-F", "#{pane_id}", "-t", "an-test", "sleep", "600")
-	return socket, first, second
+	pid, err := strconv.Atoi(must(t, tmux, socket, "display-message", "-p", "#{pid}"))
+	if err != nil {
+		t.Fatalf("the server's pid: %v", err)
+	}
+	return pid
 }
 
-func marks(t *testing.T, tmux Tmux, socket string) (map[string]string, map[string]string) {
+func paneOf(t *testing.T, tmux Tmux, socket, target string) string {
 	t.Helper()
-	rows, err := tmux.Panes(socket)
+	return must(t, tmux, socket, "display-message", "-p", "-t", target, "#{pane_id}")
+}
+
+func marksOf(t *testing.T, tmux Tmux, socket string) map[string]Mark {
+	t.Helper()
+	server, err := tmux.Look(socket)
 	if err != nil {
-		t.Fatalf("Panes: %v", err)
+		t.Fatalf("Look: %v", err)
 	}
-	panes, windows := map[string]string{}, map[string]string{}
-	for _, row := range rows {
-		panes[row.Pane] = row.PaneMark
-		windows[row.WindowID] = row.WindowMark
+	return server.Panes
+}
+
+func display(tmux Tmux) *Display {
+	return &Display{Tmux: tmux, Glyphs: testGlyphs, Logger: slog.New(slog.DiscardHandler)}
+}
+
+func render(t *testing.T, tmux Tmux, records ...session.Record) {
+	t.Helper()
+	if err := display(tmux).Render(session.View{Sessions: records}); err != nil {
+		t.Fatalf("Render: %v", err)
 	}
-	return panes, windows
 }
 
 // TestTheParseDecidesNotTheExitCode: /bin/echo is a program that exits zero
@@ -111,7 +129,7 @@ func marks(t *testing.T, tmux Tmux, socket string) (map[string]string, map[strin
 // failure being guarded against.
 func TestTheParseDecidesNotTheExitCode(t *testing.T) {
 	liar := Tmux{Binary: "/bin/echo", Timeout: 5 * time.Second}
-	if _, err := liar.Panes(home); err == nil {
+	if _, err := liar.Look(home); err == nil {
 		t.Fatal("a program that exits 0 and answers with prose was believed")
 	} else if !strings.Contains(err.Error(), "is not there") {
 		t.Errorf("the error does not say what happened: %v", err)
@@ -119,7 +137,7 @@ func TestTheParseDecidesNotTheExitCode(t *testing.T) {
 }
 
 // TestAMissingServerFails: a socket nobody is listening on is a server that is
-// not there, and asking it starts nothing — `list-panes` never starts a server.
+// not there, and asking it starts nothing.
 func TestAMissingServerFails(t *testing.T) {
 	tmux := realTmux(t)
 	directory, err := os.MkdirTemp("", "an-tmux-")
@@ -129,7 +147,7 @@ func TestAMissingServerFails(t *testing.T) {
 	defer os.RemoveAll(directory)
 	socket := filepath.Join(directory, "s")
 
-	if _, err := tmux.Panes(socket); err == nil {
+	if _, err := tmux.Look(socket); err == nil {
 		t.Fatal("asking a server that is not there succeeded")
 	}
 	if _, err := os.Stat(socket); err == nil {
@@ -139,90 +157,79 @@ func TestAMissingServerFails(t *testing.T) {
 
 // TestReadingWithNoLocale: the session-watcher runs with no LANG, and a tmux
 // that does not think its output is UTF-8 prints the separator and every glyph
-// as `_`. Every read then failed to parse, so nothing was ever placed, painted
-// or focused, while the suite, run from a UTF-8 shell, passed.
+// as `_` (D-123).
 func TestReadingWithNoLocale(t *testing.T) {
 	tmux := realTmux(t)
-	socket, first, _ := twoPanes(t, tmux)
+	socket := aServer(t, tmux, "an-test")
+	pane := paneOf(t, tmux, socket, "an-test")
 	for _, variable := range []string{"LANG", "LC_ALL", "LC_CTYPE"} {
 		t.Setenv(variable, "")
 	}
 
-	rows, err := tmux.Panes(socket)
-	if err != nil {
-		t.Fatalf("with no locale, Panes: %v", err)
-	}
-	if len(rows) == 0 {
-		t.Fatal("with no locale, no rows")
-	}
-
-	display := &Display{Tmux: tmux, Glyphs: session.NewPalette(DefaultGlyphs, nil), Logger: slog.New(slog.DiscardHandler)}
-	if err := display.Render(session.View{Sessions: []session.Record{placed("alpha", session.Working, socket, first)}}); err != nil {
+	shipped := &Display{Tmux: tmux, Glyphs: session.NewPalette(DefaultGlyphs, nil), Logger: slog.New(slog.DiscardHandler)}
+	if err := shipped.Render(session.View{Sessions: []session.Record{
+		placedIn("alpha", session.Working, socket, pidOf(t, tmux, socket), pane),
+	}}); err != nil {
 		t.Fatalf("Render: %v", err)
 	}
-	want := DefaultGlyphs[session.Working] + " alpha"
-	if panes, _ := marks(t, tmux, socket); panes[first] != want {
-		t.Errorf("with no locale, pane %s reads back %q, want %q", first, panes[first], want)
+	want := Mark{State: "working", Glyph: DefaultGlyphs[session.Working], Name: "alpha"}
+	if got := marksOf(t, tmux, socket)[pane]; got != want {
+		t.Errorf("with no locale, pane %s reads back %+v, want %+v", pane, got, want)
 	}
 }
 
-func TestPaintingARealTmux(t *testing.T) {
+func TestMarkingARealTmux(t *testing.T) {
 	tmux := realTmux(t)
-	socket, first, second := twoPanes(t, tmux)
+	socket := aServer(t, tmux, "an-test")
+	server := pidOf(t, tmux, socket)
+	first := paneOf(t, tmux, socket, "an-test")
+	second := must(t, tmux, socket, "split-window", "-P", "-F", "#{pane_id}", "-t", first, "sleep", "600")
 	window := must(t, tmux, socket, "display-message", "-p", "-t", first, "#{window_id}")
 
-	display := &Display{Tmux: tmux, Glyphs: testGlyphs, Logger: slog.New(slog.DiscardHandler)}
-	paint := func(sessions ...session.Record) {
-		t.Helper()
-		if err := display.Render(session.View{Sessions: sessions}); err != nil {
-			t.Fatalf("Render: %v", err)
+	alpha := placedIn("alpha", session.Working, socket, server, first)
+	render(t, tmux, alpha, placedIn("beta", session.BlockedOnYou, socket, server, second))
+	marks := marksOf(t, tmux, socket)
+	if want := (Mark{State: "working", Glyph: "*", Name: "alpha"}); marks[first] != want {
+		t.Errorf("pane %s says %+v, want %+v", first, marks[first], want)
+	}
+	if want := (Mark{State: "blocked-on-you", Glyph: "!", Name: "beta"}); marks[second] != want {
+		t.Errorf("pane %s says %+v, want %+v", second, marks[second], want)
+	}
+
+	// One ends, and its pane is given back.
+	render(t, tmux, alpha, placedIn("beta", session.Ended, socket, server, second))
+	if marks = marksOf(t, tmux, socket); marks[second] != (Mark{}) {
+		t.Errorf("pane %s still says %+v after its agent ended", second, marks[second])
+	}
+
+	// Nothing is ever written on the window.
+	for _, option := range options {
+		if got, _ := bare(tmux, socket, "show-options", "-w", "-v", "-q", "-t", window, option); got != "" {
+			t.Errorf("window %s carries %s = %q", window, option, got)
 		}
 	}
+}
 
-	working := placed("alpha", session.Working, socket, first)
-	paint(working, placed("beta", session.BlockedOnYou, socket, second))
-	panes, windows := marks(t, tmux, socket)
-	if panes[first] != "* alpha" {
-		t.Errorf("pane %s says %q, want %q", first, panes[first], "* alpha")
-	}
-	if panes[second] != "! beta" {
-		t.Errorf("pane %s says %q, want %q", second, panes[second], "! beta")
-	}
-	if windows[window] != "!" {
-		t.Errorf("window %s says %q, want the most urgent agent in it", window, windows[window])
-	}
+// TestAWindowShowsWhatItsPanesSay is why nothing is written on a window: a
+// format loops over the panes a window holds when tmux draws it, so a pane
+// moved to another window takes its mark there, with no render in between.
+func TestAWindowShowsWhatItsPanesSay(t *testing.T) {
+	tmux := realTmux(t)
+	socket := aServer(t, tmux, "an-test")
+	first := paneOf(t, tmux, socket, "an-test")
+	agent := must(t, tmux, socket, "split-window", "-P", "-F", "#{pane_id}", "-t", first, "sleep", "600")
+	render(t, tmux, placedIn("alpha", session.FinishedATurn, socket, pidOf(t, tmux, socket), agent))
 
-	// The blocked one is answered and goes back to work. The window follows
-	// the aggregate down, which is the half of max(rank) that is easy to get
-	// wrong.
-	paint(working, placed("beta", session.Working, socket, second))
-	if _, windows = marks(t, tmux, socket); windows[window] != "*" {
-		t.Errorf("window %s says %q, want %q", window, windows[window], "*")
+	windows := func() string {
+		return must(t, tmux, socket, "display-message", "-p", "-t", "an-test",
+			"#{W:#{window_index}=#{P:#{"+glyphOption+"}} }")
 	}
-
-	// One ends: its pane is given back, the window keeps the other's glyph.
-	ended := placed("beta", session.Ended, socket, second)
-	paint(working, ended)
-	panes, windows = marks(t, tmux, socket)
-	if panes[second] != "" {
-		t.Errorf("pane %s still says %q after its session ended", second, panes[second])
+	if got := windows(); got != "0=>" {
+		t.Errorf("windows read %q, want the agent's glyph on window 0", got)
 	}
-	if windows[window] != "*" {
-		t.Errorf("window %s says %q, want %q", window, windows[window], "*")
-	}
-
-	// Both end, and nothing of ours is left anywhere.
-	paint(placed("alpha", session.Ended, socket, first), ended)
-	panes, windows = marks(t, tmux, socket)
-	if panes[first] != "" || windows[window] != "" {
-		t.Errorf("after everything ended, pane %s says %q and window %s says %q",
-			first, panes[first], window, windows[window])
-	}
-
-	// And the window's own name was never touched: automatic-rename is the
-	// thing renaming it would have switched off.
-	if automatic := must(t, tmux, socket, "show-options", "-w", "-v", "-t", window, "automatic-rename"); automatic == "off" {
-		t.Errorf("window %s lost automatic-rename", window)
+	must(t, tmux, socket, "break-pane", "-d", "-s", agent)
+	if got := windows(); got != "0= 1=>" {
+		t.Errorf("after break-pane, windows read %q, want the glyph on window 1 only", got)
 	}
 }
 
@@ -230,37 +237,122 @@ func TestPaintingARealTmux(t *testing.T) {
 // called on every change: a render is the difference, not the state.
 func TestRenderingTwiceRunsNothingTheSecondTime(t *testing.T) {
 	tmux := realTmux(t)
-	socket, first, _ := twoPanes(t, tmux)
-
-	records := []session.Record{placed("alpha", session.Working, socket, first)}
-	display := &Display{Tmux: tmux, Glyphs: testGlyphs, Logger: slog.New(slog.DiscardHandler)}
-	if err := display.Render(session.View{Sessions: records}); err != nil {
-		t.Fatalf("Render: %v", err)
+	socket := aServer(t, tmux, "an-test")
+	records := []session.Record{
+		placedIn("alpha", session.Working, socket, pidOf(t, tmux, socket), paneOf(t, tmux, socket, "an-test")),
 	}
+	render(t, tmux, records...)
 
-	rows, err := tmux.Panes(socket)
+	server, err := tmux.Look(socket)
 	if err != nil {
-		t.Fatalf("Panes: %v", err)
+		t.Fatalf("Look: %v", err)
 	}
-	if plan := Plan(socket, records, rows, testGlyphs); len(plan) != 0 {
+	if plan := Plan(socket, records, server, testGlyphs); len(plan) != 0 {
 		t.Errorf("a second render would run %v", ran(plan))
 	}
 }
 
-// TestAGlyphThatLooksLikeAFlagIsAValue: the option's value comes after its
-// name, so tmux never reads it as a flag — pinned because a name is the
-// agent's, and the agent can call a session anything.
-func TestAGlyphThatLooksLikeAFlagIsAValue(t *testing.T) {
+// TestNamesTmuxWouldMisreadArriveWhole: a name is the agent's, it is written
+// in one invocation with every other mark, and it reads back as it was —
+// including one that ends in `;`, which tmux would otherwise take for the end
+// of the command — with the commands after it still run.
+func TestNamesTmuxWouldMisreadArriveWhole(t *testing.T) {
 	tmux := realTmux(t)
-	socket, first, _ := twoPanes(t, tmux)
+	socket := aServer(t, tmux, "an-test")
+	server := pidOf(t, tmux, socket)
 
-	display := &Display{Tmux: tmux, Glyphs: testGlyphs, Logger: slog.New(slog.DiscardHandler)}
-	if err := display.Render(session.View{Sessions: []session.Record{
-		placed("-u odd #{name}", session.Idle, socket, first),
-	}}); err != nil {
-		t.Fatalf("Render: %v", err)
+	names := []string{"fix it;", ";", `a\;`, "-u odd", "x;y", "#{session_name}", "last"}
+	var records []session.Record
+	panes := map[string]string{}
+	for _, name := range names {
+		pane := must(t, tmux, socket, "new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "an-test", "sleep", "600")
+		records = append(records, placedIn(name, session.Idle, socket, server, pane))
+		panes[pane] = name
 	}
-	if panes, _ := marks(t, tmux, socket); panes[first] != "-u odd #{name}" {
-		t.Errorf("pane %s says %q", first, panes[first])
+	render(t, tmux, records...)
+
+	marks := marksOf(t, tmux, socket)
+	for pane, name := range panes {
+		if marks[pane].Name != name {
+			t.Errorf("pane %s reads back %q, want %q", pane, marks[pane].Name, name)
+		}
+	}
+}
+
+// TestOneFailedCommandStopsTheRest is the fact paint's second attempt is for.
+func TestOneFailedCommandStopsTheRest(t *testing.T) {
+	tmux := realTmux(t)
+	socket := aServer(t, tmux, "an-test")
+	pane := paneOf(t, tmux, socket, "an-test")
+
+	err := tmux.Do(socket, chain([]Command{
+		{Args: []string{"set-option", "-p", "-t", "%999", nameOption, "gone"}},
+		{Args: []string{"set-option", "-p", "-t", pane, nameOption, "here"}},
+	}))
+	if err == nil {
+		t.Fatal("a command naming a pane that is not there succeeded")
+	}
+	if got := marksOf(t, tmux, socket)[pane].Name; got != "" {
+		t.Errorf("the command after the failed one ran: pane %s says %q", pane, got)
+	}
+}
+
+// TestAPaneThatClosesMidwayIsLookedAtAgain: a pane closes between the look
+// and the write — here, by a tmux that closes it the moment the first write
+// arrives — so the write is refused, and the marks still arrive.
+func TestAPaneThatClosesMidwayIsLookedAtAgain(t *testing.T) {
+	tmux := realTmux(t)
+	socket := aServer(t, tmux, "an-test")
+	leftover := paneOf(t, tmux, socket, "an-test")
+	agent := must(t, tmux, socket, "split-window", "-P", "-F", "#{pane_id}", "-t", leftover, "sleep", "600")
+	// A mark nobody claims on the lower-numbered pane, so that giving it back
+	// is the first command of the write.
+	must(t, tmux, socket, "set-option", "-p", "-t", leftover, nameOption, "old")
+
+	directory := t.TempDir()
+	marker := filepath.Join(directory, "closed")
+	script := filepath.Join(directory, "tmux")
+	body := "#!/bin/sh\n" +
+		"case \" $* \" in *\" set-option \"*)\n" +
+		"  if [ ! -e '" + marker + "' ]; then : > '" + marker + "'; '" + tmux.Binary + "' -S '" + socket + "' kill-pane -t " + leftover + "; fi;;\n" +
+		"esac\n" +
+		"exec '" + tmux.Binary + "' \"$@\"\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	closing := Tmux{Binary: script, Timeout: 5 * time.Second}
+	render(t, closing, placedIn("alpha", session.Working, socket, pidOf(t, tmux, socket), agent))
+
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatal("the pane was never closed under the write, so this tested nothing")
+	}
+	if want := (Mark{State: "working", Glyph: "*", Name: "alpha"}); marksOf(t, tmux, socket)[agent] != want {
+		t.Errorf("pane %s says %+v, want %+v", agent, marksOf(t, tmux, socket)[agent], want)
+	}
+}
+
+// TestAServerStartedAgainIsAnotherServer: tmux numbers panes from %0 in every
+// server it starts, so a pane id outlives the server it was handed out by.
+// A record of the one before marks nothing in the one after.
+func TestAServerStartedAgainIsAnotherServer(t *testing.T) {
+	tmux := realTmux(t)
+	socket := aServer(t, tmux, "an-test")
+	before := pidOf(t, tmux, socket)
+	pane := paneOf(t, tmux, socket, "an-test")
+	must(t, tmux, socket, "kill-server")
+	start(t, tmux, socket, "an-test")
+	if again := paneOf(t, tmux, socket, "an-test"); again != pane {
+		t.Skipf("this tmux numbered the first pane %s and then %s; the case does not arise", pane, again)
+	}
+
+	render(t, tmux, placedIn("alpha", session.Working, socket, before, pane))
+	if got := marksOf(t, tmux, socket)[pane]; got != (Mark{}) {
+		t.Errorf("pane %s of the new server was marked %+v for an agent of the old one", pane, got)
+	}
+
+	coordinates, _ := json.Marshal(Place{Socket: socket, Server: before, Pane: pane})
+	if outcome, _ := Focus(tmux, coordinates); outcome.OK || outcome.Problem != container.PlaceIsGone {
+		t.Errorf("focus on the old server's pane = %+v, want place-is-gone", outcome)
 	}
 }

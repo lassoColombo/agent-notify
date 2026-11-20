@@ -1,6 +1,6 @@
-// Command agent-notify-tmux is agent-notify's tmux integration: it paints
-// agent state onto two user options of tmux's panes and windows, and it places
-// and focuses sessions. One program because the two halves read the same two
+// Command agent-notify-tmux is agent-notify's tmux integration: it writes
+// each agent's state, glyph and name on the pane it runs in, and it places and
+// focuses sessions. One program because the two halves read the same two
 // variables and drive the same tool; wanting the marks without focus is a
 // matter of leaving it out of `containers`. Being on PATH is the whole of
 // installing it (D-102).

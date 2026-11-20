@@ -5765,6 +5765,55 @@ of this section is that it prevents re-litigating.
     showing, which is why the tab has a `close` of its own for a binding to
     call. One tab per server.
 
+- **D-126** (2026-11-20) — **agent-notify-tmux, rebuilt: marks on panes
+  only, placing that asks tmux nothing, and a focus that starts from a
+  terminal.** *Reverses* D-122's two options, `@agent-notify-pane` and
+  `@agent-notify-window`, and D-125's point that agent-notify-tmux reads
+  `@agent-notify-home`, which agent-notify-tmux-manager no longer writes.
+  *Amends* D-122's placing and D-123's focus order. *Keeps* options rather
+  than renames, `-u` and `-S` on every call, and the words a focus fails with.
+  - **Nothing is written on a window.** A pane holding a live agent carries
+    `@agent-notify-state`, `@agent-notify-glyph` and `@agent-notify-name`,
+    and what a window shows is looped out of its panes by tmux as it draws
+    (`#{P:…}`). The window mark D-122 computed went stale whenever a pane
+    moved and its agent did not change state — `break-pane`, `join-pane`,
+    `swap-pane`, the tab borrowing it — because only the store wakes a
+    render; D-125's `@agent-notify-home` patched one of those cases by
+    coupling two modules. A pane's options go where the pane goes, and the
+    loop is redone at every draw, so the glyph follows the pane at once
+    [measured on 3.8]. **The cost:** a window with two agents shows both
+    glyphs, in pane order, rather than the most urgent one, because a loop
+    can be sorted by index, name or time and not by an option.
+  - **One write per server, and one more look if it is refused.** One
+    `list-panes` reads every pane's options and the server's pid, the plan
+    is the difference, and every `set-option` runs in one invocation. tmux
+    stops at the first command of an invocation that fails, so a pane closed
+    between the read and the write is met by reading and planning again,
+    once. A value that ends in `;` is handed over as `\;`, or tmux takes it
+    for the end of the command and runs the rest as commands of their own.
+  - **Placing asks tmux nothing.** The coordinates are the socket, the
+    server's pid and the pane id, all of them in the capture. Asking tmux
+    could fail three times on a slow server and leave a session unplaced for
+    good (D-109), and what it added, the session and the window, was wrong
+    after the first move. The pid is there because a server started again on
+    the same socket hands pane ids out again from `%0`: a record of the old
+    server marks nothing in the new one, and a focus on it is
+    `place-is-gone`.
+  - **A focus first chooses the terminal**, then moves only that one with
+    `switch-client -c <it> -t <pane>`, and reads back that it shows the pane.
+    Asked from inside the server, it is the terminal showing `$TMUX_PANE`,
+    or, from a popup, one on the session `$TMUX` names; asked from anywhere
+    else, the terminal with the focus, and failing that the one used last.
+    D-123's order had a hole: it answered done, moving nothing, whenever any
+    terminal already showed the pane, so a person asking from another
+    terminal saw nothing happen; and from outside it moved a terminal on the
+    pane's session ahead of the one used last.
+  - **`focused` needs the terminal's own focus.** It is yes when a terminal
+    shows the pane and tmux says that terminal has the focus
+    (`client_flags`), which tmux learns from the terminal's focus reports
+    with `focus-events on` [measured on 3.8]; with them off it never hears
+    the focus leave, and the answer is what it was.
+
 **The payload discussion of 2026-09-17 is now ratified**
  in D-10 through D-18.
 What is still marked [proposed] elsewhere — the field list of §A7.4, the event
