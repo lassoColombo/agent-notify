@@ -39,8 +39,9 @@ it.
 | mirror | `Alt v`, the wheel | scroll through the agent's history: `j/k` `J/K` `d/u` `g/G`, `Esc` or `q` back; typing anything else leaves scrolling and is sent |
 | either | `Alt Tab` | switch between the list and the mirror |
 
-`Alt i`, `Alt Tab` and `Alt v` come from your tmux configuration, not from this
-program (see below).
+`Alt i`, `Alt Tab` and `Alt j/k` come from your tmux configuration, not from
+this program (see below). `Alt v` is the mirror's own; a tmux binding on it
+has to let it through to the mirror.
 
 ## How it fits together
 
@@ -54,7 +55,7 @@ agent-notify-tmux-manager view   the mirror
 
 The two halves talk only through tmux:
 - The list writes the selected pane's id into the tab's `@agents_selected`
-  option, and names the mirror's frame after the agent with `@name`.
+  option, and gives the mirror's pane the agent's name as its title.
 - The mirror reads the selection on every frame, in the same tmux call that
   reads the agent's screen.
 - Both panes carry `@agents_role` (`list` or `view`), which is what the tmux
@@ -84,14 +85,18 @@ Every tmux call says `-u`, for the same reason agent-notify-tmux does (D-123).
 ```tmux
 bind -n M-i if -F "#{W:#{?#{==:#{window_name},agents},1,}}" { select-window -t :=agents } { new-window -n agents agent-notify-tmux-manager }
 bind -n M-Tab if -F "#{@agents_role}" { if -F "#{==:#{@agents_role},list}" { select-pane -R } { select-pane -L } } { send-keys M-Tab }
-bind -n M-v if -F "#{==:#{@agents_role},view}" { send-keys M-v } { copy-mode }
 bind -n M-j if -F "#{==:#{@agents_role},list}" { send-keys M-j } { select-pane -Z -D }
 bind -n M-k if -F "#{==:#{@agents_role},list}" { send-keys M-k } { select-pane -Z -U }
 ```
 
-Outside the tab, `Alt Tab` reaches the program in the pane as usual, `Alt v`
-is copy mode, and `Alt j/k` move between panes. In the list they move between
-agents instead; in the mirror they still move between panes.
+Outside the tab, `Alt Tab` reaches the program in the pane as usual and
+`Alt j/k` move between panes. In the list they move between agents instead; in
+the mirror they still move between panes. If Alt v enters copy mode, pass it
+to the mirror:
+
+```tmux
+bind -n M-v if -F "#{==:#{@agents_role},view}" { send-keys M-v } { copy-mode }
+```
 
 ## Building
 

@@ -88,7 +88,8 @@ func open() error {
 		"set-option", "-w", "-t", list, optionView, view, ";",
 		"set-option", "-p", "-t", list, optionRole, roleList, ";",
 		"set-option", "-p", "-t", view, optionRole, roleView, ";",
-		"set-option", "-p", "-t", list, "@name", "agents",
+		"select-pane", "-t", list, "-T", "agents", ";",
+		"select-pane", "-t", view, "-T", noAgent,
 	); err != nil {
 		return err
 	}

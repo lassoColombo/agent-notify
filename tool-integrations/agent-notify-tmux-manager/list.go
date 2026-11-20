@@ -199,7 +199,7 @@ func (l *list) rebuild() tea.Cmd {
 	return l.publish()
 }
 
-// publish tells the view what to mirror, and names the view's frame after it.
+// publish tells the view what to mirror, and titles the view's pane after it.
 func (l *list) publish() tea.Cmd {
 	if l.selected == l.published {
 		return nil
@@ -211,10 +211,10 @@ func (l *list) publish() tea.Cmd {
 	}
 	if l.selected == "" {
 		return l.tmuxCmd("set-option", "-w", "-u", "-t", l.self, optionSelected, ";",
-			"set-option", "-p", "-u", "-t", l.view, "@name")
+			"select-pane", "-t", l.view, "-T", noAgent)
 	}
 	return l.tmuxCmd("set-option", "-w", "-t", l.self, optionSelected, l.selected, ";",
-		"set-option", "-p", "-t", l.view, "@name", name)
+		"select-pane", "-t", l.view, "-T", name)
 }
 
 func (l *list) tmuxCmd(arguments ...string) tea.Cmd {

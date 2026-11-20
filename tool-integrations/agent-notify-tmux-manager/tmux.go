@@ -10,7 +10,7 @@ import (
 
 // The options the tab is held together by. The window ones say which pane is
 // which half and what is selected; the pane one is what tmux.conf's Alt Tab
-// and Alt v test, so that they do something else in every other tab.
+// and Alt j/k test, so that they do something else in every other tab.
 const (
 	optionSelected = "@agents_selected"
 	optionList     = "@agents_list"
@@ -19,6 +19,10 @@ const (
 	roleList       = "list"
 	roleView       = "view"
 )
+
+// noAgent is the mirror's title while nothing is selected. Its title is
+// otherwise the agent's name; an empty one would show the host's.
+const noAgent = "no agent"
 
 // separator splits the fields of a format. A control character, which no name
 // contains, and which tmux prints as itself because every call says -u.
