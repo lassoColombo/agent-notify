@@ -19,6 +19,18 @@ func placed(name string, kernel session.Kernel, server, pane string) session.Rec
 	}
 }
 
+// unplaced is a session whose tmux capture ran and found no server, as one in
+// Claude's background daemon is captured.
+func unplaced(name string, kernel session.Kernel) session.Record {
+	blob, _ := json.Marshal(captured{})
+	return session.Record{
+		Name:            name,
+		Kernel:          kernel,
+		Rank:            kernel.Rank(),
+		CapturedContext: session.CapturedContext{By: map[string]json.RawMessage{"tmux": blob}},
+	}
+}
+
 func names(agents []Agent) []string {
 	var names []string
 	for _, agent := range agents {
@@ -84,5 +96,29 @@ func TestSectionsGoMostUrgentFirst(t *testing.T) {
 	}
 	if got := names(Flatten(sections)); got[0] != "b" || got[1] != "p" || len(got) != 4 {
 		t.Errorf("order = %v", got)
+	}
+}
+
+// TestTheBackgroundIsWhatNoPaneHolds: a session is in the background when
+// tmux's capture found no server and nothing else placed it. One never
+// captured for is not known to be anywhere, and is left out (D-128).
+func TestTheBackgroundIsWhatNoPaneHolds(t *testing.T) {
+	inZellij := unplaced("in zellij", session.Working)
+	inZellij.DerivedContext = map[string]json.RawMessage{"zellij": json.RawMessage(`{"session":"main"}`)}
+	records := []session.Record{
+		unplaced("idle", session.Idle),
+		unplaced("blocked", session.BlockedOnYou),
+		unplaced("ended", session.Ended),
+		inZellij,
+		placed("here", session.Working, socket, "%5"),
+		placed("elsewhere", session.Working, "/tmp/tmux-501/other", "%5"),
+		{Name: "never captured", Kernel: session.Working},
+	}
+	var got []string
+	for _, record := range Background(records) {
+		got = append(got, record.Name)
+	}
+	if len(got) != 2 || got[0] != "blocked" || got[1] != "idle" {
+		t.Errorf("background = %v, want `blocked` then `idle`", got)
 	}
 }

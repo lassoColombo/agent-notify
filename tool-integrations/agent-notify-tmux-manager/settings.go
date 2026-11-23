@@ -21,7 +21,7 @@ var me = subscribe.Integration{Name: Name, WakeOn: WhatToWakeFor()}
 // here (D-73). `state_since` is the age a row shows and what orders two agents
 // in one state; `captured_context` is where the pane is.
 func WhatToWakeFor() []string {
-	return []string{"kernel", "rank", "state_since", "name", "cwd", "captured_context"}
+	return []string{"kernel", "rank", "state_since", "name", "cwd", "captured_context", "derived_context"}
 }
 
 // DefaultGlyphs are agent-notify-tmux's, so that a state looks the same on a

@@ -51,6 +51,8 @@ type list struct {
 	world    World
 	sections []Section
 	agents   []Agent
+	// background is drawn below the agents and never selected (D-128).
+	background []session.Record
 
 	// selected is the pane under the cursor, by id rather than by index, so
 	// that the cursor stays on an agent while the list reorders around it.
@@ -294,6 +296,7 @@ func (l *list) rebuild() tea.Cmd {
 	before := l.index()
 	l.sections = Sections(Agents(l.records, l.tab.Tmux.Socket, l.world, l.tab.List))
 	l.agents = Flatten(l.sections)
+	l.background = Background(l.records)
 	if l.index() >= 0 {
 		return nil
 	}
@@ -361,7 +364,7 @@ func (l *list) nameOf(pane, otherwise string) string {
 }
 
 func (l *list) View() tea.View {
-	view := tea.NewView(Draw(l.sections, l.selected, l.glyphs, l.width, l.height, time.Now()))
+	view := tea.NewView(Draw(l.sections, l.background, l.selected, l.glyphs, l.width, l.height, time.Now()))
 	view.AltScreen = true
 	// The focus arriving here is somebody arriving at the tab.
 	view.ReportFocus = true

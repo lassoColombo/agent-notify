@@ -19,22 +19,49 @@ var (
 // drawn is the list for these records, as plain text.
 func drawn(records []session.Record, w World, selected string, width, height int) string {
 	sections := Sections(Agents(records, socket, w, "%1"))
-	return ansi.Strip(Draw(sections, selected, testGlyphs, width, height, testNow))
+	return ansi.Strip(Draw(sections, Background(records), selected, testGlyphs, width, height, testNow))
 }
 
 // TestEveryFieldTheListReadsIsOneItWakesFor asks the renderer what it reads
 // rather than trusting the list of names (D-72, D-73).
 func TestEveryFieldTheListReadsIsOneItWakesFor(t *testing.T) {
 	w := world(true, theList, theStandIn, at("%5", "@1"))
-	base := placed("alpha", session.Working, socket, "%5")
-	base.Detail = "running-bash"
-	base.Cwd = "/Users/somebody/projects/agent-notify"
+	inAPane := placed("alpha", session.Working, socket, "%5")
+	inTheBackground := unplaced("beta", session.Working)
+	for _, base := range []session.Record{inAPane, inTheBackground} {
+		base.Detail = "running-bash"
+		base.Cwd = "/Users/somebody/projects/agent-notify"
 
-	missing := session.FieldsRenderedButNotWokenFor(base, WhatToWakeFor(), func(record session.Record) string {
-		return drawn([]session.Record{record}, w, "%5", 40, 20)
-	})
-	if len(missing) > 0 {
-		t.Errorf("the list comes out different when %v move, and does not ask to be woken for them", missing)
+		missing := session.FieldsRenderedButNotWokenFor(base, WhatToWakeFor(), func(record session.Record) string {
+			return drawn([]session.Record{record}, w, "%5", 40, 20)
+		})
+		if len(missing) > 0 {
+			t.Errorf("%s: the list comes out different when %v move, and does not ask to be woken for them",
+				base.Name, missing)
+		}
+	}
+}
+
+// TestTheBackgroundIsDrawnBelowAndNeverSelected: each session there wears its
+// own state, and none is under the cursor, even with nothing else listed
+// (D-128).
+func TestTheBackgroundIsDrawnBelowAndNeverSelected(t *testing.T) {
+	away := unplaced("away", session.BlockedOnYou)
+	away.Cwd = "/Users/somebody/projects/cybergon"
+	got := drawn([]session.Record{away, placed("alpha", session.Working, socket, "%5")},
+		world(true, theList, at("%5", "@1")), "%5", 40, 20)
+	working, background := strings.Index(got, "working 1"), strings.Index(got, "in background 1")
+	if working < 0 || background < working {
+		t.Errorf("the background is not a group of its own below the agents:\n%s", got)
+	}
+	glyph := testGlyphs.For(session.Record{Kernel: session.BlockedOnYou, Rank: session.BlockedOnYou.Rank()})
+	if !strings.Contains(got, "  "+glyph+" away") || !strings.Contains(got, "\n  cybergon") {
+		t.Errorf("a background row does not say its state, its name and its directory:\n%s", got)
+	}
+
+	alone := drawn([]session.Record{away}, world(true, theList), "", 40, 20)
+	if strings.Contains(alone, "▌") || strings.Contains(alone, "no agents") {
+		t.Errorf("with nothing else listed, the background is not drawn as it is, unselected:\n%s", alone)
 	}
 }
 
@@ -66,7 +93,7 @@ func TestNoLineIsWiderThanTheList(t *testing.T) {
 func TestANameCannotDrawOutsideItsRow(t *testing.T) {
 	record := placed("al\x1b[2Jpha\nbeta", session.Working, socket, "%5")
 	sections := Sections(Agents([]session.Record{record}, socket, world(true, theList, at("%5", "@1")), "%1"))
-	got := Draw(sections, "%5", testGlyphs, 40, 20, testNow)
+	got := Draw(sections, nil, "%5", testGlyphs, 40, 20, testNow)
 	if strings.Contains(got, "\x1b[2J") || strings.Count(ansi.Strip(got), "\n") != 19 {
 		t.Errorf("the name reached the screen as it was written: %q", got)
 	}

@@ -5854,6 +5854,37 @@ of this section is that it prevents re-litigating.
     window's pane. Which window shows a background session changes without a
     hook, so they stay unplaced, as true as a session outside tmux.
 
+- **D-128** (2026-11-23) — **PROVISIONAL, to be revisited.
+  agent-notify-tmux-manager lists background sessions in a group of their
+  own.** *Amends* D-124's "this server only" for the list, not the stage;
+  works around D-127's not-done point rather than doing it.
+  - **What was missing.** [verified 2026-11-23, Claude Code 2.1.311] A
+    session `/resume` opens when it is already running in Claude's daemon
+    stays there: the window in the pane attaches to it, and the session the
+    window started with is parked as a background job of its own and ends.
+    The session in front of you is then a background one, with no `$TMUX`,
+    and the tab listed nothing for that pane. Claude records nowhere which
+    window shows it: the window's `~/.claude/sessions/<pid>.json` keeps its
+    pane and the id of the session it started with, the daemon's
+    `roster.json` lists sessions without viewers, its attach journal names
+    the window but not the session, and the only link left is the socket
+    between the two processes.
+  - **Shown apart, never selected.** Below the state groups, `in
+    background` lists every live session whose tmux capture found no server
+    and which no integration has placed (no derived context), most urgent
+    first, each row wearing its state's glyph since no header says it. They
+    have no pane, so the cursor skips them and nothing goes on the stage. A
+    session never captured for by tmux is left out rather than guessed
+    about.
+  - **Why provisional.** "Outside tmux and placed by nobody" stands for "in
+    Claude's background" only because nothing better is recorded, and a
+    session in a plain terminal that no integration places falls under it
+    too. When the window showing a session can be known, from Claude or
+    otherwise, the session belongs in the state groups on that window's
+    pane, and this group goes. Matching the socket's peer with `lsof` was
+    considered and refused: undocumented, slow, and a guess at Claude's
+    internals.
+
 **The payload discussion of 2026-09-17 is now ratified**
  in D-10 through D-18.
 What is still marked [proposed] elsewhere — the field list of §A7.4, the event

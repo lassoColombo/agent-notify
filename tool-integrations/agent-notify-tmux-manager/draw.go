@@ -48,11 +48,13 @@ func hueOf(kernel session.Kernel) lipgloss.Style {
 const keys = " ⏎ type   o go to   q close"
 
 // Draw is the list: per state a header with its count, then two lines per
-// agent, its name and age and then where it lives, scrolled to keep the
-// cursor on screen, with the keys on the last line.
-func Draw(sections []Section, selected string, glyphs session.Palette, width, height int, now time.Time) string {
+// agent, its name and age and then where it lives; below them the sessions in
+// the background, each wearing its own state's glyph since no header says it
+// (D-128). Scrolled to keep the cursor on screen, with the keys on the last
+// line.
+func Draw(sections []Section, background []session.Record, selected string, glyphs session.Palette, width, height int, now time.Time) string {
 	width, height = max(width, narrowestList), max(height, 3)
-	if len(sections) == 0 {
+	if len(sections) == 0 && len(background) == 0 {
 		return lipgloss.NewStyle().Foreground(base04).Render(" no agents in this tmux server")
 	}
 
@@ -74,7 +76,21 @@ func Draw(sections []Section, selected string, glyphs session.Palette, width, he
 			if agent.Pane == selected {
 				cursor = len(lines)
 			}
-			lines = append(lines, row(agent, agent.Pane == selected, width, now)...)
+			lines = append(lines, row(agent, agent.Pane == selected, "", width, now)...)
+		}
+	}
+	if len(background) > 0 {
+		if len(lines) > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, lipgloss.NewStyle().Foreground(base04).Bold(true).Render(" in background")+
+			lipgloss.NewStyle().Foreground(base03).Render(fmt.Sprintf(" %d", len(background))))
+		for _, record := range background {
+			mark := ""
+			if glyph := glyphs.For(session.Record{Kernel: record.Kernel, Rank: record.Rank}); glyph != "" {
+				mark = hueOf(record.Kernel).Render(glyph) + " "
+			}
+			lines = append(lines, row(Agent{Record: record}, false, mark, width, now)...)
 		}
 	}
 
@@ -86,9 +102,9 @@ func Draw(sections []Section, selected string, glyphs session.Palette, width, he
 	return strings.Join(append(shown, "", lipgloss.NewStyle().Foreground(base03).Render(fit(keys, width))), "\n")
 }
 
-// row is one agent: a bar if it is selected, its name, its age at the far
-// edge, and under it the session:window and directory it lives in.
-func row(agent Agent, selected bool, width int, now time.Time) []string {
+// row is one agent: a bar if it is selected, its name after `mark`, its age at
+// the far edge, and under it the session:window and directory it lives in.
+func row(agent Agent, selected bool, mark string, width int, now time.Time) []string {
 	bar, base := "  ", lipgloss.NewStyle()
 	if selected {
 		bar = lipgloss.NewStyle().Foreground(base13).Background(base02).Render("▌ ")
@@ -96,17 +112,17 @@ func row(agent Agent, selected bool, width int, now time.Time) []string {
 	}
 	inside := width - 2
 	age := session.Ago(agent.Record.Elapsed(now))
-	room := max(inside-lipgloss.Width(age)-1, 1)
+	room := max(inside-lipgloss.Width(age)-lipgloss.Width(mark)-1, 1)
 
 	name := base.Foreground(base05).Bold(selected).Width(room).Render(fit(agent.Record.DisplayName(), room))
 	when := base.Foreground(base04).Render(" " + age)
 
 	where := agent.Where
 	if leaf := leafOf(agent.Record.Cwd); leaf != "" {
-		where += "  " + leaf
+		where = strings.TrimLeft(where+"  "+leaf, " ")
 	}
 	under := base.Foreground(base04).Width(inside).Render(fit(where, inside))
-	return []string{bar + name + when, bar + under}
+	return []string{bar + mark + name + when, bar + under}
 }
 
 func leafOf(path string) string {

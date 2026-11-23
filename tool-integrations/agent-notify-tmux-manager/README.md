@@ -5,7 +5,10 @@ A tab of tmux given over to your agents. It has two panes:
 - **Left, the list:** every agent running in a pane of this tmux server,
   grouped by what it wants from you (needs you, broke, finished, working,
   idle). Each entry shows its name and age, and below that the
-  `session:window` and directory it lives in.
+  `session:window` and directory it lives in. Under them, in a group of their
+  own, **in background**: the sessions running outside every tmux server,
+  each with its state's glyph, name, age and directory. These are shown, not
+  selected, because there is no pane to borrow (see below).
 - **Right, the stage:** the selected agent's own pane. Not a copy of it: the
   pane itself, borrowed from the window it lives in for as long as the tab is
   on screen.
@@ -28,6 +31,18 @@ you type reaches the agent as it would anywhere, Shift+Enter included; copy
 mode, the wheel and the mouse work; and the agent draws itself for the size
 it is given rather than being re-wrapped. `agent-notify focused` is right
 about it too, since the pane in front of you is the agent's.
+
+## In background: provisional
+
+Claude Code runs some sessions in a background daemon: the one a `/compact`
+hands its conversation to, and the one `/resume` opens when the session it
+picked is already running there. Such a session has no `$TMUX`, and a window
+can show it from any pane, but Claude writes nowhere which window shows it. So
+it cannot be placed on a pane, and the list shows it apart instead. A session
+belongs in this group when tmux's capture found no server and no other
+integration placed it. That rule is a stand-in, and a session in a plain
+terminal would fall under it too. It should be revisited once the window
+showing a session can be known (plan.md D-128).
 
 ## Keys
 
@@ -118,9 +133,9 @@ agent-notify-tmux-manager restore         send every agent home
 ```
 
 `list` and `stand-in` are what the tab runs in its own two panes. There is one
-tab per tmux server. It lists the agents of that server only: an agent in
-another server, in zellij or in a plain terminal has no pane to borrow, and
-the picker already lists everything.
+tab per tmux server. It lists the agents of that server only, plus the
+background group above: an agent in another server, in zellij or in a plain
+terminal has no pane to borrow, and the picker already lists everything.
 
 ## The tmux side
 

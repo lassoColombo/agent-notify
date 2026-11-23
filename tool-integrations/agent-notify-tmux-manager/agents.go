@@ -77,6 +77,41 @@ func Agents(records []session.Record, socket string, world World, list string) [
 	return agents
 }
 
+// Background is every live session that runs in no tmux server and that no
+// other integration has placed either, most urgent first: today, the sessions
+// Claude runs in its background daemon. A window shows one from whatever pane
+// it is in, and nothing says which (D-127), so they have no pane to borrow and
+// the list shows them in a group of their own, to be seen and not selected.
+//
+// PROVISIONAL (D-128), to be revisited. "Outside tmux and placed by nobody"
+// stands in for "in the background" only because nothing better is recorded:
+// Claude writes nowhere which window shows which background session, and a
+// session in a plain terminal that no integration places would land here too.
+// Once the window showing a session can be known, the session belongs in the
+// groups above, on that window's pane, and this group goes.
+func Background(records []session.Record) []session.Record {
+	ordered := slices.Clone(records)
+	session.ByUrgency(ordered)
+	var background []session.Record
+	for _, record := range ordered {
+		if record.Kernel.Live() && outsideTmux(record) && len(record.DerivedContext) == 0 {
+			background = append(background, record)
+		}
+	}
+	return background
+}
+
+// outsideTmux is whether the tmux integration's capture ran and found no
+// server. A session it never captured for is not known to be outside.
+func outsideTmux(record session.Record) bool {
+	blob, present := record.CapturedContext.By["tmux"]
+	if !present {
+		return false
+	}
+	var given captured
+	return json.Unmarshal(blob, &given) == nil && given.Server == ""
+}
+
 // Section is one group of the list: the agents in one state.
 type Section struct {
 	Title  string
