@@ -41,6 +41,12 @@ type Report struct {
 	// Model is what the agent says it is using, in the agent's own spelling.
 	// Empty means "leave the stored one alone", like every other label here.
 	Model string
+	// ContinuedFrom is the session this one carries on from, when the agent
+	// handed a conversation over to a new session and left the old one's
+	// process running with nothing more to say about it. The sweep ends the
+	// old one (§A8.6, D-127). A session id of the same agent on the same host;
+	// empty leaves the stored one alone.
+	ContinuedFrom string
 
 	// Spent is every response the adapter could see in one read of the tail of
 	// its agent's own accounting, oldest first. Core adds the ones it has not
@@ -151,6 +157,9 @@ func Apply(previous Record, report Report, now time.Time) Record {
 	}
 	if report.Model != "" {
 		next.Model = CleanLine(report.Model)
+	}
+	if report.ContinuedFrom != "" {
+		next.ContinuedFrom = CleanLine(report.ContinuedFrom)
 	}
 
 	// Tokens accumulate, and doing so does not move state_since: a session that

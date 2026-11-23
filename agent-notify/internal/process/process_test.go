@@ -285,6 +285,59 @@ func TestTheSessionResumedInsideAProcessIsTheLiveOne(t *testing.T) {
 	}
 }
 
+// TestASessionContinuedElsewhereIsSuperseded is Claude handing a conversation
+// to a session of its own after a /compact: the old session's process stays,
+// as the window onto the new one, and nothing reports on the old session
+// again. The new one says where it came from, and that ends it (D-127).
+func TestASessionContinuedElsewhereIsSuperseded(t *testing.T) {
+	machine := invented{self: 1, processes: map[int]process.Facts{
+		1:   {PID: 1, StartedAt: started},
+		500: {PID: 500, StartedAt: started},
+		600: {PID: 600, StartedAt: started},
+	}}
+
+	left := recordFor(500, started, boot)
+	left.Key = session.Key{Host: "mac", Agent: "claude", SessionID: "left"}
+	left.Kernel = session.Working
+	left.ReportedAt = started.Add(time.Hour)
+
+	carried := recordFor(600, started, boot)
+	carried.Key = session.Key{Host: "mac", Agent: "claude", SessionID: "carried"}
+	carried.ContinuedFrom = "left"
+	carried.ReportedAt = started.Add(2 * time.Hour)
+
+	ending := process.Ended([]session.Record{left, carried}, boot, machine.self, machine)
+	if len(ending) != 1 || ending[0].Key.SessionID != "left" || ending[0].Detail != process.Superseded {
+		t.Fatalf("ended %+v, want the session left behind, as superseded", ending)
+	}
+
+	// A continuation that has itself finished still says where this one went.
+	carried.Kernel = session.Ended
+	if ending := process.Ended([]session.Record{left, carried}, boot, machine.self, machine); len(ending) != 1 {
+		t.Errorf("ended %+v, want the session left behind even after its continuation ended", ending)
+	}
+	carried.Kernel = session.FinishedATurn
+
+	// Talked to again after the hand-over, it is the one being talked to.
+	left.ReportedAt = started.Add(3 * time.Hour)
+	if ending := process.Ended([]session.Record{left, carried}, boot, machine.self, machine); len(ending) != 0 {
+		t.Errorf("ended %+v, a session reported on after the claim", ending)
+	}
+	left.ReportedAt = started.Add(time.Hour)
+
+	// The claim is about a session id of the same agent on the same host.
+	for _, other := range []session.Key{
+		{Host: "mac", Agent: "codex", SessionID: "carried"},
+		{Host: "linux", Agent: "claude", SessionID: "carried"},
+	} {
+		stranger := carried
+		stranger.Key = other
+		if ending := process.Ended([]session.Record{left, stranger}, boot, machine.self, machine); len(ending) != 0 {
+			t.Errorf("a claim from %s ended %+v", other, ending)
+		}
+	}
+}
+
 // TestASnapshotThatCannotSeeUsIsNotASnapshot is the rail that makes every other
 // verdict safe: without it, one broken moment ends every session at once.
 func TestASnapshotThatCannotSeeUsIsNotASnapshot(t *testing.T) {

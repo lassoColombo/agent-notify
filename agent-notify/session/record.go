@@ -309,6 +309,12 @@ type Record struct {
 	// therefore be older than the state, which is why a display that cares
 	// shows StateSince beside it.
 	Message string `json:"message,omitempty"`
+	// ContinuedFrom is the session this one carries on from, as the
+	// agent-integration reported it: of the same agent on the same host, so a
+	// session id rather than a key. Set once and never cleared. The sweep
+	// reads it to end the session that was left behind, whose process may
+	// well outlive it (§A8.6, D-127).
+	ContinuedFrom string `json:"continued_from,omitempty"`
 
 	// Usage is what this session has spent. The agent-integration reports the
 	// responses it can see out of its agent's own accounting and this
@@ -339,7 +345,7 @@ var recordFields = []string{
 	"key", "sequence",
 	"kernel", "rank", "detail",
 	"state_since", "created_at", "updated_at", "reported_at", "ended_at",
-	"name", "cwd", "branch", "model", "message", "usage",
+	"name", "cwd", "branch", "model", "message", "continued_from", "usage",
 	"process", "captured_context", "derived_context",
 	"annotations",
 }

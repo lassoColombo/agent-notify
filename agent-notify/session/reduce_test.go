@@ -390,3 +390,19 @@ func TestACaptureForTheSameProcessIsMergedUnderItsOwnName(t *testing.T) {
 		t.Errorf("Apply's merge wrote into its input: %s", got)
 	}
 }
+
+// TestContinuedFromIsKeptOnceSaid: which session this one carries on from is
+// a label like the others. A hook that does not look must not erase what one
+// that looked found (D-127).
+func TestContinuedFromIsKeptOnceSaid(t *testing.T) {
+	said := session.Apply(session.Record{}, session.Report{
+		Key: key, Event: session.SessionStarted, ContinuedFrom: "c84cb845",
+	}, when)
+	if said.ContinuedFrom != "c84cb845" {
+		t.Fatalf("ContinuedFrom = %q", said.ContinuedFrom)
+	}
+	quiet := session.Apply(said, session.Report{Key: key, Event: session.AgentProgressed}, later)
+	if quiet.ContinuedFrom != "c84cb845" {
+		t.Errorf("a report that did not look cleared it: %q", quiet.ContinuedFrom)
+	}
+}

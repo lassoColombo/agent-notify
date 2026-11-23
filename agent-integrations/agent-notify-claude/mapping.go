@@ -109,17 +109,17 @@ var NotificationsThatWantYou = map[string]bool{
 // Translate is what this hook says about the session, or false to say nothing.
 //
 // PURE, and where all the thinking is: no store, no hook, no agent needed to
-// test it. That is why what Claude knows about the session and what it has
-// spent are parameters rather than lookups — each is a file read (sessionname.go
-// and usage.go), and deciding which hooks carry them is policy, which belongs
-// where policy is tested.
+// test it. That is why what Claude knows about the session, what it has spent
+// and which session it continues are parameters rather than lookups — each is
+// a file read (sessionname.go, usage.go and continuation.go), and deciding
+// which hooks carry them is policy, which belongs where policy is tested.
 //
 // Every hook carries it. The report is being written anyway, so the name costs
 // no extra write, and a `/rename` halfway through a session lands on the next
 // tool call instead of waiting for one that happens to be special.
 func Translate(
 	hookName string, payload Payload, claude ClaudeSession,
-	said ClaudeTranscript, title string,
+	said ClaudeTranscript, title, continues string,
 ) (session.Report, bool) {
 	if strings.TrimSpace(payload.SessionID) == "" {
 		// Nothing can be written about a session nobody can name.
@@ -162,6 +162,11 @@ func Translate(
 		// counted before (§A7.4.3, §A7.4.4).
 		Spent: said.Responses,
 		Model: said.Model,
+		// The session Claude handed this one's conversation over from, whose
+		// process stayed behind and which nothing will report on again
+		// (continuation.go). Core ends it; empty leaves the stored one alone
+		// (D-127).
+		ContinuedFrom: continues,
 	}
 
 	switch hookName {

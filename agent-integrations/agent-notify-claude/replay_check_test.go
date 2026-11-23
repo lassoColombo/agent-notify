@@ -57,7 +57,7 @@ func TestReplayOfRealCaptures(t *testing.T) {
 		_ = json.Unmarshal([]byte(parts[4]), &named)
 
 		total++
-		report, worth := Translate(named.Hook, payload, ClaudeSession{}, ClaudeTranscript{}, "")
+		report, worth := Translate(named.Hook, payload, ClaudeSession{}, ClaudeTranscript{}, "", "")
 		if !worth {
 			ignored[named.Hook+"/"+payload.NotificationType]++
 			continue

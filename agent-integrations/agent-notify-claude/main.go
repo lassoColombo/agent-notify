@@ -25,8 +25,15 @@ func main() {
 			if payload.HookEventName == "UserPromptSubmit" {
 				title = WhatClaudeTitlesThisSession(payload.TranscriptPath)
 			}
+			// Which session this one continues is looked for when it starts,
+			// and again on a prompt in case the old transcript said so only
+			// after the start: once a turn, never once a tool call (D-127).
+			continues := ""
+			if payload.HookEventName == "SessionStart" || payload.HookEventName == "UserPromptSubmit" {
+				continues = WhatThisSessionContinues(payload.TranscriptPath, payload.SessionID)
+			}
 			return Translate(payload.HookEventName, payload,
 				WhatClaudeKnowsAboutThisSession(payload.SessionID),
-				WhatTheTranscriptSays(payload.TranscriptPath), title)
+				WhatTheTranscriptSays(payload.TranscriptPath), title, continues)
 		}))
 }

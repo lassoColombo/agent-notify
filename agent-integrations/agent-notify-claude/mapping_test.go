@@ -18,7 +18,7 @@ func translate(t *testing.T, hook, raw string) (session.Report, bool) {
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
 		t.Fatalf("the fixture is not JSON: %v", err)
 	}
-	return Translate(hook, payload, ClaudeSession{}, ClaudeTranscript{}, "")
+	return Translate(hook, payload, ClaudeSession{}, ClaudeTranscript{}, "", "")
 }
 
 func mustTranslate(t *testing.T, hook, raw string) session.Report {
@@ -225,14 +225,14 @@ func TestTheSessionsDirectoryBeatsTheHooks(t *testing.T) {
 	}
 
 	moved, _ := Translate("PostToolUse", payload,
-		ClaudeSession{Cwd: "/Users/x/projects/personal/agent-notify"}, ClaudeTranscript{}, "")
+		ClaudeSession{Cwd: "/Users/x/projects/personal/agent-notify"}, ClaudeTranscript{}, "", "")
 	if moved.Cwd != "/Users/x/projects/personal/agent-notify" {
 		t.Errorf("cwd = %q, want the session's own", moved.Cwd)
 	}
 
 	// And the payload's when Claude is too old to keep a file, because no cwd
 	// at all leaves a display with the session id to paint.
-	old, _ := Translate("PostToolUse", payload, ClaudeSession{}, ClaudeTranscript{}, "")
+	old, _ := Translate("PostToolUse", payload, ClaudeSession{}, ClaudeTranscript{}, "", "")
 	if old.Cwd != payload.Cwd {
 		t.Errorf("cwd = %q, want the payload's as the fallback", old.Cwd)
 	}

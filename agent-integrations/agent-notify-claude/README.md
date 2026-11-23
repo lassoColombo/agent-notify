@@ -390,13 +390,15 @@ payload, as `transcript_path`, and is used exactly as given.
 
 ### The files it reads
 
-Three, on every hook, and none of them is written by this program.
+Three on every hook, a fourth once a turn, and none of them is written by this
+program.
 
 | Path | Read for | When it is missing |
 | --- | --- | --- |
 | `~/.claude/sessions/<pid>.json` | `name`, `nameSource`, `cwd`, and the `sessionId` that proves the file is about this session | The name and directory are reported as nothing, and the payload's `cwd` is the fallback. Claude may simply be too old to keep one. |
 | `~/.claude/projects/<slug>/<session-id>.jsonl`, the first 64 KiB | the `ai-title` line | No title, which today is the ordinary case. |
 | the same transcript, the last 64 KiB and up to 4 MiB back | `requestId` and `usage` per response, and the model off the newest assistant line | Nothing is reported, and core leaves the stored totals alone. |
+| every other transcript in the same directory, the last 16 KiB, on `SessionStart` and `UserPromptSubmit` only | a `continued-in` line naming this session, which says which session this one carries on from | Nothing is reported, and a session left behind by a hand-over stays live until its process exits. |
 
 Nothing here can fail in a way that matters. Every one of these is a best-effort
 read whose failure mode is *say less*, and core treats an empty field as "leave
@@ -427,6 +429,17 @@ after this was written — is *nothing*, silently.
 session with a fresh id that lives for about three seconds and then ends with
 reason `resume`, and filing it as superseded is what lets the picker leave it out
 of the sessions it offers.
+
+A hand-over ends a session with no hook at all. [verified 2026-11-23, 2.1.311]
+A `/compact` no longer compacts in place: the conversation goes on in a new
+session hosted by Claude's background daemon, and the process that ran the old
+one stays, as a window onto the new one. The old session gets no `SessionEnd`,
+so with its process alive it stayed `working` until that window was closed.
+Claude appends `{"type":"continued-in","continuedInSessionId":…}` to the old
+transcript; the new session finds it (`continuation.go`) and reports the old
+session's id as `continued_from`, and the session-watcher files the old one as
+`ended/superseded` (D-127). Any user or assistant line after it means the old
+session was talked to again, and nothing is reported.
 
 ### Four rows decided by replaying real payloads
 

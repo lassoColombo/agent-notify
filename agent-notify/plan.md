@@ -675,6 +675,7 @@ demanded it. Nothing is here because it seemed useful.
 | `captured_context` = allowlisted env + ancestry | core, in the hook | containers derive container-coordinates from it (§A11) |
 | `annotations.<owner>` | anyone | container-coordinates, git branch, task ids (§A7.4.1) |
 | `usage` | the agent-integration | tokens spent, in one vocabulary both agents fill (§A7.4.3) |
+| `continued_from` | the agent-integration | the session this one carries on from, which the sweep ends (§A8.6, D-127) |
 | `branch` | core, from the checkout at `cwd` | which branch this session is on (§A7.4.4) |
 | `model` | the agent-integration | what a display groups and prices by (§A7.4.4) |
 
@@ -1381,7 +1382,9 @@ assumed:
   wrong place.
 - A session whose process is alive but which has been superseded inside that
   process (`/clear`) is ended, with a reason distinguishing it from a process
-  that died.
+  that died. **[amended 2026-11-23 — D-127]** So is one whose conversation
+  went on in another session that says so (`continued_from`), wherever that
+  one runs.
 
 ### A8.7 Sleep
 
@@ -5813,6 +5816,43 @@ of this section is that it prevents re-litigating.
     (`client_flags`), which tmux learns from the terminal's focus reports
     with `focus-events on` [measured on 3.8]; with them off it never hears
     the focus leave, and the answer is what it was.
+
+- **D-127** (2026-11-23) — **A session that says it carries on from another
+  ends that one.** *Amends* §A8.6's superseded rule, which asked only for a
+  shared process, and D-110, whose order it reuses. Adds `continued_from` to
+  the record (§A7.4).
+  - **What was wrong.** [verified 2026-11-23, Claude Code 2.1.311] A
+    `/compact` no longer compacts in place. The session's process hands the
+    conversation to Claude's background daemon, which carries it on under a
+    new session id, in a process of its own; the old process stays, as a
+    window onto the new session. The old session gets no `SessionEnd`, its
+    process is alive, and the two sessions share no process, so neither
+    rule of the sweep applied: it stayed `working` for as long as the window
+    was open, on its pane and in the agents tab.
+  - **Claude says where it went.** It appends one line to the old
+    transcript, `{"type":"continued-in","sessionId":<old>,
+    "continuedInSessionId":<new>}`, and reads it back itself from the end of
+    the file. The claude adapter looks for that line naming its own session
+    at the end of every other transcript in the directory, on `SessionStart`
+    and again on `UserPromptSubmit` in case the line landed after the start,
+    and reports what it found as `continued_from`: a label, set once, which
+    an empty report leaves alone. Any user or assistant line after it means
+    the old session was talked to again, and nothing is reported; Claude
+    asks for a whole turn, so this can miss a hand-over and cannot end a
+    session still in use.
+  - **The sweep decides, not the hook.** A hook speaks about its own session
+    (D-110), so the new one says only where it came from; `process.Ended`
+    files the old one as `ended/superseded` when its process is alive and a
+    record of the same agent and host claims it and was reported on after
+    it. A session talked to again after the claim survives it, and a
+    continuation that has itself ended still counts.
+  - **Not done: placing background sessions.** They run under Claude's
+    daemon, one per user and shared by every window, which strips `$TMUX`
+    and `$TMUX_PANE` from them. Reading the variables from an ancestor was
+    considered and refused: the daemon's environment is that of whichever
+    window started it, so every background session would be placed in that
+    window's pane. Which window shows a background session changes without a
+    hook, so they stay unplaced, as true as a session outside tmux.
 
 **The payload discussion of 2026-09-17 is now ratified**
  in D-10 through D-18.

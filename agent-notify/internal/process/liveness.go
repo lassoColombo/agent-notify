@@ -71,7 +71,8 @@ const (
 	// Superseded — its process is alive but is running a newer session.
 	// `/clear` does not end an agent; it starts a fresh session inside the same
 	// process, so two records can name one living pid and only the newest is
-	// real (§A6).
+	// real (§A6). Or the conversation went on in another session, which says
+	// so, and the process this one ran in stayed behind (D-127).
 	Superseded = "superseded"
 )
 
@@ -113,12 +114,32 @@ func Ended(
 		// The process is alive. It runs one session at a time, so a record
 		// the agent reported on later from the same process — the same pid
 		// started at the same moment, not merely the same number — means
-		// this one is finished.
-		if supersededBy(record, judgeable) {
+		// this one is finished. So does a record that says it carries on
+		// from this one, wherever it runs (D-127).
+		if supersededBy(record, judgeable) || continuedIn(record, records) {
 			ending = append(ending, Ending{Key: record.Key, Detail: Superseded})
 		}
 	}
 	return ending
+}
+
+// continuedIn is whether another session of the same agent, on the same host,
+// says it carries on from this one and was reported on after it (D-127). The
+// order is D-110's: a session talked to again after it was continued is the
+// one being talked to, and a claim older than its last report must not end
+// it. Every record handed over is asked, ended ones included, because a
+// continuation that has itself finished still says where this one went.
+func continuedIn(record session.Record, others []session.Record) bool {
+	for _, other := range others {
+		if other.ContinuedFrom != record.Key.SessionID || other.Key == record.Key ||
+			other.Key.Host != record.Key.Host || other.Key.Agent != record.Key.Agent {
+			continue
+		}
+		if other.ReportedAt.After(record.ReportedAt) {
+			return true
+		}
+	}
+	return false
 }
 
 // supersededBy compares when the two sessions were last reported on, which
