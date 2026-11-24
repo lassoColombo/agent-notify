@@ -17,7 +17,7 @@ func waiting(name string, kernel session.Kernel, since time.Time) session.Record
 	}
 }
 
-// TestMostUrgentIsWhatOneLightShows: a zellij tab holding four panes, an LED
+// TestMostUrgentIsWhatOneLightShows: a tmux window holding four panes, an LED
 // and a dock badge are the same question, and it is asked here once (R24).
 func TestMostUrgentIsWhatOneLightShows(t *testing.T) {
 	nine := time.Date(2026, 9, 18, 9, 0, 0, 0, time.UTC)

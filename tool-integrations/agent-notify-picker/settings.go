@@ -190,10 +190,10 @@ var (
 // a crash. A wrong colour is a thing you can see and fix; a pane that flashes
 // is a thing you file a bug about.
 //
-// It is called once, in main, before the three jobs below it are dispatched.
-// All three are separate processes — the list, a preview, a label — and a
-// resolve that happened inside only one of them would draw the rows in your
-// palette and the pane under them in mine. One read of the file for both
+// It is called once, in main, before the two jobs below it are dispatched.
+// Both are separate processes — the list and a preview — and a resolve that
+// happened inside only one of them would draw the rows in your palette and the
+// pane beside them in mine. One read of the file for both
 // tables, rather than one each.
 func Read(given subscribe.Integration) []string {
 	var settings Settings
@@ -270,10 +270,6 @@ func rebind(given Keymap) []string {
 
 // fzfBinds is what fzf is told about keys: `key:action`, every key of every
 // action, in this program's fixed order.
-//
-// The machinery binds are not in here and must not be. `focus` redraws the
-// preview's label and is not a key at all; keeping it in its own --bind is what
-// makes it impossible for somebody's table to take it away.
 func fzfBinds() string {
 	binds := make([]string, 0, len(keymap.bindings()))
 	for _, one := range keymap.bindings() {

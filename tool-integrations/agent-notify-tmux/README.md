@@ -65,9 +65,9 @@ in a format. For example:
 
 ```tmux
 # a pane's border: the agent's glyph and name, or the pane's own title
-set -g @agent "#{?#{@agent-notify-glyph},#{@agent-notify-glyph} ,}#{@agent-notify-name}"
+set -g @agent "#{?#{@agent-notify-glyph},#{@agent-notify-glyph} ,}#{q/h:@agent-notify-name}"
 set -g pane-border-status top
-set -g pane-border-format ' #{?#{@agent-notify-name},#{E:@agent},#{pane_title}} '
+set -g pane-border-format ' #{?#{@agent-notify-name},#{E:@agent},#{q/h:pane_title}} '
 
 # the window list: the glyph of every agent in the window, before its name
 set -g @agents "#{P:#{?#{@agent-notify-glyph},#{@agent-notify-glyph} ,}}"
@@ -78,11 +78,16 @@ set -g window-status-current-format '#{E:@agents}#I #W'
 set -g @agent_style "#{?#{==:#{@agent-notify-state},blocked-on-you},#[fg=red],}"
 ```
 
+A name is the agent's, and is stored as it is. Draw it as `#{q/h:…}`, as
+above: tmux reads `#[…]` in what it draws as a style and `##` as one `#`, so
+a session called `fix #[bold] ##3` would otherwise restyle the border and
+lose a character. `q/h` doubles every `#`, and the name is drawn as itself.
+
 **Nothing is written on a window, and that is the design** (D-126). What a
 window shows is looped out of the panes it holds while tmux draws it, and a
 pane's options go wherever the pane goes. So a pane moved with `break-pane`,
 `join-pane` or `swap-pane` — or borrowed onto the stage of
-`agent-notify-tmux-manager`'s tab — takes its glyph with it at once, and the
+`agent-notify-tmux-cockpit`'s tab — takes its glyph with it at once, and the
 window it left shows nothing of it, with no render in between. A mark computed
 for a window by this program would be right only until the next move, and
 nothing would wake it to put it right.
@@ -91,7 +96,7 @@ nothing would wake it to put it right.
 than only the most urgent one. "The most urgent" is a maximum, and a tmux loop
 can be sorted by index, name or time but not by an option.
 
-Why options rather than renames, which is what zellij's integration does: a
+Why options rather than renames: a
 pane title is the program's to rewrite, and an agent rewrites its terminal
 title constantly; and `rename-window` turns the window's `automatic-rename`
 off for good. Nobody else writes these options, so giving a pane back is
@@ -99,11 +104,20 @@ off for good. Nobody else writes these options, so giving a pane back is
 
 **How a render writes them.** For each tmux server it reads every pane's
 options in one `list-panes`, plans the difference from what the records say,
-and runs every `set-option` in one invocation. tmux stops at the first command
-of an invocation that fails — a pane that closed between the read and the
-write — so a refused write is read and planned again, once. A record whose
-capture names another server — the same socket, but a server started again
-since, with its pane ids handed out again from `%0` — marks nothing.
+and runs every `set-option` in one invocation. Each says `-q`: tmux stops an
+invocation at the first command it refuses, and a write to a pane that closed
+between the read and the write would be one, where with `-q` it is passed over
+and the rest are written. A record whose capture names another server — the
+same socket, but a server started again since, with its pane ids handed out
+again from `%0` — marks nothing.
+
+**A render that cannot paint fails, and is drawn again.** A server that is
+not running is nothing to paint: an ended agent's record may name one for a
+while. A server that is running and does not answer within 2s, or answers
+something that is not what it was asked, fails the render, and core hands the
+same view over again at its next sweep, five seconds later at most, until it
+is drawn (D-130). Before that, one slow answer left a mark saying
+`finished-a-turn` on an agent that needed you, until its state moved again.
 
 ## Configuration
 
@@ -114,11 +128,11 @@ Everything of this program's lives under `integrations.tmux` in
 | --- | --- | --- |
 | `integrations.tmux.enabled` | `true` | `false` leaves the binary on PATH and stops core running it (D-102) |
 | `integrations.tmux.settings.tmux` | `tmux` on PATH | where tmux is, when this process's PATH does not say (D-101) |
-| `integrations.tmux.settings.glyphs` | zellij's | what each state looks like, keyed on `kernel` or `kernel/detail` |
+| `integrations.tmux.settings.glyphs` | Nerd Font marks, one per state | what each state looks like, keyed on `kernel` or `kernel/detail` |
 
 A settings key nobody declared is refused by name. No timeout is configurable:
-one tmux invocation is bounded at 2s, and on expiry a render skips that server
-and a focus answers `not-running`.
+one tmux invocation is bounded at 2s, and on expiry a render fails, to be
+drawn again at core's next sweep, and a focus answers `not-running`.
 
 ## Where a session lives
 
@@ -151,12 +165,15 @@ screen that is:
   help.
 
 If that terminal already shows the pane, that is it. Otherwise
-`switch-client -c <terminal> -t <pane>` brings the session, the window and the
-pane in one command, unzooming a window zoomed on another pane; and it keeps
-the terminal on its own session when that session holds the window too, as
-with the agents tab, which is also linked into a hidden session. Then the
-terminal is read back, because an exit code says nothing about whether anybody's
-screen changed.
+`switch-client -c <terminal> -t <session>:<window>.<pane>` brings the session,
+the window and the pane in one command, unzooming a window zoomed on another
+pane. The session is named, and it is the terminal's own when the pane's
+window is linked into it, else the one a terminal was attached to last. Given
+the pane alone, tmux picks the session that was active last, and when the
+pane is on the agents tab's stage that is the tab's hidden session `_agents`
+whenever the tab was just made: the terminal was left in it. Then the terminal
+is read back, its session and its pane, because an exit code says nothing
+about whether anybody's screen changed.
 
 **Focused** is yes when a terminal shows the pane — its current window's
 active pane — and that terminal has the focus. tmux knows the last from the

@@ -323,6 +323,73 @@ func TestADisplayIsNotRunForSomethingItDoesNotWatch(t *testing.T) {
 	}
 }
 
+// aDisplayThatCanFail is aDisplay that fails every render while the file it
+// returns exists, after counting the attempt in `<name>.attempts`.
+func aDisplayThatCanFail(t *testing.T, directory, name string, wakeOn ...string) (painted, failing, attempts string) {
+	t.Helper()
+	binary := filepath.Join(directory, "agent-notify-"+name)
+	painted = filepath.Join(directory, name+".painted")
+	failing = filepath.Join(directory, name+".failing")
+	attempts = filepath.Join(directory, name+".attempts")
+	answer, err := json.Marshal(session.Capabilities{
+		Version: "0.0.0-dev", Methods: []string{session.MethodRender}, WakeOn: wakeOn,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := fmt.Sprintf("#!/bin/sh\ncase \"$1\" in\n  %s) printf '%%s\\n' '%s' ;;\n"+
+		"  %s) echo x >> %s; if [ -e %s ]; then cat > /dev/null; echo 'cannot draw' >&2; exit 1; fi;"+
+		" cat >> %s ; printf '\\n' >> %s ;;\n  *) exit 1 ;;\nesac\n",
+		session.CapabilitiesCommand, answer, session.MethodRender, attempts, failing, painted, painted)
+	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	return painted, failing, attempts
+}
+
+func lines(path string) int {
+	content, _ := os.ReadFile(path)
+	return strings.Count(string(content), "\n")
+}
+
+// TestARenderThatFailsIsDrawnAgain: a display that could not draw a change is
+// handed it again at the next sweep, with nothing else moving in between —
+// not left showing what was true before it until something else happens
+// (D-130). And while it keeps failing it is tried once a sweep, not more.
+func TestARenderThatFailsIsDrawnAgain(t *testing.T) {
+	atATestablePace(t, 200*time.Millisecond)
+	root := shortRoot(t)
+	painted, failing, attempts := aDisplayThatCanFail(t, root, "painter", "kernel")
+
+	layout := running(t, root)
+	waitFor(t, "the first render", func() bool { return len(everythingPainted(t, painted)) > 0 })
+
+	write(t, failing, "")
+	aTurnFinished(t, layout, "one")
+	before := lines(attempts)
+	waitFor(t, "three failed attempts", func() bool { return lines(attempts) >= before+3 })
+	if views := everythingPainted(t, painted); len(views[len(views)-1].Sessions) != 0 {
+		t.Fatal("a render that failed was painted")
+	}
+
+	if err := os.Remove(failing); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the change drawn once the display can draw", func() bool {
+		views := everythingPainted(t, painted)
+		last := views[len(views)-1]
+		return len(last.Sessions) == 1 && len(last.Changed) == 1 &&
+			last.Changed[0].Record.Kernel == session.FinishedATurn
+	})
+
+	// and once drawn, the sweeps hand it nothing more
+	drawn := lines(attempts)
+	time.Sleep(time.Second)
+	if now := lines(attempts); now != drawn {
+		t.Errorf("run %d more times after drawing what it was given", now-drawn)
+	}
+}
+
 // TestAContainerIsNeverDrawn: what core runs a program FOR is what the program
 // said it answers, and a container never said `render`.
 func TestAContainerIsNeverDrawn(t *testing.T) {

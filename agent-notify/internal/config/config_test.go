@@ -43,13 +43,13 @@ func TestAWholeFileIsRead(t *testing.T) {
 	settings, problems := config.Parse([]byte(`
 keep-ended-sessions: 72h
 integrations:
-  zellij:
+  tmux:
     settings:
       glyphs: { working: "*" }
   sketchybar:
     enabled: false
   aerospace: {}
-containers: [aerospace, zellij]
+containers: [aerospace, tmux]
 `), "config.yaml")
 
 	for _, problem := range problems {
@@ -58,7 +58,7 @@ containers: [aerospace, zellij]
 	if got := settings.KeepEndedSessions.Duration(); got != 3*24*time.Hour {
 		t.Errorf("KeepEndedSessions = %s, want 72h", got)
 	}
-	if !settings.Integrations["zellij"].IsEnabled() {
+	if !settings.Integrations["tmux"].IsEnabled() {
 		t.Errorf("an integration with no enabled key should be enabled")
 	}
 	if settings.Integrations["sketchybar"].IsEnabled() {
@@ -70,9 +70,9 @@ containers: [aerospace, zellij]
 
 	// Settings reach the integration verbatim and core never looks inside
 	// (plan.md §A17 R7) — but they must survive the trip.
-	glyphs, ok := settings.Integrations["zellij"].Settings["glyphs"].(map[string]any)
+	glyphs, ok := settings.Integrations["tmux"].Settings["glyphs"].(map[string]any)
 	if !ok {
-		t.Fatalf("settings.glyphs did not survive decoding: %#v", settings.Integrations["zellij"].Settings)
+		t.Fatalf("settings.glyphs did not survive decoding: %#v", settings.Integrations["tmux"].Settings)
 	}
 	if glyphs["working"] != "*" {
 		t.Errorf("settings.glyphs.working = %v", glyphs["working"])
@@ -84,7 +84,7 @@ func TestUnknownKeysAreReportedAndTheRestSurvives(t *testing.T) {
 keep-ended-sessions: 48h
 retention-visible: 1m
 integrations:
-  zellij:
+  tmux:
     colour: blue
 `), "typo.yaml")
 
@@ -100,7 +100,7 @@ integrations:
 	if got := settings.KeepEndedSessions.Duration(); got != 2*24*time.Hour {
 		t.Errorf("a typo elsewhere cost us keep-ended-sessions: %s", got)
 	}
-	if _, kept := settings.Integrations["zellij"]; !kept {
+	if _, kept := settings.Integrations["tmux"]; !kept {
 		t.Errorf("a typo in a table cost us the table")
 	}
 }
@@ -110,7 +110,7 @@ func TestBadValuesFallBackIndividually(t *testing.T) {
 keep-ended-sessions: 0
 history-messages: -1
 integrations:
-  zellij: {}
+  tmux: {}
 `), "values.yaml")
 
 	if len(problems) != 2 {
@@ -125,7 +125,7 @@ integrations:
 	if settings.HistoryMessages != 0 {
 		t.Errorf("HistoryMessages = %d, want 0", settings.HistoryMessages)
 	}
-	if _, kept := settings.Integrations["zellij"]; !kept {
+	if _, kept := settings.Integrations["tmux"]; !kept {
 		t.Errorf("a good value was thrown away with the bad ones")
 	}
 }
@@ -243,7 +243,7 @@ func TestWhatIsOnPATHIsWhatRuns(t *testing.T) {
 }
 
 func TestDisabledIntegrationsAreNotNagged(t *testing.T) {
-	_, problems := config.Parse([]byte("integrations:\n  zellij:\n    enabled: false\n"), "off.yaml")
+	_, problems := config.Parse([]byte("integrations:\n  tmux:\n    enabled: false\n"), "off.yaml")
 	if len(problems) != 0 {
 		t.Errorf("a disabled integration was complained about: %v", problems)
 	}

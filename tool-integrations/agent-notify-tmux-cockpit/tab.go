@@ -17,7 +17,7 @@ type Tab struct {
 }
 
 // rounds bounds one Reconcile. Showing another agent is one step; a tab found
-// in pieces takes four or five. A server that keeps changing under it is left
+// in pieces takes three or four. A server that keeps changing under it is left
 // for the next look rather than chased.
 const rounds = 8
 
@@ -57,20 +57,44 @@ func (t Tab) do(step Step) {
 		t.Logger.Warn("tmux made a stand-in and did not say which pane it is", "answer", out)
 		return
 	}
-	mark := append(marking(out), ";", "resize-pane", "-t", t.List, "-x", strconv.Itoa(t.Layout.ListWidth))
-	if _, err := t.Tmux.run(mark...); err != nil {
+	// The window is marked again with it: a list somebody moved to another
+	// window makes that one the tab. And the hooks are written for the first
+	// time, with nothing borrowed yet.
+	mark := block{
+		{"set-option", "-p", "-t", out, roleOption, roleStandIn},
+		{"set-option", "-w", "-t", t.List, tabOption, "1"},
+		{"resize-pane", "-t", t.List, "-x", strconv.Itoa(t.Layout.ListWidth)},
+	}
+	if _, err := t.Tmux.run(mark.argv()...); err != nil {
 		t.Logger.Warn("tmux refused", "why", "marking the stand-in "+out, "problem", err.Error())
+		return
+	}
+	tab, err := t.Tmux.run("display-message", "-p", "-t", t.List, "#{window_id}")
+	if err == nil {
+		_, err = t.Tmux.run(watching(tab, t.List, out, nil).argv()...)
+	}
+	if err != nil {
+		t.Logger.Warn("tmux refused", "why", "the hooks of a tab with nothing borrowed", "problem", err.Error())
+	}
+	// An empty pane shows a cursor until something says otherwise.
+	if err := t.Tmux.paint(out, Frame(Showing{Title: nobody}, 0, 0)); err != nil {
+		t.Logger.Warn("tmux refused", "why", "the stand-in "+out+" is drawn", "problem", err.Error())
 	}
 }
 
-// Enter puts the focus on the stage, once the stage shows what is wanted.
+// nobody is the stand-in's title while it says nothing.
+const nobody = "no agent"
+
+// Enter puts the focus on the stage, once the stage shows what is wanted. It
+// stays on the list when the stage holds only the stand-in, which takes no
+// keys.
 func (t Tab) Enter(desire Desire) (World, error) {
 	world, err := t.Reconcile(desire)
 	if err != nil {
 		return world, err
 	}
 	stage, found := world.Stage(t.List)
-	if !found {
+	if !found || world.Panes[stage].Role == roleStandIn {
 		return world, nil
 	}
 	if _, err := t.Tmux.run("select-pane", "-t", stage); err != nil {
@@ -260,13 +284,19 @@ func SendHome(tmux Tmux, logger *slog.Logger) (World, error) {
 	return world, nil
 }
 
-// Close sends everything home and then closes the tab's own two panes, the
-// stand-ins first: no agent is in the tab's window by the time it goes. A pane
-// somebody else put there keeps the window open, and is left alone.
+// Close sends everything home, takes the hooks away and then closes the tab's
+// own two panes, the stand-ins first: no agent is in the tab's window by the
+// time it goes. A pane somebody else put there keeps the window open, and is
+// left alone.
 func Close(tmux Tmux, logger *slog.Logger) error {
 	world, err := SendHome(tmux, logger)
 	if err != nil {
 		return err
+	}
+	// One at a time: a hook that is not there cannot be taken away, and tmux
+	// stops an invocation at the first command it refuses.
+	for _, hook := range unwatching() {
+		_, _ = tmux.run(block{hook}.argv()...)
 	}
 	var lists []string
 	for _, pane := range world.sorted() {

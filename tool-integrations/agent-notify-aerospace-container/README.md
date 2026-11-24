@@ -9,7 +9,7 @@ It is the outermost rung of a focus, because a session is at a path and every
 layer of it has to be right for any of it to be visible:
 
 ```
-aerospace   ──▶  Ghostty  ──▶  zellij        ──▶  pane 17
+aerospace   ──▶  Ghostty  ──▶  tmux          ──▶  pane %17
 window 34                      session home
 ```
 
@@ -66,7 +66,7 @@ running them by hand is the fastest way to see what this thinks:
 
 ```
 $ agent-notify-aerospace-container capture-environment
-{"values":{"ZELLIJ_SESSION_NAME":"agent-notify"}}
+{}
 ```
 
 `interpret-environment` is handed the record's `captured_context`: this
@@ -77,7 +77,7 @@ replay a stored record:
 ```
 $ jq .captured_context "$AGENT_NOTIFY_ROOT"/state/sessions/<key>.json | agent-notify-aerospace-container interpret-environment
 {"chain":[{"pid":67315,"command":"agent-notify-cla"},{"pid":30426,"command":"claude"},
-{"pid":29604,"command":"nu"},{"pid":29601,"command":"zellij"}],"title":"agent-notify | "}
+{"pid":29604,"command":"nu"},{"pid":29601,"command":"ghostty"}]}
 ```
 
 ```
@@ -99,8 +99,8 @@ your own shell, where blocking costs the agent nothing.
 
 ### Why a window cannot simply be read out of the environment
 
-zellij's container asks the agent's environment which pane it is in and is told:
-`ZELLIJ_PANE_ID` is simply there. A window is not, and three measurements say
+tmux's container asks the agent's environment which pane it is in and is told:
+`TMUX_PANE` is simply there. A window is not, and three measurements say
 there is no walk from an agent to its window at all
 [verified 2026-09-18, macOS 26, aerospace 0.20.3, Ghostty 1.3.1]:
 
@@ -117,7 +117,7 @@ there is no walk from an agent to its window at all
   that is one window or five is a person's window habits rather than anything
   the session knows.
 - **Inside a multiplexer the process chain does not even reach the terminal.**
-  An agent's ancestry ends at the zellij *server*, whose parent is 1; the client
+  An agent's ancestry ends at the tmux *server*, whose parent is 1; the client
   that draws it is in a different process tree entirely, under the terminal.
   This one is not a subtlety — it is the ordinary case, and it is what the title
   key exists for.
@@ -134,7 +134,7 @@ which is sufficient on its own:
 
 The chain is walked nearest-first, and the answer is every window belonging to
 the first ancestor that owns any window at all. That is also what makes the
-multiplexer case fall out rather than be special-cased: a zellij server owns no
+multiplexer case fall out rather than be special-cased: a tmux server owns no
 windows, so the walk runs off the end of the chain and the title key is what is
 left.
 
@@ -158,7 +158,7 @@ looking at it.
 ### Nothing about a window is ever stored
 
 Every other coordinate in this system is a property of the session: a pane
-belongs to its zellij session for as long as both exist. A window is not — it
+belongs to its tmux session for as long as both exist. A window is not — it
 merely *shows* a session, right now, and stops the moment somebody detaches. A
 stored window id would be a cached guess rather than a coordinate, and §A11.3
 forbids trusting those.
@@ -236,12 +236,12 @@ shell (see
 
 One thing is yours. If this is your only container, it is the whole of
 `containers` and you need not write one. A window manager is outside whatever
-multiplexer runs inside it, so with zellij too the list has to be written, this
+multiplexer runs inside it, so with tmux too the list has to be written, this
 program **first** — `doctor` says "write `containers`, outermost first" when
 two containers answer `focus` and nothing says which is outside which:
 
 ```yaml
-containers: [aerospace-container, zellij]
+containers: [aerospace-container, tmux]
 ```
 
 To turn it off without removing the binary, `integrations.aerospace-container.enabled: false`.
@@ -258,9 +258,9 @@ config       ok    2 integration(s) on PATH, 2 enabled, keep-ended-sessions 168h
 integrations ok    reported by pid 86777 at 2026-10-11T20:38:44Z
              aerospace-container    run when core needs it
                                     answers capture-environment, interpret-environment, focus, focused — built against 0.0.0-dev
-             zellij                 drawn when something it watches moves
+             tmux                   drawn when something it watches moves
                                     answers capture-environment, interpret-environment, focus, focused, render — built against 0.0.0-dev
-containers   ok    outermost first: aerospace-container, zellij
+containers   ok    outermost first: aerospace-container, tmux
 ```
 
 Read that honestly. The `config` line counts every `agent-notify-<name>` on
@@ -292,7 +292,6 @@ then:
 looking at:  window 107 Firefox, workspace 2
 $ agent-notify focus-session m15-demo
   aerospace-container    focused
-  zellij                 focused
 agent-notify is in front.
 after:       window 34 Ghostty, workspace 1
 focused?     yes
@@ -337,14 +336,14 @@ nothing and says nothing is the config bug people give up on.
 | key | type | default | what it does |
 | --- | --- | --- | --- |
 | `integrations.aerospace-container.settings.aerospace` | string | `aerospace` on PATH | where the `aerospace` binary is, when this process's PATH does not say. Unset, it is looked up on PATH at runtime, which is ordinarily yours: this program runs as a descendant of the agent, which you started from a shell. An agent launched from the Dock has no such PATH, and this key is the answer for it. Found neither way — not on PATH and no key, or a key naming a path that does not `stat` — `focus` reports `not-running` and `focused` answers `cannot-tell`, each with a sentence that names this key, rather than crashing |
-| `integrations.aerospace-container.settings.title` | string | `"{ZELLIJ_SESSION_NAME} \| "` | the template for the window-title key. `{VARIABLE}` is filled in from the agent's environment. `""` turns the key off |
+| `integrations.aerospace-container.settings.title` | string | `""` | the template for the window-title key. `{VARIABLE}` is filled in from the agent's environment. `""`, the default, turns the key off |
 
 ```yaml
 integrations:
   aerospace-container:
     settings:
       aerospace: /opt/homebrew/bin/aerospace   # only when aerospace is not on the process's PATH
-      title: "{ZELLIJ_SESSION_NAME} | "
+      title: "{MUX_SESSION} | "                # only behind a multiplexer that names its session in both places
 ```
 
 The lookup is PATH-first since D-101. D-67 had made the key required and
@@ -356,12 +355,12 @@ program: nothing in this file names a program's path any more.
 ### `containers` — your half
 
 ```yaml
-containers: [aerospace-container, zellij]
+containers: [aerospace-container, tmux]
 ```
 
 Outermost first (D-103). This is configuration rather than discovery because
-nesting is not discoverable: zellij inside a window that aerospace manages looks, from
-inside, exactly like zellij on its own. It is the one thing about containers
+nesting is not discoverable: tmux inside a window that aerospace manages looks, from
+inside, exactly like tmux on its own. It is the one thing about containers
 nothing decides for you, because which shell is outside which is something
 only the person running them knows. The one exception is the case with nothing
 to nest: when exactly one enabled integration answers `focus`, an absent list
@@ -369,7 +368,7 @@ is that one (D-101). With two or more and no list, nothing is walked, and
 `doctor`'s `containers` line says to write it.
 
 Core walks that list in order and each step must succeed before the next is
-attempted — focusing a zellij pane in a window on a workspace you are not
+attempted — focusing a tmux pane in a window on a workspace you are not
 looking at leaves you looking at nothing. A layer that has nothing to say about
 a session is skipped rather than failed, which is what lets somebody whose outer
 layer is unconfigured still focus the pane.
@@ -380,14 +379,16 @@ layer is unconfigured still focus the pane.
 integrations:
   aerospace-container:
     settings:
-      title: "{ZELLIJ_SESSION_NAME} | "   # the default
+      title: "{MUX_SESSION} | "
 ```
 
-zellij titles its terminal window `<session> | <active tab>`, so the session
-name the agent already carries is an index into the window list. The match is a
-**prefix**, and the separator is part of the key and is what makes it worth
-trusting: `home` would match any window whose title happens to start that way,
-while `home | ` is a zellij client attached to the session called home.
+It is for an agent behind a multiplexer, where the process chain runs out at
+the server. A multiplexer that titles its terminal window `<session> | …` and
+puts the same session name in the agent's environment makes that name an index
+into the window list. The match is a **prefix**, and the separator is part of
+the key and is what makes it worth trusting: `home` would match any window
+whose title happens to start that way, while `home | ` is a client attached to
+the session called home.
 
 Every `{NAME}` in the template is also exactly the list of variables
 `capture-environment` reads — the template naming them is what keeps the two
@@ -398,19 +399,16 @@ session.
 
 It is configuration rather than code because the coupling belongs to whoever set
 those two programs up, and because the next multiplexer should be a line in a
-file rather than a release. What it needs is a multiplexer that puts its session
-name in **both** the environment and the window title. zellij does. tmux — which
-puts neither its session name nor anything else nameable in an agent's
-environment — would need a different key.
-
-```yaml
-      title: ""    # no multiplexer: the process chain is the only way in, and it is the exact one
-```
+file rather than a release. **It is empty by default** (D-134): the multiplexer
+whose convention it used to be is gone from this repository, and tmux puts
+neither its session name nor anything else nameable in an agent's environment,
+so behind tmux it needs a key of its own. Empty, the process chain is the only
+way in, and it is the exact one.
 
 ### Environment variables
 
 This program declares none of its own. The variables it reads are whichever ones
-your `title` template names — `ZELLIJ_SESSION_NAME` out of the box — and they
+your `title` template names — none out of the box — and they
 are read in the one place they exist, inside the agent's process.
 
 Two of core's reach it indirectly. `AGENT_NOTIFY_ROOT` moves the state
@@ -448,8 +446,7 @@ Both measured on 0.20.3, both load-bearing:
 
 - **`focus --window-id` is the whole job.** A window on another workspace comes
   with its workspace, and focusing the window that is already focused exits 0
-  rather than complaining — unlike zellij's `focus-pane-id`, which exits 2 at
-  the same request. So there is nothing to ask first and nothing to make
+  rather than complaining. So there is nothing to ask first and nothing to make
   idempotent by hand.
 - **It tells the truth with its exit code.** A window id it does not know exits
   1 and says so; so does a usage mistake. There is no stderr vocabulary to keep

@@ -32,13 +32,11 @@ var me = subscribe.Integration{Name: Name}
 const separator = "\t"
 
 func main() {
-	// The config is read once per process, and each of the three jobs — the
-	// list, a preview fzf runs per row, a label per move of the cursor — is a
-	// separate process.
+	// The config is read once per process, and each of the two jobs — the
+	// list, and a preview fzf runs per row — is a separate process.
 	os.Exit(subscribe.Main(me, subscribe.Commands{
 		Named: map[string]func([]string) int{
 			"--preview": func(arguments []string) int { Read(me); return previewOf(arguments) },
-			"--label":   func(arguments []string) int { Read(me); return labelOf(arguments) },
 		},
 		Default: func(arguments []string) int { return run(arguments, Read(me)) },
 	}, os.Args[1:]))
@@ -102,9 +100,9 @@ func chooseOne(
 		program = "agent-notify-picker"
 	}
 
+	list, preview := Split(terminalWidth())
 	told := func() []string {
-		return Arguments(program,
-			PreviewWindow(len(sessions), terminalHeight()), Ghost(all), Complaint(complaints))
+		return Arguments(program, preview, Ghost(all), Complaint(complaints))
 	}
 
 	options, err := fzf.ParseOptions(true, told())
@@ -123,9 +121,8 @@ func chooseOne(
 
 	input, output := make(chan string, len(sessions)), make(chan string, 1)
 	options.Input, options.Output = input, output
-	columns := Measure(sessions)
 	for _, record := range sessions {
-		input <- record.Key.String() + separator + Row(record, time.Now().UTC(), columns)
+		input <- record.Key.String() + separator + Row(record, time.Now().UTC(), list-listChrome)
 	}
 	close(input)
 
@@ -159,57 +156,60 @@ func chooseOne(
 // Ghost is what the empty query says, and it is also the only place a run with
 // `--all` differs from a run without one.
 //
-// It replaces a header that said how many sessions there were in gold across
-// the top — the single brightest thing on the screen, above every session name.
-// The count is a thing fzf already prints, on the prompt line, in
-// `--info=inline-right`; what it does not know is which set it is counting.
+// There is no count beside it: the list is the count.
 func Ghost(all bool) string {
 	if all {
-		return "filter sessions, ended ones included…"
+		return "filter agents, ended ones included…"
 	}
-	return "filter sessions…"
+	return "filter agents…"
 }
 
-// PreviewWindow is how the window is divided, and it is computed rather than
-// fixed at 72%.
+// The window is the list on the left and what the selected agent said on the
+// right, the cockpit's shape (D-133), so that what is learned reading one is
+// read the same way in the other.
+const (
+	// listWidth is the columns the list side takes, the cockpit's own default.
+	listWidth = 36
+	// listChrome is what fzf spends of the list side on things other than a
+	// row: the padding, the pointer, the gutter, the scrollbar's column, and
+	// the preview's border with the space before it. Measured, on fzf 0.74.
+	listChrome = 8
+	// narrowest is the least a message is worth reading in. Under it the
+	// list takes half, which is a terminal nobody reads prose in anyway.
+	narrowest = 40
+)
+
+// Split is the list's width and fzf's preview-window spec for a terminal
+// `width` columns wide. The preview is given in columns rather than as a
+// fraction, because the list is the fixed part: a fraction would make the
+// list wider on a wider screen, which buys a name nothing but more air before
+// its wait.
 //
-// A fraction is the wrong instrument for this. Three sessions in 28% of a tall
-// pane is a list with air under it; twelve sessions in the same 28% is a list
-// that scrolls while the preview below it has rows to spare. The number of
-// sessions is known before fzf is started, so the list gets exactly the rows it
-// has rows for — capped at two fifths, because the message is what the window
-// is for — and the preview gets the rest.
-//
-// A height of zero is a terminal that would not say, and then the old fraction
-// is the honest answer.
-func PreviewWindow(sessions, height int) string {
-	const (
-		chrome   = 3 // the prompt, the separator, and the preview's own top
-		shortest = 8
-	)
-	if height <= 0 {
-		return "down,68%"
+// A width of zero is a terminal that would not say, and then the list gets
+// its width and the preview whatever fzf finds is left.
+func Split(width int) (list int, preview string) {
+	if width <= 0 {
+		return listWidth, "right,70%"
 	}
-	rows := max(height-chrome, 1)
-	list := min(max(sessions, 1), max(rows*2/5, 1))
-	if preview := rows - list; preview >= shortest {
-		return "down," + strconv.Itoa(preview)
+	list = listWidth
+	if width-list < narrowest {
+		list = max(width/2, listChrome+glyphColumn+1+ageColumn+1)
 	}
-	return "down,68%"
+	return list, "right," + strconv.Itoa(max(width-list, 1))
 }
 
-// terminalHeight is the pane this was opened in, or zero if there is no
+// terminalWidth is the pane this was opened in, or zero if there is no
 // terminal to ask — a `--print` run in a pipe, or a test.
-func terminalHeight() int {
+func terminalWidth() int {
 	for _, file := range []*os.File{os.Stdout, os.Stderr} {
-		if _, rows, err := term.GetSize(int(file.Fd())); err == nil && rows > 0 {
-			return rows
+		if columns, _, err := term.GetSize(int(file.Fd())); err == nil && columns > 0 {
+			return columns
 		}
 	}
 	if tty, err := os.Open("/dev/tty"); err == nil {
 		defer tty.Close()
-		if _, rows, err := term.GetSize(int(tty.Fd())); err == nil && rows > 0 {
-			return rows
+		if columns, _, err := term.GetSize(int(tty.Fd())); err == nil && columns > 0 {
+			return columns
 		}
 	}
 	return 0
@@ -264,27 +264,18 @@ func Arguments(program, previewWindow, ghost, complaint string) []string {
 		// move the row somebody is about to press enter on, every keystroke.
 		"--no-sort",
 		"--delimiter=" + separator,
-		// The key is field one and is never drawn: it is what the preview, the
-		// label and the jump are addressed by, and it is not something to read.
+		// The key is field one and is never drawn: it is what the preview and
+		// the jump are addressed by, and it is not something to read.
 		// fzf keeps the original line for placeholders, so {1} is still the key
 		// even though the row on screen starts at field two.
 		"--with-nth=2..",
 		"--preview", program + " --preview {1}",
-		// HORIZONTAL SPLIT: the preview underneath, not beside. An agent's
-		// message is prose and a paragraph in a half-width column is a column
-		// of words; the full width is what makes it readable. The size is
-		// computed from how many sessions there are — see PreviewWindow.
-		// `noinfo`: fzf otherwise prints the scroll position over the top-right
-		// corner of the pane, and the pane now starts with the agent's own
-		// sentence rather than with a heading nobody minds a number through.
-		// The scrollbar says the same thing at the edge instead.
-		"--preview-window=" + previewWindow + ",wrap,noinfo,border-top",
-		// WHO THIS IS, ONCE. The pane's label carries the name, the canonical
-		// state and the age, so the pane's first line can be the thing being
-		// decided on rather than a copy of the highlighted row. `bg-` because
-		// it must not make moving the cursor wait on a process.
-		"--preview-label-pos=3",
-		"--bind=focus:bg-transform-preview-label:" + program + " --label {1}",
+		// The message beside the list, which is the cockpit's shape — see
+		// Split. `noinfo`: fzf otherwise prints the scroll position over the
+		// top-right corner of the pane, over the agent's own first sentence.
+		// The scrollbar says the same thing at the edge instead. No label: the
+		// row beside the pane already says who it is.
+		"--preview-window=" + previewWindow + ",wrap,noinfo,border-left",
 		// THE SELECTED ROW. Every row arrives pre-coloured under --ansi, so
 		// there is nothing left for fzf's fg+ to repaint: the lift has to be
 		// the background across the whole row, and the mark has to be a solid
@@ -301,7 +292,8 @@ func Arguments(program, previewWindow, ghost, complaint string) []string {
 		"--prompt=\uf002  ",
 		"--ghost=" + ghost,
 		"--ellipsis=\u2026",
-		"--info=inline-right",
+		// No count: the list is the count.
+		"--info=hidden",
 		"--scrollbar=\u258e\u258e",
 		"--separator=\u2500",
 		"--padding=0,1",
@@ -310,8 +302,8 @@ func Arguments(program, previewWindow, ghost, complaint string) []string {
 	}
 	// THE KEYS, which are the user's (see Keymap) and default to this program's
 	// own. Scrolling the PREVIEW rather than the list is the decision among
-	// them worth defending: the list is three rows and the message under it is
-	// a hundred and eleven. It costs fzf's defaults on four keys — ctrl-j/k
+	// them worth defending: the list is a handful of rows and the message
+	// beside it can be a hundred. It costs fzf's defaults on four keys — ctrl-j/k
 	// also move the list (↑↓ and ctrl-n/p still do), ctrl-u clears the query
 	// (backspace still does), and ctrl-d quits on an empty query (esc and
 	// ctrl-c still do). Each of those has another way; scrolling the preview
@@ -325,8 +317,8 @@ func Arguments(program, previewWindow, ghost, complaint string) []string {
 	}
 	// A HEADER, for the one thing worth interrupting a list of sessions with.
 	// It is what the README rejected for a session count — the brightest row on
-	// the screen spent on a number fzf already prints beside the prompt — and
-	// it is right for this: a complaint about the config file is temporary, it
+	// the screen spent on a number the list already says — and it is right
+	// for this: a complaint about the config file is temporary, it
 	// is gone the moment the file is fixed, and the alternative was a picker
 	// that does not open.
 	if complaint != "" {

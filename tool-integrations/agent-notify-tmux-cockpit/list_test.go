@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/lassoColombo/agent-notify/session"
@@ -76,31 +77,45 @@ func TestWhileSomebodyIsOnTheStageNothingMoves(t *testing.T) {
 	}
 }
 
-// TestAnAgentTakenBackIsAskedForAgainByComingBackToIt: Enter in its stand-in
-// releases it; it stays at its own place while the cursor is on it, and
-// leaving and returning asks for it again.
-func TestAnAgentTakenBackIsAskedForAgainByComingBackToIt(t *testing.T) {
-	w := world(true, theList, theStandIn, at("%5", "@1"), at("%6", "@1"))
-	l := aList(w, placed("a", session.Working, socket, "%5"), placed("b", session.Idle, socket, "%6"))
-	// the stand-in is holding %5's place, and Enter is pressed in it
-	l.world = world(true, theList, at("%5", tab).awayFrom("%2"), at("%2", "@1").as(roleStandIn), at("%6", "@1"))
-	l.Update(heardMsg(pressedEnter))
-	if got := Want(w, "%1", Desire{Staged: l.staged, Released: l.released}); got != "" {
-		t.Fatalf("%q is wanted on the stage after being taken back", got)
+// TestATerminalHasToRestOnTheTab: the hooks type the list's key every time a
+// terminal comes to the tab, and one passing through on its way to another
+// window must not have an agent swapped, and resized, for it.
+func TestATerminalHasToRestOnTheTab(t *testing.T) {
+	w := world(true, theList, theStandIn, at("%5", "@1"))
+	l := aList(w, placed("a", session.Working, socket, "%5"))
+	if !strings.EqualFold(wake, wakeKey) {
+		t.Fatalf("the hooks type %s and the list waits for %s", wakeKey, wake)
 	}
-	// and Enter in the stand-in once it is back on the stage asks for it again
-	l.world = w
-	l.Update(heardMsg(pressedEnter))
-	if got := Want(w, "%1", Desire{Staged: l.staged, Released: l.released}); got != "%5" {
-		t.Fatalf("Want = %q after Enter on the stage", got)
+	if rest := l.key(wake); rest == nil || l.busy {
+		t.Fatal("the list looked at once, and a rest was to be waited for")
 	}
-	l.released = "%5"
-	l.moveTo(1)
-	l.Update(settledMsg(l.moves))
-	l.moveTo(0)
-	l.Update(settledMsg(l.moves))
-	if got := Want(w, "%1", Desire{Staged: l.staged, Released: l.released}); got != "%5" {
-		t.Errorf("Want = %q after coming back to it", got)
+	l.key(wake)
+	if _, look := l.Update(arrivedMsg(l.arrivals - 1)); look != nil || l.busy {
+		t.Error("an earlier arrival's rest made the list look")
+	}
+	if _, look := l.Update(arrivedMsg(l.arrivals)); look == nil || !l.busy {
+		t.Error("the terminal rested on the tab and the list did not look")
+	}
+}
+
+// TestAnAgentSomebodyIsLookingAtIsLeftThere: the stage says where it is
+// instead, once, and again only when it has something else to say.
+func TestAnAgentSomebodyIsLookingAtIsLeftThere(t *testing.T) {
+	w := world(true, theList, theStandIn.sized(100, 30), at("%5", "@1").onScreen())
+	l := aList(w, placed("alpha", session.Working, socket, "%5"))
+	if got := Want(w, "%1", Desire{Staged: l.staged}); got != "" {
+		t.Fatalf("%q is wanted on the stage from under a terminal showing it", got)
+	}
+	if l.show() == nil || !strings.Contains(l.drawn, "alpha is on screen in home:1") {
+		t.Fatalf("the stand-in was drawn as %q", l.drawn)
+	}
+	if l.show() != nil {
+		t.Error("the stand-in was drawn again to say the same")
+	}
+	// away from the stage it is another size, and is drawn afresh once back
+	l.world = world(true, theList, at("%5", tab).awayFrom("%2"), at("%2", "@1").as(roleStandIn))
+	if l.show() != nil || l.drawn != "" {
+		t.Errorf("a stand-in holding a place was drawn: %q", l.drawn)
 	}
 }
 

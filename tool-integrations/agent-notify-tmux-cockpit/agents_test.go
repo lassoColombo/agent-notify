@@ -9,8 +9,8 @@ import (
 
 const socket = "/tmp/tmux-501/default"
 
-func placed(name string, kernel session.Kernel, server, pane string) session.Record {
-	blob, _ := json.Marshal(captured{Server: server + ",42,0", Pane: pane})
+func placed(name string, kernel session.Kernel, socket, pane string) session.Record {
+	blob, _ := json.Marshal(captured{Server: socket + ",42,0", Pane: pane})
 	return session.Record{
 		Name:            name,
 		Kernel:          kernel,
@@ -48,7 +48,7 @@ func TestOnlyWhatTheStageCouldShowIsListed(t *testing.T) {
 		placed("gone", session.Working, socket, "%99"),
 		placed("in the tab", session.Working, socket, "%8"),
 		placed("the list", session.Working, socket, "%1"),
-		{Name: "zellij", Kernel: session.Working},
+		{Name: "not in tmux", Kernel: session.Working},
 	}
 	w := world(true, theList,
 		at("%5", "@1"), at("%7", "@1"), at("%8", tab),
@@ -58,8 +58,16 @@ func TestOnlyWhatTheStageCouldShowIsListed(t *testing.T) {
 	if got := names(agents); len(got) != 2 || got[0] != "here" || got[1] != "on the stage" {
 		t.Fatalf("agents = %v, want `here` and `on the stage`", got)
 	}
-	if agents[0].Where != "home:1" || agents[1].Where != "home:3" {
-		t.Errorf("where = %q and %q; a borrowed pane is where it lives, not in the tab", agents[0].Where, agents[1].Where)
+}
+
+// TestAServerStartedAgainIsAnotherServer: the socket is the same and the pane
+// ids start again from %0, so a record of the old server names a pane that is
+// now somebody else's (D-126).
+func TestAServerStartedAgainIsAnotherServer(t *testing.T) {
+	w := world(true, theList, at("%5", "@1"))
+	w.Server = 4242
+	if got := names(Agents([]session.Record{placed("before", session.Working, socket, "%5")}, socket, w, "%1")); len(got) != 0 {
+		t.Errorf("agents = %v; the record is of the server that was there before", got)
 	}
 }
 
@@ -103,13 +111,13 @@ func TestSectionsGoMostUrgentFirst(t *testing.T) {
 // tmux's capture found no server and nothing else placed it. One never
 // captured for is not known to be anywhere, and is left out (D-128).
 func TestTheBackgroundIsWhatNoPaneHolds(t *testing.T) {
-	inZellij := unplaced("in zellij", session.Working)
-	inZellij.DerivedContext = map[string]json.RawMessage{"zellij": json.RawMessage(`{"session":"main"}`)}
+	inAerospace := unplaced("in aerospace", session.Working)
+	inAerospace.DerivedContext = map[string]json.RawMessage{"aerospace-container": json.RawMessage(`{"title":"home | "}`)}
 	records := []session.Record{
 		unplaced("idle", session.Idle),
 		unplaced("blocked", session.BlockedOnYou),
 		unplaced("ended", session.Ended),
-		inZellij,
+		inAerospace,
 		placed("here", session.Working, socket, "%5"),
 		placed("elsewhere", session.Working, "/tmp/tmux-501/other", "%5"),
 		{Name: "never captured", Kernel: session.Working},

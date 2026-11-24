@@ -137,7 +137,7 @@ func TestASkippedLayerIsNotAFailedLayer(t *testing.T) {
 		"outer": {},
 		"inner": {},
 	})
-	// Only the inner one ever saw this session — you started zellij inside a
+	// Only the inner one ever saw this session — you started tmux inside a
 	// terminal window no window manager was recording.
 	record := placed(map[string]json.RawMessage{"inner": json.RawMessage(`{"pane":7}`)})
 
@@ -285,7 +285,7 @@ func TestARefusalWithNoReasonIsStillARefusal(t *testing.T) {
 }
 
 // TestInFrontOnlyIfEveryLayerAgrees is §A11.6, and the reason the third answer
-// exists: aerospace saying yes while zellij cannot say is not a yes.
+// exists: aerospace saying yes while tmux cannot say is not a yes.
 func TestInFrontOnlyIfEveryLayerAgrees(t *testing.T) {
 	yes := func(t *testing.T, name string) string {
 		return answers(t, name, map[string]string{"focused": `{"answer":"yes"}`})
@@ -345,8 +345,8 @@ func TestAnUnplacedLayerCannotSay(t *testing.T) {
 // cannot be caught by anything else, because a container's name is a name core
 // has never heard of (R10).
 func TestAnOrderThatNamesNothingIsReported(t *testing.T) {
-	settings, methods := settingsWith([]string{"zelij-container"}, map[string]config.Integration{
-		"zellij-container": {},
+	settings, methods := settingsWith([]string{"tmx"}, map[string]config.Integration{
+		"tmux": {},
 	})
 	configured, problems := containers.Configured(settings, methods)
 	if len(configured) != 0 {
@@ -358,7 +358,7 @@ func TestAnOrderThatNamesNothingIsReported(t *testing.T) {
 	if len(problems) != 2 {
 		t.Fatalf("problems = %v, want the typo and the container it orphaned", problems)
 	}
-	if !strings.Contains(problems[0].Error(), "zelij-container") {
+	if !strings.Contains(problems[0].Error(), "tmx") {
 		t.Errorf("problems = %v, want the first to name the misspelled entry", problems)
 	}
 	if !strings.Contains(problems[1].Error(), "`containers`") {
@@ -368,8 +368,8 @@ func TestAnOrderThatNamesNothingIsReported(t *testing.T) {
 
 func TestADisabledContainerIsSkippedSilently(t *testing.T) {
 	off := false
-	settings, methods := settingsWith([]string{"zellij-container"}, map[string]config.Integration{
-		"zellij-container": {Enabled: &off},
+	settings, methods := settingsWith([]string{"tmux"}, map[string]config.Integration{
+		"tmux": {Enabled: &off},
 	})
 	configured, problems := containers.Configured(settings, methods)
 	if len(configured) != 0 || len(problems) != 0 {

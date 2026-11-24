@@ -38,7 +38,6 @@ func WhatToWakeFor() []string {
 // DefaultGlyphs are Nerd Font codepoints, chosen so states are told apart by
 // shape, since a status line may carry no colour. Written as escapes: tooling
 // quietly drops private-use characters. Idle and ended are empty on purpose.
-// They are zellij's, so that the two multiplexers say the same thing.
 var DefaultGlyphs = map[session.Kernel]string{
 	session.BlockedOnYou:  "", // warning triangle
 	session.Broke:         "", // a cross

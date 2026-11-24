@@ -14,10 +14,9 @@ import (
 // Name is what this integration calls itself: its config table, its entry in
 // `containers`, and its section of a record.
 //
-// The role is in the name for the same reason zellij's is (D-37), even though
-// aerospace is a container and nothing else. A person reading
-// `order = ["aerospace-container", "zellij-container"]` should not have to know
-// which of those two spellings means what.
+// The role is in the name (D-37) even though aerospace is a container and
+// nothing else: a person reading `containers: [aerospace-container, tmux]`
+// should not have to know which spelling means what.
 const Name = "aerospace-container"
 
 // me is this integration: how everything here asks where agent-notify's files
@@ -27,10 +26,10 @@ const Name = "aerospace-container"
 // environment says", which is right everywhere but a test (D-69).
 var me = subscribe.Integration{Name: Name}
 
-// ── why this container looks nothing like zellij's ───────────────────────────
+// ── why this container looks nothing like tmux's ─────────────────────────────
 //
-// zellij's container asks the agent's own environment where it is and is told:
-// ZELLIJ_PANE_ID is simply there. A WINDOW is not, and three measurements say
+// tmux's container asks the agent's own environment where it is and is told:
+// TMUX_PANE is simply there. A WINDOW is not, and three measurements say
 // there is no walk from an agent to its window at all
 // [verified 2026-09-18, macOS 26, aerospace 0.20.3, Ghostty 1.3.1]:
 //
@@ -47,7 +46,7 @@ var me = subscribe.Integration{Name: Name}
 //     and no further, and whether that is one window or five is a person's
 //     window habits rather than anything the session knows.
 //   - Inside a multiplexer the chain does not even reach the terminal. An
-//     agent's ancestry ends at the zellij SERVER, whose parent is 1; the client
+//     agent's ancestry ends at the tmux SERVER, whose parent is 1; the client
 //     that draws it is in a different tree entirely, under the terminal. This
 //     one is not a subtlety — it is the ordinary case, and it is what the
 //     title key exists for.
@@ -62,17 +61,19 @@ var me = subscribe.Integration{Name: Name}
 //     exact. This is the whole of the no-multiplexer case, and it is the only
 //     key that is exact.
 //   - **A window-title prefix**, built from the agent's environment by a
-//     template. It is what survives a multiplexer: zellij titles its terminal
-//     window `<session> | <active tab>`, so the session name the agent already
-//     carries is an index into the window list. It is a lookup key rather than
+//     template. It is what survives a multiplexer that puts its session name
+//     both in the agent's environment and in its terminal's title, so that the
+//     name the agent already carries is an index into the window list. It is a lookup key rather than
 //     a fact — nothing here would be believed if the title said something else.
 //
 // The template is configuration, not code, so that the next multiplexer is a
-// line in a file (§A11.4). The default is zellij's convention.
+// line in a file (§A11.4). There is no default: the multiplexer whose
+// convention it was is gone from this repository (D-134), and tmux puts no
+// session name in an agent's environment.
 //
 // **The window is never stored, and that is the design decision M15 turned on
 // (D-44).** Every other coordinate in this system is a property of the session:
-// a pane belongs to its zellij session for as long as both exist. A window is
+// a pane belongs to its tmux session for as long as both exist. A window is
 // not — it merely SHOWS a session, right now, and stops the moment somebody
 // detaches. A stored window id would therefore be a cached guess rather than a
 // coordinate, and §A11.3 forbids trusting those. So interpretation here is
@@ -311,8 +312,8 @@ func cannotTell(detail string) container.Verdict {
 // withTitle is every window whose title starts with the key.
 //
 // A prefix rather than a substring, and the key carries its own separator:
-// zellij's `home | ` is specific enough to trust, where `home` would match any
-// window whose title happens to begin that way.
+// `home | ` is specific enough to trust, where `home` would match any window
+// whose title happens to begin that way.
 func withTitle(windows []Window, prefix string) []Window {
 	if prefix == "" {
 		return nil
@@ -331,7 +332,7 @@ func withTitle(windows []Window, prefix string) []Window {
 //
 // Nearest first, for the reason core walks that way when it looks for an agent:
 // the innermost match is the one you are actually inside. It is also what makes
-// the multiplexer case fall out rather than be special-cased — a zellij server
+// the multiplexer case fall out rather than be special-cased — a tmux server
 // owns no windows, so the walk simply runs off the end of the chain and the
 // title key is what is left.
 func ofNearestOwner(windows []Window, chain []Ancestor) []Window {

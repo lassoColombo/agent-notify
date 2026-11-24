@@ -184,6 +184,47 @@ func TestFocusMovesTheTerminalItWasAskedFrom(t *testing.T) {
 	focusFrom("a pane", socket+","+server+","+other, here)
 }
 
+// TestFocusNeverLeavesATerminalInAHiddenSession: the agent's window is linked
+// into a session nobody attaches to, as the agents tab is into `_agents`, and
+// that session is the one active last, as `_agents` is when the tab was just
+// made. Given the pane alone, tmux sends the terminal through it, wherever
+// the terminal was [measured on 3.8]. The terminal goes through its own
+// session when that holds the window, and otherwise through the one somebody
+// was attached to last.
+func TestFocusNeverLeavesATerminalInAHiddenSession(t *testing.T) {
+	tmux := realTmux(t)
+	socket := aServer(t, tmux, "an-agent")
+	pane := paneOf(t, tmux, socket, "an-agent")
+	window := must(t, tmux, socket, "display-message", "-p", "-t", pane, "#{window_id}")
+	must(t, tmux, socket, "new-window", "-t", "an-agent", "sleep", "600")
+	must(t, tmux, socket, "new-session", "-d", "-s", "an-here", "sleep", "600")
+	terminal := viewer(t, tmux, socket, "an-agent")
+	session := func() string {
+		t.Helper()
+		return must(t, tmux, socket, "display-message", "-p", "-c", terminal.Name, "#{client_session}")
+	}
+	outside(t)
+	coordinates := coordinatesOf(t, tmux, socket, pane)
+
+	// on another window of the agent's session, then on a session without it
+	for _, from := range []string{"an-agent:1", "an-here:0"} {
+		must(t, tmux, socket, "switch-client", "-c", terminal.Name, "-t", from)
+		_, _ = bare(tmux, socket, "kill-session", "-t", "=_hidden")
+		must(t, tmux, socket, "new-session", "-d", "-s", "_hidden", "sleep", "600")
+		must(t, tmux, socket, "link-window", "-d", "-s", window, "-t", "_hidden:")
+
+		if outcome, err := Focus(tmux, coordinates); err != nil || !outcome.OK {
+			t.Fatalf("from %s: Focus = %+v, %v", from, outcome, err)
+		}
+		if shown := terminal.shows(t, tmux, socket); shown != pane {
+			t.Errorf("from %s: the terminal shows %s, not %s", from, shown, pane)
+		}
+		if got := session(); got != "an-agent" {
+			t.Errorf("from %s: the terminal was sent through session %s", from, got)
+		}
+	}
+}
+
 // TestFocusFromOutsideMovesTheTerminalWithTheFocus: two terminals, neither on
 // the agent; the one used last has lost the focus to another application, so
 // the other one is where the person is.

@@ -27,11 +27,12 @@ import (
 // this window is open. So:
 //
 //   - the four STATE hues (love, gold, foam, bright pine) appear on the state
-//     glyph and the state's detail, and nowhere else;
+//     glyph and nowhere else, but for gold on the wait of a turn gone on too
+//     long, which is the cockpit's rule;
 //   - identity and prose are the neutral ramp, always, so a session's name does
 //     not change colour when its state does;
-//   - iris is paths and chrome, rose is branches and matched characters, and
-//     neither is ever a state.
+//   - iris is links and chrome, rose is matched characters, and neither is
+//     ever a state.
 //
 // The greys are measured rather than chosen. base02 is a BACKGROUND slot —
 // 1.16:1 against base00 — so it draws nothing legible as a line; every rule,
@@ -50,10 +51,10 @@ var (
 	base05 = "#e0def4" // text
 	base08 = "#eb6f92" // love — wants you
 	base09 = "#f6c177" // gold — what broke, and a string in a fenced block
-	base0A = "#ebbcba" // rose — branches, matched characters
+	base0A = "#ebbcba" // rose — matched characters
 	base0B = "#31748f" // pine — a keyword, inside a fenced block and nowhere else
 	base0C = "#9ccfd8" // foam — finished a turn
-	base0D = "#c4a7e7" // iris — paths, prompt, labels
+	base0D = "#c4a7e7" // iris — links, the prompt
 	base13 = "#fff0ee" // bright rose — the pointer, headings
 	base14 = "#609fbb" // bright pine — working
 )
@@ -67,28 +68,27 @@ var (
 var (
 	// Rule is every line and every mark that separates rather than speaks.
 	Rule lipgloss.Style
-	// Subtle is a word that is worth reading second: an age, a fact's name.
+	// Subtle is a word that is worth reading second: a wait.
 	Subtle lipgloss.Style
 	// Text is identity and prose. A session's name is this colour whatever it
 	// is doing, so that a name can be learned.
 	Text lipgloss.Style
-	// Path and Branch are where a session is, in the two colours this machine
-	// already writes a path and a branch in — the shell prompt's own pair.
-	Path   lipgloss.Style
-	Branch lipgloss.Style
+	// Long is the wait of a turn that has run past stuckAfter, in gold: the
+	// one place a state hue is spent off a glyph, and it is the cockpit's.
+	Long lipgloss.Style
 )
 
-// restyle builds those five from the hues in force. It runs at startup, so that
+// restyle builds those four from the hues in force. It runs at startup, so that
 // a program which never reads a configuration still draws in the defaults, and
 // again from Repaint once the user's table has been read.
 //
 // It is the only place a style is built, which is the reason the block above
-// declares rather than initialises: two lists of the same five assignments is
+// declares rather than initialises: two lists of the same four assignments is
 // two lists that will differ once, and the one that differs would be the one a
 // person never sees.
 //
 // They are values rather than functions because they are used as values
-// twenty-eight times across two files. A package variable assigned at startup
+// throughout the files that draw. A package variable assigned at startup
 // is what that costs, and it is safe here for a reason that is true of this
 // program and not of the daemons beside it: one job per process, and then it
 // exits.
@@ -98,8 +98,7 @@ func restyle() {
 	Rule = lipgloss.NewStyle().Foreground(lipgloss.Color(base03))
 	Subtle = lipgloss.NewStyle().Foreground(lipgloss.Color(base04))
 	Text = lipgloss.NewStyle().Foreground(lipgloss.Color(base05))
-	Path = lipgloss.NewStyle().Foreground(lipgloss.Color(base0D))
-	Branch = lipgloss.NewStyle().Foreground(lipgloss.Color(base0A))
+	Long = lipgloss.NewStyle().Foreground(lipgloss.Color(base09))
 }
 
 // StateStyle is what a state is worth looking at in, and it is the bar's
@@ -131,7 +130,7 @@ func StateColour(rank int) string {
 	return base03
 }
 
-// Glyphs are the marks the bar and the zellij tab titles already wear — Font
+// Glyphs are the marks tmux already puts on agents' panes — Font
 // Awesome's BMP block, written as escapes rather than literals because they
 // are private-use codepoints and a great deal of tooling drops them silently.
 //
@@ -157,19 +156,6 @@ func Glyph(record session.Record) string {
 		return mark
 	}
 	return ""
-}
-
-// short is the row's word for a kernel: core's own, except where core's own is
-// a sentence. "blocked-on-you" and "finished-a-turn" are exactly right on the
-// wire and too wide to repeat down a column beside a detail.
-func short(kernel session.Kernel) string {
-	switch kernel {
-	case session.BlockedOnYou:
-		return "blocked"
-	case session.FinishedATurn:
-		return "finished"
-	}
-	return string(kernel)
 }
 
 // fzfColours is fzf's chrome, in the hues in force.
@@ -228,8 +214,8 @@ func fzfColours() string {
 
 // Markdown is what an agent said, in the same palette by the same roles — and
 // by the same discipline: headings are bright rose rather than iris (iris is
-// paths), inline code is text on a raised chip rather than gold (gold is a
-// state), links are iris because a link is a path.
+// chrome), inline code is text on a raised chip rather than gold (gold is a
+// state), links are iris.
 //
 //go:embed rose-pine.json
 var Markdown []byte
@@ -238,7 +224,7 @@ var Markdown []byte
 //
 // It is written in slots rather than in colours so that ONE table covers the
 // whole window: a person who moves base0D moves the links in a message as well
-// as the paths in a row. A window half in your palette and half in mine is
+// as the prompt. A window half in your palette and half in mine is
 // worse than a window wholly in mine, and it is what an embedded file of
 // literal hexes would have given.
 //

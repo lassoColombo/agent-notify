@@ -50,13 +50,13 @@ func TestTheBackgroundIsDrawnBelowAndNeverSelected(t *testing.T) {
 	away.Cwd = "/Users/somebody/projects/cybergon"
 	got := drawn([]session.Record{away, placed("alpha", session.Working, socket, "%5")},
 		world(true, theList, at("%5", "@1")), "%5", 40, 20)
-	working, background := strings.Index(got, "working 1"), strings.Index(got, "in background 1")
+	working, background := strings.Index(got, "working"), strings.Index(got, "in background")
 	if working < 0 || background < working {
 		t.Errorf("the background is not a group of its own below the agents:\n%s", got)
 	}
 	glyph := testGlyphs.For(session.Record{Kernel: session.BlockedOnYou, Rank: session.BlockedOnYou.Rank()})
-	if !strings.Contains(got, "  "+glyph+" away") || !strings.Contains(got, "\n  cybergon") {
-		t.Errorf("a background row does not say its state, its name and its directory:\n%s", got)
+	if !strings.Contains(got, "  "+glyph+" away") {
+		t.Errorf("a background row does not say its state and its name:\n%s", got)
 	}
 
 	alone := drawn([]session.Record{away}, world(true, theList), "", 40, 20)
@@ -65,15 +65,49 @@ func TestTheBackgroundIsDrawnBelowAndNeverSelected(t *testing.T) {
 	}
 }
 
-func TestARowIsItsNameItsAgeAndWhereItLives(t *testing.T) {
+// TestARowIsItsNameAndItsWait, on one line, under its state: nothing about
+// where it lives or what it said, which `o` and the stage are for (D-132).
+func TestARowIsItsNameAndItsWait(t *testing.T) {
 	record := placed("alpha", session.BlockedOnYou, socket, "%5")
 	record.Cwd = "/Users/somebody/projects/agent-notify"
+	record.Message = "Claude needs your permission to use Bash"
 	record.StateSince = testNow.Add(-90 * time.Second)
 	got := drawn([]session.Record{record}, world(true, theList, at("%5", "@1")), "%5", 40, 20)
-	for _, part := range []string{"needs you 1", "▌ alpha", "1m", "home:1  agent-notify", "q close"} {
-		if !strings.Contains(got, part) {
-			t.Errorf("the list does not say %q:\n%s", part, got)
+	lines := strings.Split(got, "\n")
+	if !strings.HasSuffix(strings.TrimSpace(lines[0]), "needs you") || !strings.HasPrefix(lines[1], "▌ alpha") ||
+		!strings.HasSuffix(lines[1], " 1m") || strings.TrimSpace(lines[2]) != "" {
+		t.Errorf("not a header and then one line for the agent:\n%s", got)
+	}
+	idle := placed("beta", session.Idle, socket, "%6")
+	header := strings.Split(drawn([]session.Record{idle}, world(true, theList, at("%6", "@1")), "%6", 40, 20), "\n")[0]
+	if header != " idle" {
+		t.Errorf("a header with no glyph reads %q, and is to start one column in, as the others do", header)
+	}
+	for _, gone := range []string{"home:1", "agent-notify", "permission", " 1\n"} {
+		if strings.Contains(got, gone) {
+			t.Errorf("the list says %q, which is no longer its to say:\n%s", gone, got)
 		}
+	}
+	if !strings.Contains(got, "q close") {
+		t.Errorf("the keys are gone:\n%s", got)
+	}
+}
+
+// TestATurnThatRunsLongIsMarked: the wait of a working agent turns gold
+// once it has gone on longer than a turn usually does.
+func TestATurnThatRunsLongIsMarked(t *testing.T) {
+	waitOf := func(since time.Duration) string {
+		record := placed("alpha", session.Working, socket, "%5")
+		record.StateSince = testNow.Add(-since)
+		sections := Sections(Agents([]session.Record{record}, socket, world(true, theList, at("%5", "@1")), "%1"))
+		return Draw(sections, nil, "", testGlyphs, 40, 10, testNow)
+	}
+	gold := "\x1b[38;2;246;193;119m"
+	if strings.Contains(waitOf(stuckAfter-time.Minute), gold) {
+		t.Error("a turn shorter than the threshold is marked")
+	}
+	if !strings.Contains(waitOf(stuckAfter+time.Minute), gold) {
+		t.Error("a turn longer than the threshold is not marked")
 	}
 }
 
@@ -124,16 +158,19 @@ func TestAnEmptyListSaysSo(t *testing.T) {
 }
 
 func TestTheStandInSaysWhatItWasTold(t *testing.T) {
-	frame := Frame(Showing{Title: "alpha\x07\x1b]0;evil\x07", Lines: []string{"alpha is in the agents tab", "Enter brings it back here"}}, 60, 11)
+	frame := Frame(Showing{Title: "alpha\x07\x1b]0;evil\x07", Lines: []string{"alpha is on screen in home", "o goes there"}}, 60, 11)
 	if !strings.Contains(frame, "\x1b]2;alpha") || strings.Contains(frame, "\x07\x1b]0;evil") {
 		t.Errorf("the title is not the one it was told, cleaned: %q", frame)
 	}
 	// 26 cells, centred in 60, on the fifth of eleven rows
-	if !strings.Contains(frame, "\x1b[5;18H") || !strings.Contains(ansi.Strip(frame), "alpha is in the agents tab") {
+	if !strings.Contains(frame, "\x1b[5;18H") || !strings.Contains(ansi.Strip(frame), "alpha is on screen in home") {
 		t.Errorf("the first line is not in the middle: %q", frame)
 	}
-	narrow := ansi.Strip(Frame(Showing{Lines: []string{"alpha is in the agents tab"}}, 10, 3))
-	if strings.Contains(narrow, "agents tab") {
+	if !strings.Contains(frame, "\x1b[?25l") {
+		t.Errorf("an empty pane shows a cursor unless it is told not to: %q", frame)
+	}
+	narrow := ansi.Strip(Frame(Showing{Lines: []string{"alpha is on screen in home"}}, 10, 3))
+	if strings.Contains(narrow, "in home") {
 		t.Errorf("a line wider than the pane was not cut: %q", narrow)
 	}
 }

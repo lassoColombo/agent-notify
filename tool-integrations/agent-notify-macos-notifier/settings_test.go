@@ -210,9 +210,9 @@ integrations:
 func TestSomebodyElsesTableIsNotOurs(t *testing.T) {
 	settings, err := settingsIn(t, `
 integrations:
-  zellij:
+  tmux:
     settings:
-      zellij: /usr/bin/true
+      tmux: /usr/bin/true
   macos-notifier:
     settings:
       preview:

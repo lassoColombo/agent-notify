@@ -106,7 +106,7 @@ func (g Palette) nearest(rank int) (Kernel, bool) {
 // Marks is every distinct non-empty glyph this table can paint, longest first.
 //
 // It is for the display that writes into a namespace it does not own — a
-// zellij tab name, a tmux window name, a terminal's title — and must therefore
+// tmux window name, a terminal's title — and must therefore
 // be able to recognise its own leftovers and take them off again before
 // writing. Longest first so that stripping is greedy and a one-rune glyph that
 // happens to prefix a two-rune one cannot strip half of it.

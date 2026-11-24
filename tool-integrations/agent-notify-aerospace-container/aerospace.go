@@ -11,7 +11,7 @@ import (
 
 // Aerospace is the only thing here that runs anything.
 //
-// Like zellij's container half, this program is run rather than connected: core
+// Like every container, this program is run rather than connected: core
 // spawns it with a subcommand when it needs an answer (D-38). So there is no
 // daemon and no cache — every invocation asks aerospace afresh, which is also
 // what §A11.3 requires of coordinates at the moment of use. Measured at about
@@ -77,9 +77,8 @@ func (a Aerospace) list(which string) ([]Window, error) {
 //
 // [verified 2026-09-18, aerospace 0.20.3] One command does the whole job: a
 // window on another workspace comes with its workspace, and focusing the window
-// that is already focused exits 0 rather than complaining — unlike zellij's
-// focus-pane-id, which exits 2 at the same request. So there is nothing to ask
-// first and nothing to make idempotent by hand.
+// that is already focused exits 0 rather than complaining. So there is nothing
+// to ask first and nothing to make idempotent by hand.
 func (a Aerospace) Focus(id int) error {
 	_, err := a.run("focus", "--window-id", strconv.Itoa(id))
 	return err

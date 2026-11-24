@@ -16,7 +16,7 @@ import (
 // matters most, without any of them having to decide.
 
 // enoughOfTheIDToTellThemApart is how much of the session id is stuck on the
-// end of a guessed name. Two characters, because this goes in a zellij tab
+// end of a guessed name. Two characters, because this goes in a title
 // beside a state and a spinner, and because it is what an agent that does the
 // same thing chose: Claude's own unnamed sessions read `agent-notify-8e`.
 const enoughOfTheIDToTellThemApart = 2
@@ -109,7 +109,7 @@ func moreUrgent(a, b Record) int {
 	return cmp.Compare(a.DisplayName(), b.DisplayName())
 }
 
-// MostUrgent is the one record a single light is for: a zellij tab that holds
+// MostUrgent is the one record a single light is for: a tmux window that holds
 // four panes, a menu-bar LED, a dock badge (§A12.1).
 //
 // It returns the record rather than its rank because what a display paints is

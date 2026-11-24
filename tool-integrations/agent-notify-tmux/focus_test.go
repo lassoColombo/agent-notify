@@ -41,6 +41,29 @@ func TestChoose(t *testing.T) {
 	}
 }
 
+func TestThrough(t *testing.T) {
+	agents := View{Session: "$2", Window: "@3"}
+	mine := View{Session: "$0", Window: "@3", LastAttached: 100}
+	theirs := View{Session: "$1", Window: "@3", LastAttached: 300}
+	for _, given := range []struct {
+		why    string
+		views  []View
+		client Client
+		want   string
+	}{
+		{"the terminal's own session, when it holds the window",
+			[]View{agents, theirs, mine}, Client{Session: "$0"}, "$0"},
+		{"else the one a terminal was attached to last",
+			[]View{agents, mine, theirs}, Client{Session: "$9"}, "$1"},
+		{"and one nobody was ever attached to only when there is no other",
+			[]View{agents}, Client{Session: "$9"}, "$2"},
+	} {
+		if got, found := Through(given.views, given.client); !found || got.Session != given.want {
+			t.Errorf("%s: %+v (%v), want %s", given.why, got, found, given.want)
+		}
+	}
+}
+
 func TestVerdict(t *testing.T) {
 	panes := map[string]Mark{"%1": {}, "%2": {}, "%3": {}, "%4": {}}
 	for _, given := range []struct {

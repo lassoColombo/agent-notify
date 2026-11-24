@@ -11,13 +11,10 @@ import (
 // This file is pure: which sessions the list shows, and in what groups.
 
 // Agent is one row of the list: a live session whose agent runs in a pane of
-// this server, and where that pane lives.
+// this server, and that pane.
 type Agent struct {
 	Record session.Record
 	Pane   string
-	// Where is `session:window`, read off tmux when the list was drawn rather
-	// than off the record, because a pane can be moved after it was captured.
-	Where string
 }
 
 // captured is the tmux integration's section of a record: the two variables
@@ -28,27 +25,31 @@ type captured struct {
 	Pane   string `json:"TMUX_PANE"`
 }
 
-// placeOf is the server socket and pane a session was captured in.
-func placeOf(record session.Record) (socket, pane string, found bool) {
+// placeOf is the server, as its socket and its pid, and the pane a session
+// was captured in.
+func placeOf(record session.Record) (socket string, server int, pane string, found bool) {
 	blob, present := record.CapturedContext.By["tmux"]
 	if !present {
-		return "", "", false
+		return "", 0, "", false
 	}
 	var given captured
 	if err := json.Unmarshal(blob, &given); err != nil {
-		return "", "", false
+		return "", 0, "", false
 	}
-	socket, found = SocketOf(given.Server)
+	socket, server, found = ServerOf(given.Server)
 	if !found || !IsPaneID(given.Pane) {
-		return "", "", false
+		return "", 0, "", false
 	}
-	return socket, given.Pane, true
+	return socket, server, given.Pane, true
 }
 
 // Agents is every live session in a pane of this server that the stage could
-// show, most urgent first. A session whose pane is gone is left out rather
-// than guessed about, and so is one that lives in the tab's own window, which
-// cannot be borrowed into itself. When two sessions claim one pane, the more
+// show, most urgent first. This server is the socket and the pid both: one
+// started again on the same socket hands pane ids out again from `%0`, and a
+// record of the old one would otherwise put somebody else's pane on the stage
+// (D-126). A session whose pane is gone is left out rather than guessed
+// about, and so is one that lives in the tab's own window, which cannot be
+// borrowed into itself. When two sessions claim one pane, the more
 // urgent has it.
 func Agents(records []session.Record, socket string, world World, list string) []Agent {
 	tab := world.Panes[list].Window
@@ -63,8 +64,8 @@ func Agents(records []session.Record, socket string, world World, list string) [
 		if !record.Kernel.Live() {
 			continue
 		}
-		server, id, found := placeOf(record)
-		if !found || server != socket || claimed[id] {
+		at, server, id, found := placeOf(record)
+		if !found || at != socket || server != world.Server || claimed[id] {
 			continue
 		}
 		pane, exists := world.Panes[id]
@@ -72,7 +73,7 @@ func Agents(records []session.Record, socket string, world World, list string) [
 			continue
 		}
 		claimed[id] = true
-		agents = append(agents, Agent{Record: record, Pane: id, Where: world.Where(id)})
+		agents = append(agents, Agent{Record: record, Pane: id})
 	}
 	return agents
 }

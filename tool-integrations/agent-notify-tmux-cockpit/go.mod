@@ -1,4 +1,4 @@
-module github.com/lassoColombo/agent-notify-tmux-manager
+module github.com/lassoColombo/agent-notify-tmux-cockpit
 
 go 1.26.0
 
@@ -7,7 +7,6 @@ require (
 	charm.land/lipgloss/v2 v2.0.6
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/lassoColombo/agent-notify v0.0.0
-	golang.org/x/term v0.34.0
 )
 
 require (

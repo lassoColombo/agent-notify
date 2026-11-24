@@ -32,6 +32,20 @@ type LastShown struct {
 	shown    bool
 }
 
+// Clone is a copy that a later Replace on either leaves the other out of: what
+// whoever keeps it puts back when the display it was handed to could not
+// draw it, so that the next Replace hands the same change over again.
+func (l LastShown) Clone() LastShown {
+	copied := LastShown{shown: l.shown}
+	if l.sessions != nil {
+		copied.sessions = make(map[string]Record, len(l.sessions))
+		for key, record := range l.sessions {
+			copied.sessions[key] = record
+		}
+	}
+	return copied
+}
+
 // Replace swaps the whole world in and answers with the view to hand over, or
 // false when this display has nothing to be told: it has seen a view, nothing
 // moved on the fields it asked to be woken for, and nothing LEFT. The three

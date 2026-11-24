@@ -134,7 +134,7 @@ Each is its own Go module in this monorepo, one per agent and one per tool.
 | [agent-notify-claude](../agent-integrations/agent-notify-claude) | agent | Claude Code's hooks |
 | [agent-notify-codex](../agent-integrations/agent-notify-codex) | agent | Codex CLI's hooks |
 | [agent-notify-macos-notifier](../tool-integrations/agent-notify-macos-notifier) | display | a macOS notification when an agent wants you |
-| [agent-notify-zellij](../tool-integrations/agent-notify-zellij) | display and container | pane and tab titles, placing and focusing a session |
+| [agent-notify-tmux](../tool-integrations/agent-notify-tmux) | display and container | marks on agents' panes, placing and focusing a session |
 | [agent-notify-picker](../tool-integrations/agent-notify-picker) | display | every session in a terminal, and a way into one |
 | [agent-notify-aerospace-container](../tool-integrations/agent-notify-aerospace-container) | container | finding and raising the window a session is in |
 
@@ -201,8 +201,8 @@ That is the only thing `install` exists for — a file core cannot know about.
 and `agent-notify install` you are done: the file need not exist.
 
 A tool-integration has nothing to install. **What is on PATH is what runs**
-(D-102): `agent-notify-zellij` in a directory on your PATH is the whole of
-asking for zellij, and the file never lists what runs. It is where you turn one
+(D-102): `agent-notify-tmux` in a directory on your PATH is the whole of
+asking for tmux, and the file never lists what runs. It is where you turn one
 off, or tune one:
 
 ```yaml
@@ -221,8 +221,8 @@ agent-notify install claude --print
 
 Two things stay yours. `containers` says which shell is outside which, and that
 is not discoverable, so with two containers it goes in `config.yaml` by hand
-(with one, that one is the order). And the picker's keybinding is KDL in
-zellij's config; its README has it.
+(with one, that one is the order). And the picker's keybinding is a line in
+your tmux config; its README has it.
 
 `agent-notify uninstall` mirrors `install`: each agent takes its hook back, and
 nothing else was written. Run `install` again after a rebuild; it is idempotent.
@@ -268,9 +268,9 @@ integrations ok    reported by pid 86777 at 2026-09-28T20:38:09Z
                                     answers render — built against 0.0.0-dev
              picker                 yours to start; core never runs it
                                     answers nothing core calls
-             zellij                 drawn when something it watches moves
+             tmux                   drawn when something it watches moves
                                     answers capture-environment, interpret-environment, focus, focused, render — built against 0.0.0-dev
-containers   ok    outermost first: aerospace-container, zellij
+containers   ok    outermost first: aerospace-container, tmux
 
 not checked here: whether each agent still runs its hooks. An
 agent-integration's `install` says so, and is safe to run again.
@@ -491,7 +491,7 @@ uninstall claude` is how that stops.
 integrations:
   picker:
     enabled: false
-  zellij:
+  tmux:
     settings:
       glyphs: { working: "*" }
 ```
@@ -509,7 +509,7 @@ answers nothing, so core never runs it; a keybinding does.
 ### `integrations.<name>.settings`
 
 Everything under here belongs to that integration alone. Core never reads it,
-never validates it, and must not know what the zellij display's glyph keys are
+never validates it, and must not know what the tmux display's glyph keys are
 called. Core does load it — it is the one reader of the file (D-103) — and
 hands it to the integration through `subscribe.Integration.Settings`, which
 refuses a key the integration never declared **by name**, because a misspelled
@@ -525,7 +525,7 @@ integrations:
 
 What each integration accepts is in that integration's own README.
 
-The one key the three that drive a tool share is the tool's path — `zellij`,
+The one key the three that drive a tool share is the tool's path — `tmux`,
 `aerospace`, `alerter` — and it is **optional**: the integration looks the tool
 up on PATH when it runs, and the key is the override for a process started
 without your PATH, an agent launched from the Dock (D-101, amending D-67). The
@@ -533,9 +533,9 @@ message when neither finds it names the key to write.
 
 ```yaml
 integrations:
-  zellij:
+  tmux:
     settings:
-      zellij: /opt/homebrew/bin/zellij    # only if `zellij` is not on the runtime PATH
+      tmux: /opt/homebrew/bin/tmux    # only if `tmux` is not on the runtime PATH
 ```
 
 The one shape core does define is the **palette**: a display that paints a glyph
@@ -543,7 +543,7 @@ or a colour per state resolves it most-specific-first, and the map is yours.
 
 ```yaml
 integrations:
-  zellij:
+  tmux:
     settings:
       glyphs:
         blocked-on-you: "!"
@@ -558,12 +558,12 @@ today survive a seventh state shipped tomorrow.
 ### `containers`
 
 ```yaml
-containers: [aerospace-container, zellij]
+containers: [aerospace-container, tmux]
 ```
 
 | Key | Type | What it does |
 | --- | --- | --- |
-| `containers` | list of integration names, **outermost first** | The order `focus-session` walks: raise the window, then focus the pane inside it. It is configured rather than discovered because nesting is not discoverable — zellij inside a window aerospace manages looks, from inside, exactly like zellij on its own. With exactly one integration answering `focus` there is nothing to nest, and an absent list is that one (D-101); with two or more you write it, and `doctor` says so until you do — "aerospace-container and zellij all answer focus, and which is outside which is not discoverable: write containers, outermost first". |
+| `containers` | list of integration names, **outermost first** | The order `focus-session` walks: raise the window, then focus the pane inside it. It is configured rather than discovered because nesting is not discoverable — tmux inside a window aerospace manages looks, from inside, exactly like tmux on its own. With exactly one integration answering `focus` there is nothing to nest, and an absent list is that one (D-101); with two or more you write it, and `doctor` says so until you do — "aerospace-container and tmux all answer focus, and which is outside which is not discoverable: write containers, outermost first". |
 
 A name in the list that is not on PATH, or that is turned off, is a complaint;
 so is a container that answers `focus` and is left out, because nothing would
@@ -581,7 +581,7 @@ well and need no line — their hooks are in their own settings files, written b
 keep-ended-sessions: 168h
 
 integrations:
-  zellij:
+  tmux:
     settings:
       glyphs:
         working: "*"
@@ -592,7 +592,7 @@ integrations:
     enabled: false
 
 # Two containers, so which is outside which has to be said.
-containers: [aerospace-container, zellij]
+containers: [aerospace-container, tmux]
 ```
 
 ### What happens when the file is wrong
@@ -863,7 +863,7 @@ whether the pane is there.
 ```
 $ agent-notify focus-session lenny-load
   aerospace-container    focused
-  zellij                 focused
+  tmux                   focused
 lenny-load is in front.
 ```
 
@@ -1095,7 +1095,7 @@ with it.
 
 ```go
 var me = subscribe.Integration{
-    Name:      "zellij",
+    Name:      "tmux",
     WakeOn:    []string{"kernel", "detail", "name", "captured_context"},
     WantEnded: true,       // to give a pane back when its session ends
     Reads:     capture,    // capture-environment: runs inside the agent
@@ -1111,7 +1111,7 @@ func main() {
 }
 ```
 
-A display fills in `Render`; a container fills in the other three; zellij fills
+A display fills in `Render`; a container fills in the other three; tmux fills
 in all four. `Focused` returns three values, because "nobody can tell" is the
 state of every fresh install. The contract in one line: one JSON object on
 stdout and exit 0. Anything else means "I could not answer", and stderr is the
@@ -1141,13 +1141,13 @@ the refusal when the whole file was refused.
 
 ```go
 type Settings struct {
-    Zellij string            `yaml:"zellij"`   // the tool's path, when PATH will not do
+    Tmux   string            `yaml:"tmux"`     // the tool's path, when PATH will not do
     Glyphs map[string]string `yaml:"glyphs"`   // kernel or kernel/detail → glyph
 }
 
 var mine Settings
 if err := me.Settings(&mine); err != nil {
-    return err   // "integrations.zellij.settings: 1 key(s) not recognised and ignored: …"
+    return err   // "integrations.tmux.settings: 1 key(s) not recognised and ignored: …"
 }
 ```
 
@@ -1235,6 +1235,6 @@ The codebase says this in places and it is worth saying here.
   would have to be reversed first.
 
 What does work, and has been the thing running on the machine it was written on
-since 2026-09-18: two agents tracked in one vocabulary, liveness, zellij pane
-and tab titles, notifications, a picker, and focus through every layer a
+since 2026-09-18: two agents tracked in one vocabulary, liveness, tmux pane
+marks, notifications, a picker, and focus through every layer a
 session is buried under.

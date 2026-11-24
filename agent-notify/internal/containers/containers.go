@@ -53,8 +53,8 @@ type Container struct {
 // A container is an integration that answers `focus`, and it says so itself.
 // “containers“ does not decide which programs are containers — it
 // keeps the one job that is genuinely the user's, which is how the shells nest:
-// zellij inside a window aerospace manages looks, from inside, exactly like
-// zellij on its own, so nesting is not discoverable and never will be (§A11.2).
+// tmux inside a window aerospace manages looks, from inside, exactly like
+// tmux on its own, so nesting is not discoverable and never will be (§A11.2).
 // With one container there is nothing to nest, so an absent order is that one
 // (D-101); with two or more, the order has to be written.
 //
@@ -194,12 +194,12 @@ type Step struct {
 // session to the front (§A11.2).
 //
 // Each step must succeed before the next is attempted, because the inner one is
-// meaningless without the outer: focusing a zellij pane in a window on a
+// meaningless without the outer: focusing a tmux pane in a window on a
 // workspace you are not looking at leaves you looking at nothing.
 //
 // A layer with no coordinates for this session is SKIPPED rather than failed,
 // and that refinement is load-bearing. Partial placement is the ordinary case —
-// you started zellij inside a terminal window that no window manager was
+// you started tmux inside a terminal window that no window manager was
 // recording — and treating it as failure would mean that anybody whose outer
 // layer is unconfigured can never focus anything. Only when NO layer placed this
 // session is there nothing to do, and that has its own name (§A11.7).

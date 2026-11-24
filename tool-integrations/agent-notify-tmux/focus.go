@@ -77,15 +77,36 @@ func latest(clients []Client, fits func(Client) bool) (Client, bool) {
 	return best, found
 }
 
+// Through is the session a terminal is sent through to see a pane, of those
+// the pane's window is linked into: the terminal's own when it is one of
+// them, else the one a terminal was attached to last. A session nobody was
+// ever attached to — the agents tab's hidden `_agents` — is the last choice,
+// and a terminal is never left in one while another holds the window.
+//
+// It is named because tmux, given a pane alone, picks the session that was
+// active last, and the agents tab's hidden session is active whenever the tab
+// is made [measured on 3.8].
+func Through(views []View, client Client) (View, bool) {
+	var best View
+	found := false
+	for _, view := range views {
+		if view.Session == client.Session {
+			return view, true
+		}
+		if !found || view.LastAttached > best.LastAttached {
+			best, found = view, true
+		}
+	}
+	return best, found
+}
+
 // Focus brings the pane in front of one terminal, then reads back that it is.
 // tmux answers once it has acted, so nothing is waited for; but an exit code
 // is not evidence that anybody's screen changed.
 //
-// `switch-client -t <pane>` is the session, the window and the pane in one
-// command, unzooming a window zoomed on another pane, and it keeps the
-// terminal on its own session when that session holds the window too — the
-// agents tab is linked into a hidden session as well as yours [measured on
-// 3.8].
+// `switch-client -t <session>:<window>.<pane>` is the session, the window and
+// the pane in one command, unzooming a window zoomed on another pane
+// [measured on 3.8].
 func Focus(tmux Tmux, coordinates json.RawMessage) (container.Outcome, error) {
 	place, ours := placeIn(coordinates)
 	if !ours {
@@ -108,8 +129,10 @@ func Focus(tmux Tmux, coordinates json.RawMessage) (container.Outcome, error) {
 	if client.Pane == place.Pane {
 		return container.Done(), nil
 	}
+	through, _ := Through(server.Views[place.Pane], client)
 
-	if err := tmux.Do(place.Socket, []string{"switch-client", "-c", client.Name, "-t", place.Pane}); err != nil {
+	target := through.Session + ":" + through.Window + "." + place.Pane
+	if err := tmux.Do(place.Socket, []string{"switch-client", "-c", client.Name, "-t", target}); err != nil {
 		return container.Failed(container.Refused, err.Error()), nil
 	}
 	server, err = tmux.Look(place.Socket)
@@ -117,12 +140,13 @@ func Focus(tmux Tmux, coordinates json.RawMessage) (container.Outcome, error) {
 		return container.Failed(container.NotRunning, err.Error()), nil
 	}
 	for _, now := range server.Clients {
-		if now.Name == client.Name && now.Pane == place.Pane {
+		if now.Name == client.Name && now.Pane == place.Pane && now.Session == through.Session {
 			return container.Done(), nil
 		}
 	}
 	return container.Failed(container.Refused, fmt.Sprintf(
-		"tmux took switch-client and terminal %s does not show pane %s", client.Name, place.Pane)), nil
+		"tmux took switch-client and terminal %s does not show pane %s through session %s",
+		client.Name, place.Pane, through.Session)), nil
 }
 
 // Focused answers whether a person is looking at the pane. Anything that

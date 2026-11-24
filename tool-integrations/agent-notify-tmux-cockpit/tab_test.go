@@ -6,9 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -25,8 +23,8 @@ import (
 
 var quiet = slog.New(slog.DiscardHandler)
 
-// idle is what every pane of a test runs, the tab's own two included: a test
-// is about where panes are, not about what is in them.
+// idle is what every pane of a test runs, the tab's list included: a test is
+// about where panes are, not about what is in them.
 var idle = []string{"sleep", "600"}
 
 // aServer starts a private server and returns it. The directory is made by
@@ -76,11 +74,12 @@ func must(t *testing.T, tmux Tmux, arguments ...string) string {
 	return out
 }
 
-// viewer attaches a real client to session home and returns its name: a pane
-// of a second server running `tmux attach` to the first is an attached client
+// viewer attaches a real client to a session and returns its name: a pane of
+// a second server running `tmux attach` to the first is an attached client
 // like any other.
-func viewer(t *testing.T, tmux Tmux) string {
+func viewer(t *testing.T, tmux Tmux, session string) string {
 	t.Helper()
+	before := len(strings.Fields(must(t, tmux, "list-clients", "-F", "#{client_name}")))
 	directory, err := os.MkdirTemp("", "an-tab-")
 	if err != nil {
 		t.Fatalf("MkdirTemp: %v", err)
@@ -91,11 +90,13 @@ func viewer(t *testing.T, tmux Tmux) string {
 		_ = os.RemoveAll(directory)
 	})
 	must(t, host, "new-session", "-d", "-x", "160", "-y", "40",
-		"env -u TMUX "+tmux.Binary+" -u -f /dev/null -S "+tmux.Socket+" attach -t home")
+		"env -u TMUX "+tmux.Binary+" -u -f /dev/null -S "+tmux.Socket+" attach -t '="+session+"'")
 	deadline := time.Now().Add(15 * time.Second)
 	for {
-		if name, err := bare(tmux, "list-clients", "-F", "#{client_name}"); err == nil && name != "" {
-			return name
+		// newest first, so the one just attached
+		names, err := bare(tmux, "list-clients", "-O", "creation", "-r", "-F", "#{client_name}")
+		if clients := strings.Fields(names); err == nil && len(clients) > before {
+			return clients[0]
 		}
 		if time.Now().After(deadline) {
 			t.Fatal("nothing ever attached to the server")
@@ -121,7 +122,7 @@ func aScene(t *testing.T) scene {
 	s.a = must(t, tmux, "display-message", "-p", "-t", "home", "#{pane_id}")
 	must(t, tmux, "split-window", "-h", "-d", "-t", s.a, "sleep", "600")
 	s.b = must(t, tmux, "new-window", "-d", "-t", "home:", "-P", "-F", "#{pane_id}", "sleep", "600")
-	s.client = viewer(t, tmux)
+	s.client = viewer(t, tmux, "home")
 	if err := Open(tmux, s.client, idle); err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -129,7 +130,7 @@ func aScene(t *testing.T) scene {
 	if !found {
 		t.Fatal("the tab was opened and has no list")
 	}
-	s.tab = Tab{Tmux: tmux, List: list.ID, Layout: Layout{StandIn: idle, ListWidth: 30}, Logger: quiet}
+	s.tab = Tab{Tmux: tmux, List: list.ID, Layout: Layout{ListWidth: 30}, Logger: quiet}
 	return s
 }
 
@@ -312,39 +313,6 @@ func TestAnAgentThatClosesOnTheStageLeavesTheTabWhole(t *testing.T) {
 	}
 }
 
-// TestAStandInThatDiesKeepsThePlace: its program is killed while it holds an
-// agent's place. The pane stays, and is started again where it stands.
-func TestAStandInThatDiesKeepsThePlace(t *testing.T) {
-	s := aScene(t)
-	world := s.show(t, Desire{Staged: s.a})
-	standIn := world.Panes[s.a].StandIn
-	home := world.Panes[standIn].Window
-	before := s.shape(t, home)
-
-	pid, err := strconv.Atoi(must(t, s.tmux, "display-message", "-p", "-t", standIn, "#{pane_pid}"))
-	if err != nil {
-		t.Fatalf("the stand-in's pid: %v", err)
-	}
-	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
-		t.Fatalf("kill: %v", err)
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for !s.see(t).Panes[standIn].Dead {
-		if time.Now().After(deadline) {
-			t.Fatal("the stand-in's pane never showed as dead")
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-
-	world = s.show(t, Desire{Staged: s.a})
-	if pane, there := world.Panes[standIn]; !there || pane.Dead || pane.Window != home {
-		t.Errorf("the stand-in is %+v (there = %v)", pane, there)
-	}
-	if after := s.shape(t, home); after != before {
-		t.Errorf("the window changed shape:\n%s\nwas\n%s", after, before)
-	}
-}
-
 // TestGivingBackTwiceIsGivingBackOnce: the list, a stand-in left alone and
 // `restore` may all send one pane home, and a swap done twice is a swap
 // undone.
@@ -363,22 +331,236 @@ func TestGivingBackTwiceIsGivingBackOnce(t *testing.T) {
 	}
 }
 
-// TestAStandInLeftAloneGivesBack is what a stand-in does when the list is
-// gone: the agent goes home, and the stand-in closes.
-func TestAStandInLeftAloneGivesBack(t *testing.T) {
+// TestTheStandInIsAnEmptyPane: no program runs in it, and what the list has
+// it say is written into it.
+func TestTheStandInIsAnEmptyPane(t *testing.T) {
+	s := aScene(t)
+	stage, found := s.show(t, Desire{}).Stage(s.tab.List)
+	if !found {
+		t.Fatal("the tab has no stage")
+	}
+	if pid := must(t, s.tmux, "display-message", "-p", "-t", stage, "#{pane_pid}"); pid != "" {
+		t.Errorf("the stand-in runs a program, pid %s", pid)
+	}
+	if err := s.tmux.paint(stage, Frame(Showing{Title: "alpha", Lines: []string{"alpha is on screen in home:0"}}, 80, 10)); err != nil {
+		t.Fatalf("paint: %v", err)
+	}
+	if got := must(t, s.tmux, "capture-pane", "-p", "-t", stage); !strings.Contains(got, "alpha is on screen in home:0") {
+		t.Errorf("the stand-in shows %q", got)
+	}
+	if got := must(t, s.tmux, "display-message", "-p", "-t", stage, "#{pane_title} #{cursor_flag}"); got != "alpha 0" {
+		t.Errorf("its title and cursor are %q", got)
+	}
+}
+
+// TestLeavingTheTabSendsTheAgentHomeWithNobodyAsked is the rule everything
+// leans on, kept by the server: the hooks the borrow left behind give the
+// pane back the moment the tab is left, by whatever way, and nothing of this
+// program runs in between.
+func TestLeavingTheTabSendsTheAgentHomeWithNobodyAsked(t *testing.T) {
+	for way, leave := range map[string]func(s scene){
+		"another window":  func(s scene) { must(t, s.tmux, "select-window", "-t", "home:0") },
+		"another session": func(s scene) { must(t, s.tmux, "switch-client", "-c", s.client, "-t", "=work") },
+		"detaching":       func(s scene) { must(t, s.tmux, "detach-client", "-t", s.client) },
+		// two windows trade places and the terminal stays where it was,
+		// which is now the other one
+		"the tab moved from under the terminal": func(s scene) {
+			must(t, s.tmux, "swap-window", "-s", "home:"+s.tabWindow(t), "-t", "home:0")
+		},
+	} {
+		t.Run(way, func(t *testing.T) {
+			s := aScene(t)
+			must(t, s.tmux, "new-session", "-d", "-s", "work", "sleep", "600")
+			home := must(t, s.tmux, "display-message", "-p", "-t", s.b, "#{window_id}")
+			if world := s.show(t, Desire{Staged: s.b}); world.Panes[s.b].Window != s.tabWindow(t) {
+				t.Fatalf("%s did not reach the stage", s.b)
+			}
+			leave(s)
+			world := s.see(t)
+			if world.Visible(s.tab.List) {
+				t.Fatal("the tab is still on screen")
+			}
+			if got := world.Panes[s.b]; got.Window != home || got.StandIn != "" || got.HomeSession != "" {
+				t.Errorf("the tab was left and the agent is not home: %+v", got)
+			}
+			if stage, found := world.Stage(s.tab.List); !found || world.Panes[stage].Role != roleStandIn {
+				t.Errorf("the stage holds %q", stage)
+			}
+		})
+	}
+}
+
+// TestATerminalComingToItsWindowFindsTheAgentThere: with the tab on screen
+// in one terminal, a second one goes to the window a borrowed agent lives in.
+// The agent is back before that window is drawn, and is not taken again while
+// the terminal stays.
+func TestATerminalComingToItsWindowFindsTheAgentThere(t *testing.T) {
+	s := aScene(t)
+	agent := must(t, s.tmux, "new-session", "-d", "-s", "work", "-P", "-F", "#{pane_id}", "sleep", "600")
+	home := must(t, s.tmux, "display-message", "-p", "-t", agent, "#{window_id}")
+	must(t, s.tmux, "new-window", "-t", "work:", "sleep", "600")
+	viewer(t, s.tmux, "work")
+	if world := s.show(t, Desire{Staged: agent}); world.Panes[agent].Window != s.tabWindow(t) {
+		t.Fatalf("%s did not reach the stage", agent)
+	}
+
+	must(t, s.tmux, "select-window", "-t", "work:"+home)
+	world := s.see(t)
+	if !world.Visible(s.tab.List) {
+		t.Fatal("the tab is no longer on screen in the first terminal")
+	}
+	if got := world.Panes[agent]; got.Window != home || got.StandIn != "" {
+		t.Fatalf("a terminal came to its window and the agent is not there: %+v", got)
+	}
+	if world := s.show(t, Desire{Staged: agent}); len(world.Borrowed()) != 0 {
+		t.Errorf("the agent was taken from under the terminal looking at it: %v", world.Borrowed())
+	}
+	// and with a world read before the terminal came, tmux refuses the swap
+	// as it runs it
+	stale := s.see(t)
+	stale.Panes[agent] = unseen(stale.Panes[agent])
+	if step, more := Next(stale, s.tab.List, agent, s.tab.Layout); !more {
+		t.Fatal("nothing was planned on the old read")
+	} else {
+		s.tab.do(step)
+	}
+	if got := s.see(t).Panes[agent]; got.Window != home {
+		t.Errorf("a swap planned on an old read went through: %+v", got)
+	}
+
+	must(t, s.tmux, "select-window", "-t", "work:1")
+	if world := s.show(t, Desire{Staged: agent}); world.Panes[agent].Window != s.tabWindow(t) {
+		t.Errorf("the terminal left and the agent did not come back to the stage: %+v", world.Panes[agent])
+	}
+}
+
+// unseen is a pane as it was read before anybody came to its window.
+func unseen(pane Pane) Pane {
+	pane.Views = slices.Clone(pane.Views)
+	for i := range pane.Views {
+		pane.Views[i].WindowActive = false
+	}
+	return pane
+}
+
+// TestTheListIsWokenWhenATerminalComesToTheTab, by the hooks, which type its
+// key into its pane; and every key is kept until it is read, however many
+// there are. The list here is a `sleep`, so its terminal shows what was typed.
+func TestTheListIsWokenWhenATerminalComesToTheTab(t *testing.T) {
+	s := aScene(t)
+	s.show(t, Desire{})
+	typed := func() int {
+		t.Helper()
+		return strings.Count(must(t, s.tmux, "capture-pane", "-p", "-J", "-t", s.tab.List), "^[[24~")
+	}
+	before := typed()
+	for range 3 {
+		must(t, s.tmux, "select-window", "-t", "home:0")
+		if got := typed(); got != before {
+			t.Fatalf("the tab was left and the list was woken %d times", got-before)
+		}
+		must(t, s.tmux, "select-window", "-t", "home:"+s.tabWindow(t))
+		if got := typed(); got != before+1 {
+			t.Fatalf("a terminal came to the tab and the list was woken %d times", got-before)
+		}
+		before++
+	}
+}
+
+// TestHooksLeftBehindDoNothing: the tab is killed with its hooks still on the
+// server, naming a window and a stand-in that are gone. An `if-shell` aimed
+// at something that is gone tests the pane in front instead, so each test in
+// them has to be false of every other pane: nothing moves, and nothing is
+// typed into whatever pane is in front.
+func TestHooksLeftBehindDoNothing(t *testing.T) {
+	s := aScene(t)
+	s.show(t, Desire{Staged: s.b})
+	must(t, s.tmux, "select-window", "-t", "home:0")
+	if world := s.see(t); len(world.Borrowed()) != 0 {
+		t.Fatalf("the agent is not home: %v", world.Borrowed())
+	}
+	must(t, s.tmux, "set-hook", "-w", "-u", "-t", s.tabWindow(t), hookOf("window-layout-changed"))
+	must(t, s.tmux, "kill-window", "-t", s.tabWindow(t))
+	if hooks := must(t, s.tmux, "show-hooks", "-g"); !strings.Contains(hooks, hookName) {
+		t.Fatal("the hooks went with the tab, and this is about the ones that stay")
+	}
+
+	before := must(t, s.tmux, "list-panes", "-a", "-F", "#{pane_id} #{window_id} #{pane_index}")
+	for _, window := range []string{"home:1", "home:0", "home:1"} {
+		must(t, s.tmux, "select-window", "-t", window)
+	}
+	if after := must(t, s.tmux, "list-panes", "-a", "-F", "#{pane_id} #{window_id} #{pane_index}"); after != before {
+		t.Errorf("something moved:\n%s\nwas\n%s", after, before)
+	}
+	// every pane is a `sleep`, whose terminal shows what is typed into it
+	for pane := range s.see(t).Panes {
+		if got := must(t, s.tmux, "capture-pane", "-p", "-t", pane); strings.Contains(got, "^[") {
+			t.Errorf("a key was typed into %s: %q", pane, got)
+		}
+	}
+}
+
+// TestAWindowKeepsItsNameWhileItsAgentIsOnTheStage: a window tmux names after
+// its active pane would be named after the stand-in, so its naming is held
+// off for as long as the agent is away, and given back by whatever sends the
+// agent home: here, the hooks.
+func TestAWindowKeepsItsNameWhileItsAgentIsOnTheStage(t *testing.T) {
+	s := aScene(t)
+	home := must(t, s.tmux, "display-message", "-p", "-t", s.b, "#{window_id}")
+	naming := func() string {
+		t.Helper()
+		return must(t, s.tmux, "show-options", "-w", "-t", home, "automatic-rename")
+	}
+	if got := naming(); got != "" {
+		t.Fatalf("the window starts with %q", got)
+	}
+	if world := s.show(t, Desire{Staged: s.b}); world.Panes[s.b].Renamed != home {
+		t.Fatalf("the borrowed pane does not say its window's name is held: %+v", world.Panes[s.b])
+	}
+	if got := naming(); got != "automatic-rename off" {
+		t.Errorf("while its agent is away the window has %q", got)
+	}
+	must(t, s.tmux, "select-window", "-t", "home:0")
+	world := s.see(t)
+	if got := naming(); got != "" || world.Panes[s.b].Renamed != "" || !world.Panes[s.b].AutoRename {
+		t.Errorf("once its agent was home the window was left with %q: %+v", got, world.Panes[s.b])
+	}
+
+	// and a window somebody named is not touched at all
+	must(t, s.tmux, "rename-window", "-t", home, "mine")
+	must(t, s.tmux, "select-window", "-t", "home:"+s.tabWindow(t))
+	world = s.show(t, Desire{Staged: s.b})
+	if got := world.Panes[s.b]; got.Window != s.tabWindow(t) || got.Renamed != "" || naming() != "automatic-rename off" {
+		t.Errorf("a window that was given its name: %+v, with %q", got, naming())
+	}
+	must(t, s.tmux, "select-window", "-t", "home:0")
+	if got := naming(); got != "automatic-rename off" {
+		t.Errorf("the window somebody named was left with %q", got)
+	}
+}
+
+// TestATabWhoseListIsKilledClosesItself: the list is the tab's only program,
+// and however it goes the server sends the agent home and closes what is
+// left, with nothing of this program running.
+func TestATabWhoseListIsKilledClosesItself(t *testing.T) {
 	s := aScene(t)
 	world := s.show(t, Desire{Staged: s.a})
 	standIn := world.Panes[s.a].StandIn
 	home := world.Panes[standIn].Window
-	if err := leave(s.tmux, standIn); err != nil {
-		t.Fatalf("leave: %v", err)
-	}
+	must(t, s.tmux, "kill-pane", "-t", s.tab.List)
+
 	world = s.see(t)
+	if got := world.Panes[s.a]; got.Window != home || got.StandIn != "" {
+		t.Errorf("the agent was not given back: %+v", got)
+	}
 	if _, there := world.Panes[standIn]; there {
 		t.Error("the stand-in is still there")
 	}
-	if got := world.Panes[s.a]; got.Window != home || got.StandIn != "" {
-		t.Errorf("the agent was not given back: %+v", got)
+	if out, err := bare(s.tmux, "has-session", "-t", "="+tabSession); err == nil {
+		t.Errorf("the tab's session outlived the tab: %s", out)
+	}
+	if hooks := must(t, s.tmux, "show-hooks", "-g"); strings.Contains(hooks, hookName) {
+		t.Errorf("the tab's hooks outlived the tab:\n%s", hooks)
 	}
 }
 
@@ -401,6 +583,9 @@ func TestClosingSendsEverythingHomeAndLeavesNothing(t *testing.T) {
 	if out, err := bare(s.tmux, "has-session", "-t", "="+tabSession); err == nil {
 		t.Errorf("the tab's session outlived the tab: %s", out)
 	}
+	if hooks := must(t, s.tmux, "show-hooks", "-g"); strings.Contains(hooks, hookName) {
+		t.Errorf("the tab's hooks outlived the tab:\n%s", hooks)
+	}
 }
 
 func TestEnterPutsTheFocusOnTheStage(t *testing.T) {
@@ -411,6 +596,18 @@ func TestEnterPutsTheFocusOnTheStage(t *testing.T) {
 	}
 	if !world.Panes[s.a].Active || !world.StageFocused(s.tab.List) {
 		t.Errorf("the agent on the stage is not the tab's active pane: %+v", world.Panes[s.a])
+	}
+}
+
+// TestEnterStaysOnTheListWhenTheStageIsEmpty: the stand-in takes no keys.
+func TestEnterStaysOnTheListWhenTheStageIsEmpty(t *testing.T) {
+	s := aScene(t)
+	world, err := s.tab.Enter(Desire{})
+	if err != nil {
+		t.Fatalf("Enter: %v", err)
+	}
+	if !world.Panes[s.tab.List].Active {
+		t.Error("the focus went to a stand-in")
 	}
 }
 

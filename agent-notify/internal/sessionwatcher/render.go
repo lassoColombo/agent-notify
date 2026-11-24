@@ -31,8 +31,8 @@ type renderer struct {
 	stop context.CancelFunc
 
 	// woken holds at most one: it coalesces, because a render paints the
-	// whole world, and it serialises, because two `zellij action rename-pane`
-	// in flight together is how a pane ends up wearing the wrong name.
+	// whole world, and it serialises, because two renders in flight together
+	// can land out of order and leave a pane wearing the wrong mark.
 	woken chan struct{}
 
 	mu sync.Mutex
@@ -46,6 +46,13 @@ type renderer struct {
 	// shown is what this display was last handed. Kept here because a process
 	// started fresh for one render remembers nothing.
 	shown session.LastShown
+	// epoch moves whenever shown is forgotten by a reload, so that a render
+	// that fails across one does not put back a picture of before it.
+	epoch int
+	// failing is how the last render failed, empty once one succeeds: a
+	// display that keeps failing the same way is logged once, not once a
+	// sweep.
+	failing string
 }
 
 func (r *renderer) wake(world []session.Record) {
@@ -69,6 +76,7 @@ func (r *renderer) redeclare(asked session.Capabilities) bool {
 		return false
 	}
 	r.asked, r.shown = asked, session.LastShown{}
+	r.epoch++
 	return true
 }
 
@@ -85,15 +93,16 @@ func (r *renderer) serve(ctx context.Context) {
 
 func (r *renderer) renderOnce() {
 	// The decision is taken under the lock and the tool is run outside it,
-	// so a reload is never held behind zellij.
+	// so a reload is never held behind the tool.
 	r.mu.Lock()
-	world, asked := r.handed, r.asked
+	world, asked, epoch := r.handed, r.asked, r.epoch
 	if !asked.WantEnded {
 		// The world is shared with every other display and not written.
 		world = slices.DeleteFunc(slices.Clone(world), func(record session.Record) bool {
 			return record.Kernel == session.Ended
 		})
 	}
+	before := r.shown.Clone()
 	view, worth := r.shown.Replace(world, asked.WakeOn)
 	r.mu.Unlock()
 	if !worth {
@@ -105,10 +114,29 @@ func (r *renderer) renderOnce() {
 		r.logger.Warn("a view could not be encoded", "display", r.name, "problem", err.Error())
 		return
 	}
-	if _, err := tool.RunWithInput(r.binary, renderTimeout, handed, session.MethodRender); err != nil {
-		// Nothing is retried: the next change renders the whole world again
-		// (R13).
-		r.logger.Warn("render", "display", r.name, "problem", err.Error())
+	_, err = tool.RunWithInput(r.binary, renderTimeout, handed, session.MethodRender)
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err == nil {
+		if r.failing != "" {
+			r.logger.Info("drawn again", "display", r.name)
+			r.failing = ""
+		}
+		return
+	}
+	// What failed to be drawn is still to be drawn: the picture goes back to
+	// what the display had before, and the next wake — a sweep at the
+	// latest — hands the same change over again, against the world as it is
+	// by then (D-130). A display that cannot draw costs one process a sweep,
+	// and nothing else (R13).
+	if r.epoch == epoch {
+		r.shown = before
+	}
+	if problem := err.Error(); problem != r.failing {
+		r.logger.Warn("render", "display", r.name, "problem", problem,
+			"then", "drawn again at the next sweep, and not logged again while it fails like this")
+		r.failing = problem
 	}
 }
 

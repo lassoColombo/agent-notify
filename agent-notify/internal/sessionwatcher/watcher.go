@@ -165,7 +165,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 
 	// Interpretation talks to the tool under its own timeout (D-38), so it
 	// runs beside the loop rather than on it: an exit or a store wake is never
-	// queued behind zellij. What it derives it writes through the store, and
+	// queued behind a slow tool. What it derives it writes through the store, and
 	// that write wakes the loop, which draws (D-91).
 	w.derivations = make(chan struct{}, 1)
 	var deriving sync.WaitGroup
@@ -481,7 +481,7 @@ func isEmptyObject(captured json.RawMessage) bool {
 }
 
 // attemptsBeforeGivingUp is small and not one: the first failure is usually
-// the session-watcher asking zellij about a pane a moment before it exists.
+// the session-watcher asking a multiplexer about a pane a moment before it exists.
 const attemptsBeforeGivingUp = 3
 
 // oneCapture names what a container was asked to interpret: this session's

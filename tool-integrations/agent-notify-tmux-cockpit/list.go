@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"os"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -11,40 +10,50 @@ import (
 	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
-// The list is the tab's left pane and the only part of it that decides
-// anything: which agent the cursor is on, and so which pane the stage should
-// show. It never acts on what it remembers. Every time something may have
-// moved it looks at the server, and what it does comes from what it saw.
+// The list is the tab's left pane, the tab's only program and the only part
+// of it that decides anything: which agent the cursor is on, and so which
+// pane the stage should show. It never acts on what it remembers. Every time
+// something may have moved it looks at the server, and what it does comes
+// from what it saw.
 
 const (
 	// lookEvery is how often the list looks at the server with nothing to
-	// prompt it. Everything that can be noticed sooner is: the store, a key,
-	// the focus arriving at either pane. This is what catches the rest — the
-	// tab left for another window, a pane closed — within a second.
-	lookEvery = time.Second
+	// prompt it. It is told of what matters as it happens: the store by the
+	// store, a terminal coming to the tab or to a borrowed pane's window by
+	// the tab's hooks, which type a key into this pane. This is for whatever no hook announces — a pane
+	// closed, the hooks themselves wiped by a configuration that sets one
+	// whole — and nothing waits on it to send an agent home, which the
+	// server does (R22).
+	lookEvery = 5 * time.Second
+	// drawEvery is how often the ages in the rows move.
+	drawEvery = time.Second
 	// settle is how long the cursor rests on an agent before its pane is
 	// brought to the stage, so that going down a list of six does not swap,
-	// and resize, six agents.
+	// and resize, six agents; and how long a terminal rests on the tab
+	// before anything is, so that passing through it on the way to another
+	// window does not either.
 	settle = 120 * time.Millisecond
 )
 
-// The list's messages: a new view of the store, the clock, something a
-// stand-in reported, the cursor having rested, and the server as it was found.
+// The list's messages: a new view of the store, the two clocks, a terminal
+// having rested on the tab, the cursor having rested, the server as it was
+// found, and a stand-in that could not be drawn.
 type (
 	storeMsg   session.View
 	tickMsg    time.Time
-	heardMsg   string
+	dueMsg     time.Time
+	arrivedMsg int
 	settledMsg int
 	lookedMsg  struct {
 		world  World
 		err    error
 		desire Desire
 	}
+	undrawnMsg struct{}
 )
 
 type list struct {
 	tab    Tab
-	link   *Link
 	glyphs session.Palette
 
 	records  []session.Record
@@ -60,11 +69,13 @@ type list struct {
 	// staged is the pane asked onto the stage: the selected one, once the
 	// cursor has rested on it.
 	staged string
-	// released is a pane somebody took back at its own place.
-	released string
 	// moves counts the cursor's moves, so that only the last one's rest
-	// stages anything.
-	moves int
+	// stages anything; arrivals, the same for a terminal coming to the tab.
+	moves, arrivals int
+	// drawn is the stand-in as it was last drawn on the stage, so that it is
+	// drawn again only to say something else. Forgotten whenever it is seen
+	// away from the stage, where its size is another's.
+	drawn string
 
 	// One look at the server at a time. What is asked for while one runs is
 	// done after it: `next` if it was more than a look, another look if not.
@@ -83,28 +94,11 @@ func runList() error {
 	if err != nil {
 		return err
 	}
-	executable, err := os.Executable()
-	if err != nil {
-		return err
-	}
 	logger := me.Logger()
 	tmux := Tmux{Binary: settings.Binary, Socket: socket}
 
-	var program *tea.Program
-	link, err := Listen(func(report string) { program.Send(heardMsg(report)) })
-	if err != nil {
-		return err
-	}
-	// After Close below, and that order matters: a stand-in takes the link
-	// closing to mean the list is gone, and gives back what it stands in for.
-	defer link.Close()
-
-	program = tea.NewProgram(&list{
-		tab: Tab{
-			Tmux: tmux, List: self, Logger: logger,
-			Layout: Layout{StandIn: []string{executable, "stand-in", link.Path()}, ListWidth: settings.ListWidth},
-		},
-		link:   link,
+	program := tea.NewProgram(&list{
+		tab:    Tab{Tmux: tmux, List: self, Logger: logger, Layout: Layout{ListWidth: settings.ListWidth}},
 		glyphs: settings.Glyphs,
 	})
 
@@ -129,17 +123,22 @@ func runList() error {
 	}()
 
 	_, err = program.Run()
-	// However the list ended, nothing stays borrowed.
+	// However the list ended, nothing stays borrowed. And if it ended in a
+	// way that never gets here, the tab's own hook does the same.
 	if closing := Close(tmux, logger); err == nil {
 		err = closing
 	}
 	return err
 }
 
-func (l *list) Init() tea.Cmd { return tea.Batch(l.look(), tick()) }
+func (l *list) Init() tea.Cmd { return tea.Batch(l.look(), tick(), due()) }
 
 func tick() tea.Cmd {
-	return tea.Tick(lookEvery, func(at time.Time) tea.Msg { return tickMsg(at) })
+	return tea.Tick(drawEvery, func(at time.Time) tea.Msg { return tickMsg(at) })
+}
+
+func due() tea.Cmd {
+	return tea.Tick(lookEvery, func(at time.Time) tea.Msg { return dueMsg(at) })
 }
 
 func (l *list) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -148,21 +147,19 @@ func (l *list) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		l.records = msg.Sessions
 		return l, l.look()
 	case tickMsg:
-		return l, tea.Batch(l.look(), tick())
+		return l, tick()
+	case dueMsg:
+		return l, tea.Batch(l.look(), due())
 	case tea.FocusMsg, tea.BlurMsg:
-		return l, l.look()
-	case heardMsg:
-		if string(msg) == pressedEnter {
-			// Enter in a stand-in asks for the agent where the stand-in is:
-			// back at its own place when it is holding one, and onto the
-			// stage again when that is where it stands.
-			if stage, found := l.world.Stage(l.tab.List); found && l.world.Panes[stage].Role == roleStandIn {
-				l.released = ""
-			} else {
-				l.released = l.staged
-			}
+		// the focus moved between the tab's halves, or came to the terminal
+		return l, l.woken()
+	case arrivedMsg:
+		if int(msg) != l.arrivals {
+			return l, nil
 		}
 		return l, l.look()
+	case undrawnMsg:
+		l.drawn = ""
 	case settledMsg:
 		if int(msg) != l.moves {
 			return l, nil
@@ -179,8 +176,23 @@ func (l *list) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return l, nil
 }
 
+// woken is something having moved in the server: a terminal came to the tab,
+// or to the window of the pane on the stage, or the tab's panes changed. The
+// list looks once it has rested.
+func (l *list) woken() tea.Cmd {
+	l.arrivals++
+	arrivals := l.arrivals
+	return tea.Tick(settle, func(time.Time) tea.Msg { return arrivedMsg(arrivals) })
+}
+
+// wake is wakeKey as the list reads it.
+const wake = "f12"
+
 func (l *list) key(key string) tea.Cmd {
 	switch key {
+	case wake:
+		// typed by the tab's hooks, and by anybody who wants a look now
+		return l.woken()
 	case "j", "down", "ctrl+j", "ctrl+n", "alt+j", "alt+down":
 		return l.moveTo(l.index() + 1)
 	case "k", "up", "ctrl+k", "ctrl+p", "alt+k", "alt+up":
@@ -191,8 +203,8 @@ func (l *list) key(key string) tea.Cmd {
 		return l.moveTo(len(l.agents) - 1)
 	case "enter":
 		// Onto the stage, as Alt Tab does; and what is selected is asked for
-		// now, rested or not, released or not.
-		l.staged, l.released = l.selected, ""
+		// now, rested or not.
+		l.staged = l.selected
 		return l.ask(l.tab.Enter)
 	case "o":
 		// To where the agent lives, leaving the tab behind.
@@ -233,14 +245,8 @@ func (l *list) pick(pane string) tea.Cmd {
 	return tea.Tick(settle, func(time.Time) tea.Msg { return settledMsg(moves) })
 }
 
-// stage asks a pane onto the stage. Asking for another one is what ends a
-// release: the pane somebody took back is asked for again by coming back to
-// it.
-func (l *list) stage(pane string) {
-	if pane != l.staged {
-		l.staged, l.released = pane, ""
-	}
-}
+// stage asks a pane onto the stage.
+func (l *list) stage(pane string) { l.staged = pane }
 
 // look is one look at the server, and whatever it takes to make the tab show
 // what is wanted.
@@ -260,7 +266,7 @@ func (l *list) ask(act func(Desire) (World, error)) tea.Cmd {
 		act = l.tab.Reconcile
 	}
 	l.busy = true
-	desire := Desire{Staged: l.staged, Released: l.released}
+	desire := Desire{Staged: l.staged}
 	return func() tea.Msg {
 		world, err := act(desire)
 		return lookedMsg{world: world, err: err, desire: desire}
@@ -276,12 +282,11 @@ func (l *list) looked(msg lookedMsg) tea.Cmd {
 		l.tab.Logger.Warn("cannot read the tmux server", "problem", msg.err.Error())
 	} else {
 		l.world = msg.world
-		moved = l.rebuild()
-		l.show()
+		moved = tea.Batch(l.rebuild(), l.show())
 	}
 	next, again := l.next, l.again
 	l.next, l.again = nil, false
-	if next != nil || again || (Desire{Staged: l.staged, Released: l.released}) != msg.desire {
+	if next != nil || again || (Desire{Staged: l.staged}) != msg.desire {
 		return tea.Batch(moved, l.ask(next))
 	}
 	return moved
@@ -304,7 +309,7 @@ func (l *list) rebuild() tea.Cmd {
 		return nil
 	}
 	if len(l.agents) == 0 {
-		l.selected, l.staged, l.released = "", "", ""
+		l.selected, l.staged = "", ""
 		return nil
 	}
 	first := l.selected == ""
@@ -316,42 +321,45 @@ func (l *list) rebuild() tea.Cmd {
 	return rested
 }
 
-// show tells the stand-in what to say, which depends on where it is: on the
-// stage it speaks for the tab, and in an agent's window for the agent that is
-// away.
-func (l *list) show() {
+// show draws the stand-in, when it is on the stage and has something else to
+// say: that there is no agent, or why the one selected is not here. Holding a
+// place it is drawn for nobody.
+func (l *list) show() tea.Cmd {
 	tab := l.world.Panes[l.tab.List].Window
 	standIns := l.world.StandIns(tab)
 	if len(standIns) == 0 {
-		return
+		return nil
 	}
 	standIn := standIns[0]
 	if standIn.Window != tab {
-		name := "an agent"
-		for _, pane := range l.world.Borrowed() {
-			if pane.StandIn == standIn.ID {
-				name = l.nameOf(pane.ID, name)
-			}
-		}
-		l.link.Show(Showing{
-			Title: name + " → " + tabName,
-			Lines: []string{name + " is in the agents tab", "Enter brings it back here"},
-		})
-		return
+		l.drawn = ""
+		return nil
 	}
+	showing := Showing{Title: nobody}
 	switch {
 	case len(l.agents) == 0:
-		l.link.Show(Showing{Title: "no agent", Lines: []string{"no agents in this tmux server"}})
-	case l.staged != "" && l.staged == l.released:
+		showing.Lines = []string{"no agents in this tmux server"}
+	case l.world.OnScreenAtHome(l.staged, tab):
+		// Nothing is taken from under a terminal that is looking at it.
 		name := l.nameOf(l.staged, "this agent")
-		l.link.Show(Showing{
-			Title: name,
-			Lines: []string{name + " is at its own place", "Enter brings it here"},
-		})
-	default:
-		// An agent is on its way here, and anything said would only flash.
-		l.link.Show(Showing{Title: "no agent"})
+		showing = Showing{Title: name, Lines: []string{
+			name + " is on screen in " + l.world.Where(l.staged), "o goes there",
+		}}
 	}
+	// Otherwise an agent is on its way here, and anything said would only
+	// flash.
+	frame := Frame(showing, standIn.Width, standIn.Height)
+	if drawn := standIn.ID + frame; drawn != l.drawn {
+		l.drawn = drawn
+		return func() tea.Msg {
+			if err := l.tab.Tmux.paint(standIn.ID, frame); err != nil {
+				l.tab.Logger.Warn("tmux refused", "why", "the stand-in "+standIn.ID+" is drawn", "problem", err.Error())
+				return undrawnMsg{}
+			}
+			return nil
+		}
+	}
+	return nil
 }
 
 func (l *list) nameOf(pane, otherwise string) string {

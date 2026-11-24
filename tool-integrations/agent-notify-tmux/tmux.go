@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -54,8 +55,19 @@ type Server struct {
 	PID int
 	// Panes is every pane, and what our options say on it.
 	Panes map[string]Mark
+	// Views is, for every pane, its window as each session it is linked into
+	// holds it.
+	Views map[string][]View
 	// Clients is every terminal attached.
 	Clients []Client
+}
+
+// View is a pane's window as one session holds it.
+type View struct {
+	Session, Window string
+	// LastAttached is when a terminal was last attached to the session, in
+	// seconds; zero for one nobody ever was, as a hidden session is.
+	LastAttached int64
 }
 
 // Client is one terminal attached to the server.
@@ -80,13 +92,21 @@ var (
 	paneFormat = strings.Join([]string{
 		"pane", "#{pid}", "#{pane_id}",
 		"#{" + stateOption + "}", "#{" + glyphOption + "}", "#{" + nameOption + "}",
+		"#{session_id}", "#{window_id}", "#{session_last_attached}",
 	}, separator)
 	clientFormat = strings.Join([]string{
 		"client", "#{client_name}", "#{session_id}", "#{pane_id}", "#{client_activity}", "#{client_flags}",
 	}, separator)
 )
 
-const fields = 6
+const paneFields, clientFields = 9, 6
+
+// ErrNotThere is a server that is not running: tmux said so as it exited.
+// There is nothing on it to draw or to bring, and a render that finds it so
+// has not failed. Any other way a look goes wrong — tmux too slow to answer,
+// or answering something that is not what it was asked — is a failure, and
+// the render that met it is drawn again (D-130).
+var ErrNotThere = errors.New("not there")
 
 // Look asks a server, in one invocation, what its panes say and who is
 // looking at it. The parse is the test of whether the server answered: one
@@ -95,36 +115,47 @@ const fields = 6
 func (t Tmux) Look(socket string) (Server, error) {
 	out, err := t.run(socket, "list-panes", "-a", "-F", paneFormat, ";", "list-clients", "-F", clientFormat)
 	if err != nil {
-		return Server{}, err
+		return Server{}, notThere(socket, err)
 	}
 	server, err := ParseServer(out)
 	if err != nil {
-		return Server{}, fmt.Errorf("tmux server %q is not there (it answered %q)", socket, tool.Summarise(out))
+		return Server{}, fmt.Errorf("tmux server %q answered what it was not asked for (%q)", socket, tool.Summarise(out))
 	}
 	return server, nil
+}
+
+// notThere names the error of a tmux that said no as ErrNotThere.
+func notThere(socket string, err error) error {
+	var said *tool.SaidNo
+	if errors.As(err, &said) {
+		return fmt.Errorf("tmux server %q is %w (%v)", socket, ErrNotThere, err)
+	}
+	return err
 }
 
 // ParseServer is the pure half of Look. A pane is listed once for every
 // session its window is linked into, with the same options each time.
 func ParseServer(output []byte) (Server, error) {
-	server := Server{Panes: map[string]Mark{}}
+	server := Server{Panes: map[string]Mark{}, Views: map[string][]View{}}
 	for _, line := range strings.Split(strings.TrimRight(string(output), "\n"), "\n") {
 		if line == "" {
 			continue
 		}
-		field := strings.SplitN(line, separator, fields)
-		if len(field) != fields {
-			return Server{}, fmt.Errorf("not a line of either format: %q", line)
-		}
-		switch field[0] {
-		case "pane":
+		// A name of ours never holds the separator: core strips control
+		// characters out of every line it stores.
+		field := strings.Split(line, separator)
+		switch {
+		case field[0] == "pane" && len(field) == paneFields:
 			pid, err := strconv.Atoi(field[1])
 			if err != nil || pid <= 0 || !IsPaneID(field[2]) {
 				return Server{}, fmt.Errorf("not a pane: %q", line)
 			}
 			server.PID = pid
 			server.Panes[field[2]] = Mark{State: field[3], Glyph: field[4], Name: field[5]}
-		case "client":
+			attached, _ := strconv.ParseInt(field[8], 10, 64)
+			server.Views[field[2]] = append(server.Views[field[2]],
+				View{Session: field[6], Window: field[7], LastAttached: attached})
+		case field[0] == "client" && len(field) == clientFields:
 			if field[3] != "" && !IsPaneID(field[3]) {
 				return Server{}, fmt.Errorf("not a client: %q", line)
 			}
@@ -149,7 +180,7 @@ func ParseServer(output []byte) (Server, error) {
 // stops at the first that fails and runs none after it [measured on 3.8].
 func (t Tmux) Do(socket string, args []string) error {
 	_, err := t.run(socket, args...)
-	return err
+	return notThere(socket, err)
 }
 
 // run is `tmux -u -S <socket> …`. Both flags belong to tmux itself, not to

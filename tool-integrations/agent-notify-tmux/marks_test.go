@@ -84,17 +84,17 @@ func TestPlan(t *testing.T) {
 		records: []session.Record{placed("alpha", session.Working, "%3")},
 		panes:   map[string]Mark{"%3": {}, "%4": {}},
 		want: []string{
-			"set-option -p -t %3 @agent-notify-state working",
-			"set-option -p -t %3 @agent-notify-glyph *",
-			"set-option -p -t %3 @agent-notify-name alpha",
+			"set-option -q -p -t %3 @agent-notify-state working",
+			"set-option -q -p -t %3 @agent-notify-glyph *",
+			"set-option -q -p -t %3 @agent-notify-name alpha",
 		},
 	}, {
 		why:     "an idle agent has no glyph, and its name alone is shown",
 		records: []session.Record{placed("alpha", session.Idle, "%3")},
 		panes:   map[string]Mark{"%3": {}},
 		want: []string{
-			"set-option -p -t %3 @agent-notify-state idle",
-			"set-option -p -t %3 @agent-notify-name alpha",
+			"set-option -q -p -t %3 @agent-notify-state idle",
+			"set-option -q -p -t %3 @agent-notify-name alpha",
 		},
 	}, {
 		why:     "what already says the right thing is not written again",
@@ -105,25 +105,25 @@ func TestPlan(t *testing.T) {
 		records: []session.Record{placed("alpha", session.BlockedOnYou, "%3")},
 		panes:   map[string]Mark{"%3": working},
 		want: []string{
-			"set-option -p -t %3 @agent-notify-state blocked-on-you",
-			"set-option -p -t %3 @agent-notify-glyph !",
+			"set-option -q -p -t %3 @agent-notify-state blocked-on-you",
+			"set-option -q -p -t %3 @agent-notify-glyph !",
 		},
 	}, {
 		why:     "an agent that ended gives its pane back",
 		records: []session.Record{placed("alpha", session.Ended, "%3")},
 		panes:   map[string]Mark{"%3": working},
 		want: []string{
-			"set-option -p -u -t %3 @agent-notify-state",
-			"set-option -p -u -t %3 @agent-notify-glyph",
-			"set-option -p -u -t %3 @agent-notify-name",
+			"set-option -q -p -u -t %3 @agent-notify-state",
+			"set-option -q -p -u -t %3 @agent-notify-glyph",
+			"set-option -q -p -u -t %3 @agent-notify-name",
 		},
 	}, {
 		why:   "a pane nobody claims is given back, whether or not a record remembers it",
 		panes: map[string]Mark{"%3": {}, "%5": working},
 		want: []string{
-			"set-option -p -u -t %5 @agent-notify-state",
-			"set-option -p -u -t %5 @agent-notify-glyph",
-			"set-option -p -u -t %5 @agent-notify-name",
+			"set-option -q -p -u -t %5 @agent-notify-state",
+			"set-option -q -p -u -t %5 @agent-notify-glyph",
+			"set-option -q -p -u -t %5 @agent-notify-name",
 		},
 	}, {
 		why:     "a record of the server that was on this socket before is not this server's",
@@ -145,25 +145,25 @@ func TestPlan(t *testing.T) {
 		},
 		panes: map[string]Mark{"%3": {}},
 		want: []string{
-			"set-option -p -t %3 @agent-notify-state blocked-on-you",
-			"set-option -p -t %3 @agent-notify-glyph !",
-			"set-option -p -t %3 @agent-notify-name new",
+			"set-option -q -p -t %3 @agent-notify-state blocked-on-you",
+			"set-option -q -p -t %3 @agent-notify-glyph !",
+			"set-option -q -p -t %3 @agent-notify-name new",
 		},
 	}, {
 		why:     "panes are taken in the order of their numbers",
 		records: []session.Record{placed("ten", session.Idle, "%10"), placed("nine", session.Idle, "%9")},
 		panes:   map[string]Mark{"%10": {}, "%9": {}},
 		want: []string{
-			"set-option -p -t %9 @agent-notify-state idle",
-			"set-option -p -t %9 @agent-notify-name nine",
-			"set-option -p -t %10 @agent-notify-state idle",
-			"set-option -p -t %10 @agent-notify-name ten",
+			"set-option -q -p -t %9 @agent-notify-state idle",
+			"set-option -q -p -t %9 @agent-notify-name nine",
+			"set-option -q -p -t %10 @agent-notify-state idle",
+			"set-option -q -p -t %10 @agent-notify-name ten",
 		},
 	}, {
 		why:     "a name ending in ; is handed over so that tmux does not end the command there",
 		records: []session.Record{placed("fix it;", session.Idle, "%3")},
 		panes:   map[string]Mark{"%3": {State: "idle"}},
-		want:    []string{`set-option -p -t %3 @agent-notify-name fix it\;`},
+		want:    []string{`set-option -q -p -t %3 @agent-notify-name fix it\;`},
 	}} {
 		server := Server{PID: pid, Panes: given.panes}
 		same(t, given.why, ran(Plan(home, given.records, server, testGlyphs)), given.want)

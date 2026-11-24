@@ -52,3 +52,33 @@ func TestAViewIsHandedOverForTheFirstWorldAChangeOrADeparture(t *testing.T) {
 			worth, len(view.Sessions), len(view.Changed))
 	}
 }
+
+// TestACloneIsWhatWasShownBefore: put back after a display could not draw a
+// view, it hands the same change over again; and replacing the world in one
+// leaves the other as it was.
+func TestACloneIsWhatWasShownBefore(t *testing.T) {
+	one := session.Record{Key: session.Key{Host: "mac", Agent: "claude", SessionID: "one"},
+		Kernel: session.Working, Rank: session.Working.Rank()}
+	finished := one
+	finished.Kernel, finished.Rank = session.FinishedATurn, session.FinishedATurn.Rank()
+	wakeOn := []string{"kernel"}
+
+	var shown session.LastShown
+	shown.Replace([]session.Record{one}, wakeOn)
+	before := shown.Clone()
+	if _, worth := shown.Replace([]session.Record{finished}, wakeOn); !worth {
+		t.Fatal("a kernel moved and nothing was handed over")
+	}
+
+	shown = before
+	view, worth := shown.Replace([]session.Record{finished}, wakeOn)
+	if !worth || len(view.Changed) != 1 || view.Changed[0].PreviousKernel != session.Working {
+		t.Errorf("put back, the same change: worth=%v, %+v", worth, view.Changed)
+	}
+
+	var never session.LastShown
+	cloned := never.Clone()
+	if _, worth := cloned.Replace([]session.Record{one}, wakeOn); !worth {
+		t.Error("a clone of nothing shown does not draw a first view")
+	}
+}

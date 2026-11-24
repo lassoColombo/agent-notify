@@ -1,20 +1,21 @@
-// Command agent-notify-tmux-manager is a tab of tmux given over to agents:
+// Command agent-notify-tmux-cockpit is a tab of tmux given over to agents:
 // every agent in this tmux server down the left, grouped by what it wants from
 // you, and on the right the selected one's own pane, borrowed from the window
 // it lives in for as long as the tab is on screen (D-125).
 //
-//	agent-notify-tmux-manager open [client]   show the tab, making it if there is none; on the tab, go back
-//	agent-notify-tmux-manager close           send every agent home and close the tab
-//	agent-notify-tmux-manager restore         send every agent home
+//	agent-notify-tmux-cockpit open [client]   show the tab, making it if there is none; on the tab, go back
+//	agent-notify-tmux-cockpit close           send every agent home and close the tab
+//	agent-notify-tmux-cockpit restore         send every agent home
 //
-// and two that the tab runs in its own panes, never a person:
+// and one that the tab runs in its own pane, never a person:
 //
-//	agent-notify-tmux-manager list            the list, which decides what the stage shows
-//	agent-notify-tmux-manager stand-in <sock> the pane an agent is swapped with
+//	agent-notify-tmux-cockpit list            the list, which decides what the stage shows
 //
 // What it knows is written in tmux, as options on the panes: the list never
 // acts on a memory of what it did, and anything left half done is finished by
-// whoever looks next. It is run from a key and never by core.
+// whoever looks next. The way home of a borrowed pane is written there too,
+// as hooks, and the server sees to it by itself (D-129). It is run from a key
+// and never by core.
 package main
 
 import (
@@ -29,11 +30,10 @@ import (
 func main() {
 	os.Exit(subscribe.Main(me, subscribe.Commands{
 		Named: map[string]func([]string) int{
-			"open":     func(arguments []string) int { return fail(open(arguments)) },
-			"close":    func([]string) int { return fail(outside(Close)) },
-			"restore":  func([]string) int { return fail(outside(sendHome)) },
-			"list":     func([]string) int { return fail(runList()) },
-			"stand-in": func(arguments []string) int { return fail(runStandIn(arguments)) },
+			"open":    func(arguments []string) int { return fail(open(arguments)) },
+			"close":   func([]string) int { return fail(outside(Close)) },
+			"restore": func([]string) int { return fail(outside(sendHome)) },
+			"list":    func([]string) int { return fail(runList()) },
 		},
 		Default: func(arguments []string) int {
 			fmt.Fprintf(os.Stderr, "%s takes one of: open, close, restore\n", Name)

@@ -42,7 +42,7 @@ var (
 // aRealLookingTree is the ladder a hook actually climbs, measured on this
 // machine on 2026-09-17:
 //
-//	88251 the hook -> 88240 go -> 88236 zsh -> 38514 claude -> 99297 nu -> 3655 zellij
+//	88251 the hook -> 88240 go -> 88236 zsh -> 38514 claude -> 99297 nu -> 3655 tmux
 func aRealLookingTree(self int) invented {
 	step := func(pid, parent int, command string) process.Facts {
 		return process.Facts{PID: pid, Parent: parent, Command: command, StartedAt: started}
@@ -55,7 +55,7 @@ func aRealLookingTree(self int) invented {
 			88236: step(88236, 38514, "zsh"),
 			38514: step(38514, 99297, "claude"),
 			99297: step(99297, 3655, "nu"),
-			3655:  step(3655, 1, "zellij"),
+			3655:  step(3655, 1, "tmux"),
 		},
 	}
 }
@@ -73,7 +73,7 @@ func TestTheAgentIsFoundHoweverManyShellsAreInTheWay(t *testing.T) {
 	if len(chain) != 6 {
 		t.Errorf("recorded %d ancestors, want the whole ladder: %+v", len(chain), chain)
 	}
-	if chain[0].Command != "agent-notify" || chain[len(chain)-1].Command != "zellij" {
+	if chain[0].Command != "agent-notify" || chain[len(chain)-1].Command != "tmux" {
 		t.Errorf("the chain is not in order: %+v", chain)
 	}
 }

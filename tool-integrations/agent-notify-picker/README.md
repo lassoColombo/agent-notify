@@ -3,7 +3,7 @@
   <p><strong>Every agent on your machine, most urgent first, and enter to be taken to one</strong></p>
   <p>
     A tool-integration for <a href="../../agent-notify">agent-notify</a><br>
-    Type to filter, read what the agent said underneath, press enter<br>
+    Type to filter, read what the agent said beside it, press enter<br>
     fzf owns the screen; the rows, the preview and the palette are ours
   </p>
 </div>
@@ -11,66 +11,25 @@
 ---
 
 ```
-  ⌕  filter sessions…                                                          3/5
- ──────────────────────────────────────────────────────────────────────────────────
- ▌  ⚠ blocked/permission-prompt  12m  agent-notify  ~/projects/agent-notify  ⎇ browse
-    ✕ broke/tool-error           52m  lenny-62      ~/projects/work/lenny    ⎇ main
-    ↻ working/compacting          2m  wholeness     ~/projects/agent-notify  ⎇ view-changed
- ── agent-notify · blocked-on-you/permission-prompt · 12m ──────────────────────────
- May I run rm -rf ./build ?
-
- ▌ What it would remove
-
-  ./build — 2.1G of cached object files
-
- ──────────────────────────────────────────────────────────────────────────────────
- where    ~/projects/agent-notify  ⎇ browse
- running  claude-opus-5  ·  127k tokens  ·  pid 44182
- ──────────────────────────────────────────────────────────────────────────────────
- earlier
-   12m  working → blocked-on-you
-   31m  tests are green
+  ⌕  filter agents…            │ May I run rm -rf ./build ?
+ ───────────────────────────── │
+ ▌ ⚠ agent-notify          12m │ ▌ What it would remove
+   ✕ lenny-62              52m │
+   ↻ wholeness              2m │  ./build — 2.1G of cached object files
 ```
-
----
-
-- [What it is](#what-it-is)
-  - [A display that is not a daemon](#a-display-that-is-not-a-daemon)
-  - [fzf owns the screen, as a library](#fzf-owns-the-screen-as-a-library)
-- [Installation](#installation)
-  - [Prerequisites](#prerequisites)
-  - [1. Clone the monorepo and build](#1-clone-the-monorepo-and-build)
-  - [2. Nothing: it is on PATH](#2-nothing-it-is-on-path)
-  - [3. Bind it to a key](#3-bind-it-to-a-key)
-  - [4. Check it worked](#4-check-it-worked)
-- [Configuration](#configuration)
-  - [Where the file is](#where-the-file-is)
-  - [`integrations.picker`: what core reads](#integrationspicker-what-core-reads)
-  - [Keys: a key is yours, an action is not](#keys-a-key-is-yours-an-action-is-not)
-  - [Colours: the hues are yours, where they go is not](#colours-the-hues-are-yours-where-they-go-is-not)
-  - [Environment variables](#environment-variables)
-  - [What a bad configuration does](#what-a-bad-configuration-does)
-  - [What is deliberately not configurable](#what-is-deliberately-not-configurable)
-- [The command line](#the-command-line)
-- [The list](#the-list)
-- [The preview](#the-preview)
-- [One hue, one meaning](#one-hue-one-meaning)
-- [What it reads, and what it runs](#what-it-reads-and-what-it-runs)
-- [Testing](#testing)
-- [What is unfinished](#what-is-unfinished)
 
 ---
 
 ## What it is
 
 Every session [agent-notify](../../agent-notify) knows about, most urgent first,
-with what the highlighted one is working on and last said underneath it. Type to
+with what the highlighted one last said beside it. Type to
 filter, press enter, and you are in that agent's pane.
 
 ### A display that is not a daemon
 
 It reads through the SDK, is found on PATH like every other integration, and
-renders the answer core computed — exactly like the zellij pane titles. What
+renders the answer core computed — exactly like the tmux pane marks. What
 differs is that it needs a terminal, so it is run when you press a key and it
 goes away when you have chosen.
 
@@ -85,7 +44,7 @@ path (D-101).
 
 ### fzf owns the screen, as a library
 
-This program is about a thousand lines and none of them draw anything. It builds
+This program is a few hundred lines of code and none of them draw anything. It builds
 the rows, hands them to [fzf](https://github.com/junegunn/fzf) through a channel
 — the same fzf, imported as a Go package, not shelled out to — and gets back the
 one that was chosen.
@@ -102,25 +61,22 @@ the screen away and still leaves everything that is actually agent-notify's:
   to press enter on, on every keystroke.
 - **`--layout=reverse`**, so the most urgent session is the first line you read
   rather than the last.
-- **A horizontal split, sized by how many sessions there are.** `down,<lines>`
-  rather than `down,72%`: the number of rows is known before fzf is started, so
-  three sessions do not sit in a third of a tall pane with air under them, and
-  twelve do not scroll while the preview below has rows to spare. The list is
-  capped at two fifths of the pane, because the message is what the window is
-  for, and a pane too short to divide falls back to `down,68%`.
+- **A vertical split, the cockpit's.** The list on the left at 36 columns, the
+  cockpit's own default, and the message on the right in everything else
+  (`right,<columns>`), so that what you learn reading one you read the same way
+  in the other (D-133). The list is the fixed part: a wider screen is a wider
+  message rather than more air between a name and its wait. A terminal too
+  narrow for both halves gives the list half.
 - **`--highlight-line`, and a solid pointer.** Every row arrives pre-coloured
   under `--ansi`, so fzf's `fg+` and `hl+` have nothing left to repaint: the
   selected row is lifted by its background across the whole width and marked by
   `▌` rather than by a glyph a font may not have.
-- **No header and no footer.** A header saying how many sessions there are
-  spends the brightest row on the screen on a number fzf already prints beside
-  the prompt; a footer is drawn below the list and above a `down` preview, which
-  splits the window at the exact point the eye moves from one to the other. The
+- **No header, no footer and no count.** A header saying how many sessions
+  there are spends the brightest row on the screen on a number the list already
+  is, and so does fzf's own count beside the prompt (`--info=hidden`). The
   empty query's ghost text carries the only thing left — whether this run
   included ended sessions. The one thing that does get a header is a complaint
   about the config file, which is worth a row precisely because it is temporary.
-- **`bg-transform-preview-label` on `focus`**, which is what lets the pane's
-  identity live in its border rather than in its first two lines.
 
 ## Installation
 
@@ -138,15 +94,14 @@ is installed and finding sessions. This section does all three.
   or [codex](../../agent-integrations/agent-notify-codex) — installed and
   reporting, so that `agent-notify list` has rows.
 - **A container integration**, if you want enter to actually take you
-  somewhere: [zellij](../agent-notify-zellij) and
+  somewhere: [tmux](../agent-notify-tmux) and
   [aerospace](../agent-notify-aerospace-container). Without one, enter runs
   `focus-session` and `focus-session` says it cannot.
 - **Go 1.26 or newer** to build. `.tool-versions` pins 1.26.2.
-- **A Nerd Font in your terminal.** The state glyphs and the branch mark are
-  Font Awesome codepoints out of the private-use area — the same marks the bar
-  and the zellij tab titles wear. Without one you get boxes where the badges
-  should be; everything else still reads, because every glyph sits beside its
-  word.
+- **A Nerd Font in your terminal.** The state glyphs are Font Awesome
+  codepoints out of the private-use area — the same marks the cockpit and the
+  tmux status line wear. Without one you get boxes where the glyphs should be,
+  and the list says a state by its order alone.
 - **No fzf binary is needed.** fzf is compiled in as a library, so there is
   nothing to install and nothing whose version can drift from what this was
   built against.
@@ -183,41 +138,24 @@ runs has one. To uninstall, delete the binary.
 
 ### 3. Bind it to a key
 
-The keybinding is yours to write: a zellij config is KDL, full of your own
-comments and your own key choices, and an integration that rewrote it would be
-guessing at both. Put this in
-`~/.config/zellij/config.kdl`, inside your keybindings block, with the path
-`make install` printed for this program:
-
-```kdl
-bind "Alt a" {
-    Run "/Users/you/go/bin/agent-notify-picker" {
-        name "agents"
-        floating true
-        close_on_exit true
-        width "90%"
-        height "90%"
-        x "5%"
-        y 1
-    }
-}
-```
-
-`close_on_exit true` is what makes enter feel like a jump rather than like
-starting a program: focusing a pane hides the floating layer by itself, and the
-picker exits a moment later, so the pane it was in goes away behind you.
-
-The absolute path is not decoration. zellij's `Run` takes one because zellij's
-`PATH` is the one it was started with, which is not necessarily the one `make
-install` put this program on.
-
-**Not in zellij?** The picker is an ordinary terminal program that wants a
-terminal and exits when it is done, so anything that can open one works. In tmux
-a popup is the closest equivalent:
+The keybinding is yours to write: a tmux config is full of your own comments
+and your own key choices, and an integration that rewrote it would be guessing
+at both. A popup is the shape that fits, with the path `make install` printed
+for this program:
 
 ```sh
-tmux bind-key -n M-a display-popup -E -w 90% -h 90% /opt/homebrew/bin/agent-notify-picker
+tmux bind-key -n M-a display-popup -E -w 90% -h 90% /Users/you/go/bin/agent-notify-picker
 ```
+
+`-E` is what makes enter feel like a jump rather than like starting a program:
+the picker exits once it has focused the pane, and the popup goes with it.
+
+The absolute path is not decoration. tmux runs a popup with the server's
+`PATH`, which is the one the server was started with and not necessarily the
+one `make install` put this program on.
+
+**Not in tmux?** The picker is an ordinary terminal program that wants a
+terminal and exits when it is done, so anything that can open one works.
 
 And from a shell, a widget that jumps without leaving your prompt is just the
 program:
@@ -314,7 +252,7 @@ nothing and says nothing is the config bug people give up on.
 ### Keys: a key is yours, an action is not
 
 Typing filters; there is no key to press first. The preview is what needs
-scrolling — the list is three rows and the message under it can be a hundred —
+scrolling — the list is a handful of rows and the message beside it can be a hundred —
 so the four keys nearest the home row scroll it:
 
 | what it does | the action | default keys |
@@ -419,15 +357,15 @@ integrations:
     settings:
       colors:
         base02: "#26233a"  # overlay     — the row you are on, the chip behind inline code
-        base03: "#6e6a86"  # muted       — rules, borders, scrollbars, the marks between words
-        base04: "#8c88a6"  # subtle      — ages, fact names, earlier messages, unmatched rows, idle
+        base03: "#6e6a86"  # muted       — rules, borders, scrollbars
+        base04: "#8c88a6"  # subtle      — waits, unmatched rows, idle
         base05: "#e0def4"  # text        — names and prose
         base08: "#eb6f92"  # love        — blocked-on-you
-        base09: "#f6c177"  # gold        — broke, a string in a fenced block, the complaint header
-        base0A: "#ebbcba"  # rose        — branches, matched characters
+        base09: "#f6c177"  # gold        — broke, a turn gone on too long, a string in a fenced block, the complaint header
+        base0A: "#ebbcba"  # rose        — matched characters
         base0B: "#31748f"  # pine        — a keyword, inside a fenced code block and nowhere else
         base0C: "#9ccfd8"  # foam        — finished-a-turn
-        base0D: "#c4a7e7"  # iris        — paths, the prompt, the pane label, links in a message
+        base0D: "#c4a7e7"  # iris        — the prompt, links in a message
         base13: "#fff0ee"  # bright rose — the pointer rail, headings in a message
         base14: "#609fbb"  # bright pine — working
 ```
@@ -440,17 +378,17 @@ keys are under `integrations.picker.settings.colors`:
 | key | default | what it paints |
 | --- | --- | --- |
 | `base02` | `#26233a` | the selected row's background, the chip behind inline code |
-| `base03` | `#6e6a86` | every rule, border, separator, scrollbar and middot; the dimmed part of a path; an elapsed time in the timeline |
-| `base04` | `#8c88a6` | ages, fact names, earlier messages, unmatched rows, `idle`, h5/h6 and quotes in a message |
-| `base05` | `#e0def4` | session names, the query, prose in a message |
-| `base08` | `#eb6f92` | `blocked-on-you`, glyph and detail |
-| `base09` | `#f6c177` | `broke`, a string inside a fenced block, the complaint header |
-| `base0A` | `#ebbcba` | branches, the characters your query matched, h3/h4 in a message |
+| `base03` | `#6e6a86` | every rule, border, separator and scrollbar; the ghost text |
+| `base04` | `#8c88a6` | waits, unmatched rows, `idle`, h5/h6 and quotes in a message |
+| `base05` | `#e0def4` | session names, the wait of an agent waiting on you, the query, prose in a message |
+| `base08` | `#eb6f92` | `blocked-on-you`'s glyph |
+| `base09` | `#f6c177` | `broke`'s glyph, the wait of a turn past fifteen minutes, a string inside a fenced block, the complaint header |
+| `base0A` | `#ebbcba` | the characters your query matched, h3/h4 in a message |
 | `base0B` | `#31748f` | a keyword inside a fenced code block, and nowhere else on screen |
-| `base0C` | `#9ccfd8` | `finished-a-turn`, glyph and detail |
-| `base0D` | `#c4a7e7` | the leaf of a path, the prompt, the spinner, the pane label, links in a message |
+| `base0C` | `#9ccfd8` | `finished-a-turn`'s glyph |
+| `base0D` | `#c4a7e7` | the prompt, the spinner, links in a message |
 | `base13` | `#fff0ee` | the pointer rail and the marker, h1/h2 in a message |
-| `base14` | `#609fbb` | `working`, glyph and detail |
+| `base14` | `#609fbb` | `working`'s glyph |
 
 A whole palette, pasted from the file you already keep:
 
@@ -490,7 +428,7 @@ integrations:
 - **One table covers the whole window, not only the rows.** The embedded glamour
   stylesheet is written in those same slot names and resolved before the
   renderer sees it, so moving `base0D` moves the links in a message along with
-  the paths in a row. A window half in your palette and half in mine would be
+  the prompt. A window half in your palette and half in mine would be
   worse than one wholly in mine.
 - **`#rrggbb` and nothing else**, though fzf and lipgloss would each take more —
   a colour number, a name, an ANSI index. Every one of these values is also
@@ -510,8 +448,8 @@ and through fzf:
 | `PATH` | core's SDK | how `agent-notify` is found for the jump (D-101). |
 | `FZF_PREVIEW_COLUMNS` | this program's `--preview` child | how wide to wrap the message. fzf sets it; the fallback is 80, narrow on purpose, because text that is too narrow is readable and text that is too wide is a staircase. |
 
-Enter runs `agent-notify`, found on that `PATH` — the one zellij was started
-with, since this program is zellij's child. If the jump says it cannot find
+Enter runs `agent-notify`, found on that `PATH` — the one the tmux server was
+started with, since this program is its child. If the jump says it cannot find
 core, that is the PATH to put `make install`'s directory on.
 
 `keep-ended-sessions` — core's, seven days by default — is what bounds the set
@@ -553,13 +491,9 @@ is the picker refusing to open by another route.
 - **The background.** `bg:-1` everywhere. This opens in a floating pane over
   your work, and a picker that repaints the canvas reads as a different
   application rather than as a layer on top of one.
-- **The layout** — the split, the widths, the column caps, the glyphs, the
-  prompt, the ellipsis, the scrollbar. All of it is measured against the list
-  actually in front of you, and none of it is something only you can know, which
-  is the test §A14 sets for what belongs in a config file at all.
-- **`focus`, which redraws the pane label.** It is machinery rather than a key,
-  and keeping it in its own `--bind` is what makes it impossible for a keymap to
-  take it away.
+- **The layout** — the split, the widths, the glyphs, the prompt, the ellipsis,
+  the scrollbar. None of it is something only you can know, which is the test
+  §A14 sets for what belongs in a config file at all.
 - **Anything about where a session is.** Which containers there are and what
   order they nest in is core's (§A11.2), and configured there.
 
@@ -584,110 +518,72 @@ and ctrl-c are not failures. Exit 1 when there is nothing to list, when the
 store cannot be read, or when the jump failed; exit 2 for an option that is not
 one.
 
-`--preview` and `--label` are on the command line too, and they are not yours to
-run: fzf runs this program again with them, once per row you look at and once
-per move of the cursor.
+`--preview` is on the command line too, and it is not yours to run: fzf runs
+this program again with it, once per row you look at.
 
 ## The list
 
-One line reads left to right as: what state this is, what precisely it is
-waiting on, how long it has been that way, who it is, and where it lives.
+One line is the state's glyph, the name, and how long it has been that way:
+the cockpit's row, so that the two lists say the same thing about the same
+agent (D-133).
 
 ```
- ▌  ⚠ blocked/permission-prompt  12m  agent-notify  ~/projects/agent-notify  ⎇ browse
+ ▌ ⚠ agent-notify          12m
 ```
-
-The first three are a narrow status gutter that answers "which of these wants
-me", and they are **adjacent on the left** because they are one question. The
-age spent a version on the far side of the name, where it floated in the middle
-of the row with whitespace on both sides of it and belonged to neither
-neighbour.
-
-**The state is a word as well as a shape, and the two together are a badge.** A
-glyph-only column was tried first, with a legend above the list naming the six
-shapes; a screenshot settled it. The legend read as a sixth row of the list, and
-three identical speech bubbles in a list of five still had to be looked up
-against it. A shape resolves faster than a word, which is why the glyph is
-there; a word needs no key, which is why the word is there too. The word is
-core's own, shortened only where core's own is a sentence —
-`blocked/permission-prompt` rather than `blocked-on-you/permission-prompt`, and
-the canonical string is spelled out in full in the pane label for the row you
-are on.
 
 | glyph | state | hue |
 | --- | --- | --- |
-| warning triangle | `blocked` | love |
+| warning triangle | `blocked-on-you` | love |
 | a cross | `broke` | gold |
-| speech bubble | `finished` | foam |
+| speech bubble | `finished-a-turn` | foam |
 | circular arrows | `working` | bright pine |
 | a dot | `idle` | subtle |
 | a hollow dot | `ended` | muted |
 
-**Only the badge is coloured.** A session's name is `base05` whatever it is
-doing, so that a name can be learned: a row painted end to end in its state's
-hue makes identity a moving target, and four such rows read as four kinds of
-object rather than four instances of one.
+**The state is the glyph in its hue, and not a word.** The row used to carry
+`blocked/permission-prompt` beside the glyph, as a badge. The list is scanned
+for which of these wants you, and a shape in a colour answers that before a word
+does; the cockpit has said a state that way since D-132, and the picker now
+does too.
 
-**The columns are capped, not fixed** — the rule `agent-notify list` already
-uses (R24). A cap stops one enormous name pushing everything after it off the
-row; measuring the rest against what is actually in the list is what keeps a
-screenful of short names from leaving a gutter of air. Names cap at 24, states
-at 26 (because `blocked/permission-prompt` is 25, and the state that wants you
-is exactly the one that must not be cut short), paths at 44.
+**Only the glyph is coloured by state.** A session's name is `base05` whatever
+it is doing, so that a name can be learned: a row painted end to end in its
+state's hue makes identity a moving target.
 
-**A path is dimmed down to its leaf** and elided from the left when it is long,
-a whole component at a time: `…/modules/nu-http-client-generator`. Five
-components in one colour is the longest and loudest thing on a row, competing
-with the name for a glance it does not deserve, and only the last of them tells
-two sessions apart. Cutting the tail instead would take the repository's name
-off, which is the one part that identifies it. The branch follows behind a dim
-`⎇`, in the two colours a shell prompt already writes a path and a branch in.
+**The wait is dim, except where it is the reason to look.** It is bold for an
+agent waiting on you and gold for a turn that has run fifteen minutes or more,
+which is the cockpit's rule too.
 
-The whole row is also what the matcher matches against, so typing `browse` finds
-the session on that branch and typing `blocked` finds everything that wants you.
+**Every row is the list's width**, so that every wait ends on the same column.
+A name too long for it is cut with an ellipsis rather than wrapped, because a
+row two lines high tears the list in half under it.
+
+**The directory, the branch and the detail are gone.** An agent is named after
+its directory more often than not, and the name is what anybody types at this
+list. The row is also what the matcher matches, so typing a branch no longer
+finds the agent on it; typing its name does.
 
 ## The preview
 
-`--preview` runs `agent-notify-picker --preview <key>` and `focus` runs
-`agent-notify-picker --label <key>`. That is how every fzf preview works, and it
-is what makes the pane a full renderer — markdown, metadata and history — rather
-than a string squeezed through a callback. It re-reads the store per row, which
-costs a few milliseconds and is the only way the pane can show history at all:
-history is read on demand, for one session, and never arrives with a delta
-(§A7.7).
+`--preview` runs `agent-notify-picker --preview <key>`, which is how every fzf
+preview works. It re-reads the store per row, which costs a few milliseconds and
+gives a pane that is correct when it is looked at.
 
-The message leads, because it is the thing being decided on:
+It is what the agent said, as markdown, and nothing else. [glamour](https://charm.land)
+renders it: headings, lists, quotes, fenced code and tables come out as
+headings, lists, quotes, code and tables. A picker that printed the source would
+show a wall of asterisks at the moment somebody is deciding which of four agents
+to answer. A message that cannot be rendered is printed as it arrived — the
+point is reading what the agent said, and a renderer that fails should not eat
+it.
 
-- **What it said, as markdown.** [glamour](https://charm.land) renders it:
-  headings, lists, quotes, fenced code and tables come out as headings, lists,
-  quotes, code and tables. A picker that printed the source would show a wall of
-  asterisks at the moment somebody is deciding which of four agents to answer. A
-  message that cannot be rendered is printed as it arrived — the point is
-  reading what the agent said, and a renderer that fails should not eat it.
-- **What it is working on and spending**, as a two-column block rather than a
-  line of values between middots, so a name in the margin says what the value
-  beside it is: `where` is the directory and the branch checked out there, which
-  core reads on the hook path rather than taking the agent's word for it
-  (§A7.4.4); `running` is the model, the tokens and the pid. Each part
-  disappears when there is nothing to say, because a zero token count almost
-  always means an adapter that reports no usage rather than a session that has
-  spent nothing (§A7.4.3).
-- **What it said before**, from the session's own history, newest first: the
-  messages and the state changes interleaved, one line each, cut rather than
-  wrapped. This is a timeline and not a transcript — an agent's last-but-one
-  message can be four hundred words, and wrapping it buries the state changes it
-  sits between. The message already at the top of the pane is not repeated down
-  here.
-- **Who it is, in the border rather than in the body.** The name, core's
-  canonical `(kernel, detail)` string and the age are the pane's *label*, drawn
-  by a second re-run of this program on fzf's `focus` event. They used to be the
-  pane's first line, two rows under the row that already said them.
-
-**There were two meters here and they are gone.** How full the context window
-was, and the tightest of the account's allowances with how long it had left,
-with their digits riding in the pane label beside the three facts. Both left the
-record in D-76, because only one of the two agents could fill either, so both
-bars drew for codex and never for Claude. Nothing in the chrome replaced them.
+**Where it lives, what it runs on, what it has spent and what happened before
+were here, and were cut** (D-133). A block of the directory, the branch, the
+model, the tokens and the pid sat under the message, then a timeline of earlier
+messages and state changes, and the pane's border carried the name, the
+canonical state and the age. None of it is what the choice of an agent is made
+on. The row beside the pane already says who it is, and the cockpit shows an
+agent's own screen, which is where a long answer is read and replied to.
 
 A session that ends between the keypress and the read gets `that session is
 gone` rather than an error, and one that has not said anything yet gets `nothing
@@ -704,12 +600,11 @@ across the top. Foam was `finished-a-turn` and also the model's name. Iris was
 paths and also every markdown heading. So:
 
 - **The four state hues — love, gold, foam, bright pine — appear on the state
-  glyph and on the state's detail, and nowhere else.** Not on the name, not on a
-  heading.
+  glyph and nowhere else**, but for gold on the wait of a turn gone on too
+  long, which is the cockpit's rule. Not on the name, not on a heading.
 - **Identity and prose are the neutral ramp, always.**
-- **Iris is paths and chrome, rose is branches and matched characters**, and
-  neither is ever a state. That pair is the one a shell prompt already writes a
-  path and a branch in.
+- **Iris is chrome and links, rose is matched characters**, and neither is
+  ever a state.
 
 Two of the greys were measured rather than chosen, and both were wrong. `base02`
 is a *background* slot — 1.16:1 against this canvas — and every rule, border,
@@ -733,7 +628,6 @@ Nothing here walks agent-notify's directory layout or drives a container:
 - `Read` (or `ReadIncludingEnded` for `--all`) for the sessions, already ordered
   by urgency and with the liveness decision already applied — a session whose
   process was killed is not offered as working (D-30).
-- `History` for the preview of the one under the cursor.
 - `Settings` for this integration's own `settings` section, which core read
   and handed over without looking inside (D-103).
 - `CoreBinary`, which is `agent-notify` on PATH (D-101), then
@@ -774,11 +668,11 @@ somebody makes.
   it had. The preview under the cursor is re-read per row, so it is current; the
   row above it may not be.
 - **One paste by hand, and it carries a path.** The keybinding is yours to
-  write (D-101), and it names an absolute path because zellij's `Run` wants
-  one; a `make install` to a different `GOBIN` is a keybinding to edit.
+  write (D-101), and it names an absolute path because tmux's popup runs with
+  the server's `PATH`; a `make install` to a different `GOBIN` is a keybinding to edit.
 - **The glyphs assume a Nerd Font**, and there is no ASCII fallback. A terminal
-  without one draws boxes in the badge column; every badge still carries its
-  word, so nothing becomes unreadable.
+  without one draws boxes where the glyphs are, and since a state is now only
+  its glyph, the list then says a state by its order alone.
 - **The container side is somebody else's.** Enter is only as good as the
   container integrations installed beside it, and a `focus-session` that cannot
   find your window fails in the container's words, not this program's.

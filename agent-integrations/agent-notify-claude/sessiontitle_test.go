@@ -13,7 +13,7 @@ const (
 	realTitle = `{"type":"ai-title","aiTitle":"Fix configuration resetting tab name","sessionId":"c1dd7433-1750-4655-88e7-67c5d039b974"}`
 	// realTypedPrompt is what a person asked for, which is not a name and is
 	// deliberately not read (D-75).
-	realTypedPrompt = `{"type":"user","isSidechain":false,"userType":"external","message":{"role":"user","content":"the zellij display integration is not working correctly: tabs and panes are not getting renamed"}}`
+	realTypedPrompt = `{"type":"user","isSidechain":false,"userType":"external","message":{"role":"user","content":"the tmux display integration is not working correctly: panes are not getting marked"}}`
 	realToolResult  = `{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_01","type":"tool_result","content":"ok"}]}}`
 	realAssistant   = `{"type":"assistant","requestId":"req_011","message":{"model":"claude-opus-5","usage":{"input_tokens":2,"output_tokens":366}}}`
 )

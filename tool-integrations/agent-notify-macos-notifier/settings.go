@@ -76,8 +76,8 @@ type Settings struct {
 	// on the screen until somebody closes it, so a banner nobody touched sat in
 	// the corner, held by a process, until a later banner for the same
 	// session replaced it. A banner that closes itself is taken out of
-	// Notification Centre as well. What is still waiting for you is still on
-	// zellij, aerospace and the picker.
+	// Notification Centre as well. What is still waiting for you is still marked
+	// in tmux and listed in the picker.
 	//
 	// A pointer, so that absent and 0 are different requests.
 	Timeout *session.Duration `yaml:"timeout"`

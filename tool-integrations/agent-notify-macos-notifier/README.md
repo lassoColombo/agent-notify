@@ -139,7 +139,7 @@ care where a session lives, only what it is doing.
 There used to be two. `agent-notify-macos-bar` put a semaphore on the menu bar, in its own
 `.app`, kept alive by its own launch agent, and it was **deleted on 2026-10-07 (D-87)**. So
 a banner is the whole of what macOS will tell you, and the surfaces that answer "which
-session wants me" are [zellij](../agent-notify-zellij), [aerospace](../agent-notify-aerospace-container)
+session wants me" are [tmux](../agent-notify-tmux), [aerospace](../agent-notify-aerospace-container)
 and the [picker](../agent-notify-picker).
 
 The two were deliberately separate — macOS files its decision about notifications against a
@@ -395,7 +395,7 @@ It is a setting because nothing else decides it. alerter declares itself an aler
 and macOS keeps an alert on the screen until somebody dismisses it.
 
 A banner that closes itself is taken out of Notification Centre as well, so one that timed
-out while you were away is not there to find later. The session is still marked on zellij,
+out while you were away is not there to find later. The session is still marked in tmux,
 aerospace and the picker, which show what every session is doing rather than announce it.
 Closing on its own never takes you anywhere: alerter says `@TIMEOUT`, and only a tap focuses
 a session.

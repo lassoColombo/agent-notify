@@ -249,7 +249,7 @@ func TestAskingForNothingIsNotAMistake(t *testing.T) {
 // in this repository actually declares.
 func TestTheSpellingsInUseTodayAreReal(t *testing.T) {
 	for _, inUse := range [][]string{
-		{"kernel", "detail", "rank", "name", "cwd", "captured_context"}, // zellij-display
+		{"kernel", "detail", "rank", "name", "cwd", "captured_context"}, // tmux
 		{"kernel", "rank", "detail", "name", "message", "state_since"},  // the bars
 		{"kernel"},
 	} {

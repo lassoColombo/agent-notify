@@ -15,7 +15,7 @@ import (
 //
 // bare: an agent in a terminal window, with the process chain reaching the
 // terminal, which is the only case where the answer is exact.
-// nested: the same agent inside zellij, where the chain ends at a server that
+// nested: the same agent inside tmux, where the chain ends at a server that
 // owns no windows and the title is the only way in.
 var (
 	ghostty = Window{ID: 34, App: 3434, Name: "Ghostty", Title: "home |  agent-notify"}
@@ -38,7 +38,7 @@ func nestedChain() []Ancestor {
 		{PID: 91000, Command: "agent-notify-a"},
 		{PID: 90000, Command: "agent-notify-c"},
 		{PID: 89000, Command: "claude"},
-		{PID: 3655, Command: "zellij"}, // the SERVER, whose parent is 1
+		{PID: 3655, Command: "tmux"}, // the SERVER, whose parent is 1
 	}
 }
 
@@ -93,12 +93,12 @@ func TestInsideAMultiplexerTheTitleIsTheOnlyWayIn(t *testing.T) {
 		t.Fatalf("problem = %q (%s), want the terminal found", placement.Problem, placement.Detail)
 	}
 	if len(placement.Windows) != 1 || placement.Windows[0].ID != 34 {
-		t.Errorf("windows = %+v, want the window titled for the zellij session", placement.Windows)
+		t.Errorf("windows = %+v, want the window titled for the tmux session", placement.Windows)
 	}
 }
 
 // TestNothingIsShowingIt: a detached multiplexer session. The place really is
-// gone, and saying so stops the walk before zellij focuses a pane in a window
+// gone, and saying so stops the walk before tmux focuses a pane in a window
 // nobody can see — which is the exact failure this milestone exists to fix.
 func TestNothingIsShowingIt(t *testing.T) {
 	placement := Resolve([]Window{firefox}, Coordinates{Chain: nestedChain(), Title: "home | "})
@@ -113,7 +113,7 @@ func TestNothingIsShowingIt(t *testing.T) {
 // Inside a multiplexer there is no process chain to narrow by, so a window
 // belonging to something else entirely — a browser on a page whose name starts
 // the same way — matches the key and is believed. What makes it survivable is
-// that the key carries zellij's own separator: `home | ` is a great deal more
+// that the key carries the multiplexer's own separator: `home | ` is a great deal more
 // specific than `home`, and the alternative is refusing to focus anything at
 // all for every session inside a multiplexer.
 func TestATitleKeyCanOnlyMatchATitle(t *testing.T) {
@@ -134,7 +134,7 @@ func TestAChainThatOwnsNothingAndNoTitleIsNotAFailure(t *testing.T) {
 	}
 }
 
-// TestSomebodyElsesCoordinatesAreNotOurs. zellij's section decodes cleanly into
+// TestSomebodyElsesCoordinatesAreNotOurs. Another container's section decodes cleanly into
 // this struct and means nothing in it; a container that acted on it would focus
 // a window chosen by a pane id.
 func TestSomebodyElsesCoordinatesAreNotOurs(t *testing.T) {
@@ -143,7 +143,7 @@ func TestSomebodyElsesCoordinatesAreNotOurs(t *testing.T) {
 		t.Fatalf("Unmarshal: %v", err)
 	}
 	if theirs.ours() {
-		t.Fatalf("zellij's coordinates decoded as ours: %+v", theirs)
+		t.Fatalf("another container's coordinates decoded as ours: %+v", theirs)
 	}
 	placement := Resolve([]Window{ghostty}, theirs)
 	if placement.Problem != container.NeverPlaced {
@@ -180,7 +180,7 @@ func TestWhenTheKeysDisagreeTheTitleWins(t *testing.T) {
 	}
 }
 
-// TestTwoClientsOnOneSessionAreBothRight: attach the same zellij session twice
+// TestTwoClientsOnOneSessionAreBothRight: attach the same tmux session twice
 // and both windows show it, so either is an arrival rather than a coin toss.
 func TestTwoClientsOnOneSessionAreBothRight(t *testing.T) {
 	second := Window{ID: 200, App: 3434, Name: "Ghostty", Title: "home |  agent-notify"}
@@ -198,10 +198,10 @@ func TestTwoClientsOnOneSessionAreBothRight(t *testing.T) {
 // TestCaptureReadsOnlyWhatTheTemplateNames is R11: nothing leaves an agent's
 // environment which the configuration did not name.
 func TestCaptureReadsOnlyWhatTheTemplateNames(t *testing.T) {
-	t.Setenv("ZELLIJ_SESSION_NAME", "home")
+	t.Setenv("MUX_SESSION", "home")
 	t.Setenv("ANTHROPIC_API_KEY", "sk-not-this-one")
 
-	captured, err := Capture("{ZELLIJ_SESSION_NAME} | ")
+	captured, err := Capture("{MUX_SESSION} | ")
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
@@ -221,9 +221,9 @@ func TestCaptureReadsOnlyWhatTheTemplateNames(t *testing.T) {
 // chain from what core walked (D-93), with a start time core keeps and a
 // coordinate does not.
 func TestInterpretBuildsTheKey(t *testing.T) {
-	captured := []byte(`{"values":{"ZELLIJ_SESSION_NAME":"home"}}`)
-	walked := []session.Ancestor{{PID: 3655, Command: "zellij", StartedAt: time.Unix(1, 0)}}
-	answer, err := Interpret("{ZELLIJ_SESSION_NAME} | ", captured, walked)
+	captured := []byte(`{"values":{"MUX_SESSION":"home"}}`)
+	walked := []session.Ancestor{{PID: 3655, Command: "tmux", StartedAt: time.Unix(1, 0)}}
+	answer, err := Interpret("{MUX_SESSION} | ", captured, walked)
 	if err != nil {
 		t.Fatalf("Interpret: %v", err)
 	}
@@ -234,7 +234,7 @@ func TestInterpretBuildsTheKey(t *testing.T) {
 	if coordinates.Title != "home | " {
 		t.Errorf("title = %q, want %q", coordinates.Title, "home | ")
 	}
-	if want := []Ancestor{{PID: 3655, Command: "zellij"}}; !reflect.DeepEqual(coordinates.Chain, want) {
+	if want := []Ancestor{{PID: 3655, Command: "tmux"}}; !reflect.DeepEqual(coordinates.Chain, want) {
 		t.Errorf("chain = %+v, want %+v: the one core walked, pid and name only", coordinates.Chain, want)
 	}
 }
@@ -242,7 +242,7 @@ func TestInterpretBuildsTheKey(t *testing.T) {
 // TestAHalfBuiltKeyIsNoKey: a template with a hole in it matches windows that
 // have nothing to do with this session.
 func TestAHalfBuiltKeyIsNoKey(t *testing.T) {
-	answer, err := Interpret("{ZELLIJ_SESSION_NAME} | ", []byte(`{}`),
+	answer, err := Interpret("{MUX_SESSION} | ", []byte(`{}`),
 		[]session.Ancestor{{PID: 3434, Command: "ghostty"}})
 	if err != nil {
 		t.Fatalf("Interpret: %v", err)
@@ -257,7 +257,7 @@ func TestAHalfBuiltKeyIsNoKey(t *testing.T) {
 // layer has nothing to do for this session" and steps past it, so the pane
 // inside still gets focused.
 func TestNothingToPlaceAnswersNull(t *testing.T) {
-	answer, err := Interpret("{ZELLIJ_SESSION_NAME} | ", []byte(`{}`), nil)
+	answer, err := Interpret("{MUX_SESSION} | ", []byte(`{}`), nil)
 	if err != nil {
 		t.Fatalf("Interpret: %v", err)
 	}
@@ -271,23 +271,23 @@ func TestNothingToPlaceAnswersNull(t *testing.T) {
 }
 
 func TestATemplateThatIsOffCapturesNothing(t *testing.T) {
-	t.Setenv("ZELLIJ_SESSION_NAME", "home")
+	t.Setenv("MUX_SESSION", "home")
 	captured, _ := Capture("")
 	if captured.(Captured).Values != nil {
 		t.Errorf("values = %+v, want none: the template names nothing", captured.(Captured).Values)
 	}
-	if _, complete := substitute("", map[string]string{"ZELLIJ_SESSION_NAME": "home"}); complete {
+	if _, complete := substitute("", map[string]string{"MUX_SESSION": "home"}); complete {
 		t.Error("an empty template built a key, want none")
 	}
 }
 
 func TestPlaceholders(t *testing.T) {
 	for template, want := range map[string]string{
-		"{ZELLIJ_SESSION_NAME} | ": "ZELLIJ_SESSION_NAME",
-		"{A}-{B}":                  "A,B",
-		"no placeholders":          "",
-		"{unclosed":                "",
-		"{}":                       "",
+		"{MUX_SESSION} | ": "MUX_SESSION",
+		"{A}-{B}":          "A,B",
+		"no placeholders":  "",
+		"{unclosed":        "",
+		"{}":               "",
 	} {
 		if got := strings.Join(placeholders(template), ","); got != want {
 			t.Errorf("placeholders(%q) = %q, want %q", template, got, want)

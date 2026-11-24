@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -131,7 +132,9 @@ func TestTheParseDecidesNotTheExitCode(t *testing.T) {
 	liar := Tmux{Binary: "/bin/echo", Timeout: 5 * time.Second}
 	if _, err := liar.Look(home); err == nil {
 		t.Fatal("a program that exits 0 and answers with prose was believed")
-	} else if !strings.Contains(err.Error(), "is not there") {
+	} else if !strings.Contains(err.Error(), "not asked for") || errors.Is(err, ErrNotThere) {
+		// Something answered, so it is not a server that is not there: a
+		// render that meets it has failed, and is drawn again.
 		t.Errorf("the error does not say what happened: %v", err)
 	}
 }
@@ -147,11 +150,41 @@ func TestAMissingServerFails(t *testing.T) {
 	defer os.RemoveAll(directory)
 	socket := filepath.Join(directory, "s")
 
-	if _, err := tmux.Look(socket); err == nil {
-		t.Fatal("asking a server that is not there succeeded")
+	if _, err := tmux.Look(socket); !errors.Is(err, ErrNotThere) {
+		t.Fatalf("asking a server that is not there: %v, want it said to be not there", err)
 	}
 	if _, err := os.Stat(socket); err == nil {
 		t.Error("asking a server that is not there started one")
+	}
+}
+
+// TestARenderFailsOnlyForAServerThatIsThere: a server that is not running has
+// nothing to paint, and an ended agent's record may name one for a while; a
+// server that is too slow to answer leaves its marks wrong, and the render
+// says so, for core to hand it over again (D-130).
+func TestARenderFailsOnlyForAServerThatIsThere(t *testing.T) {
+	tmux := realTmux(t)
+	socket := aServer(t, tmux, "an-test")
+	pane := paneOf(t, tmux, socket, "an-test")
+	agent := placedIn("alpha", session.Working, socket, pidOf(t, tmux, socket), pane)
+	gone := placedIn("beta", session.Ended, filepath.Join(t.TempDir(), "s"), pid, "%1")
+
+	if err := display(tmux).Render(session.View{Sessions: []session.Record{agent, gone}}); err != nil {
+		t.Errorf("a record of a server that is not running failed the render: %v", err)
+	}
+
+	slow := filepath.Join(t.TempDir(), "tmux")
+	if err := os.WriteFile(slow, []byte("#!/bin/sh\nsleep 2\nexec '"+tmux.Binary+"' \"$@\"\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	moved := placedIn("alpha", session.BlockedOnYou, socket, pidOf(t, tmux, socket), pane)
+	err := display(Tmux{Binary: slow, Timeout: 300 * time.Millisecond}).Render(session.View{Sessions: []session.Record{moved}})
+	if err == nil || errors.Is(err, ErrNotThere) {
+		t.Errorf("a server too slow to answer: %v, want the render to fail", err)
+	}
+	render(t, tmux, moved)
+	if got := marksOf(t, tmux, socket)[pane].State; got != "blocked-on-you" {
+		t.Errorf("drawn again, the pane says %q", got)
 	}
 }
 
@@ -279,28 +312,32 @@ func TestNamesTmuxWouldMisreadArriveWhole(t *testing.T) {
 	}
 }
 
-// TestOneFailedCommandStopsTheRest is the fact paint's second attempt is for.
-func TestOneFailedCommandStopsTheRest(t *testing.T) {
+// TestAWriteToAPaneThatIsGoneStopsNothing: tmux stops an invocation at the
+// first command it refuses, and a write naming a pane that closed would be
+// one; with `-q` it is passed over, and the commands after it run [measured
+// on 3.8].
+func TestAWriteToAPaneThatIsGoneStopsNothing(t *testing.T) {
 	tmux := realTmux(t)
 	socket := aServer(t, tmux, "an-test")
 	pane := paneOf(t, tmux, socket, "an-test")
 
 	err := tmux.Do(socket, chain([]Command{
-		{Args: []string{"set-option", "-p", "-t", "%999", nameOption, "gone"}},
-		{Args: []string{"set-option", "-p", "-t", pane, nameOption, "here"}},
+		{Args: []string{"set-option", "-q", "-p", "-t", "%999", nameOption, "gone"}},
+		{Args: []string{"set-option", "-q", "-p", "-u", "-t", "%998", nameOption}},
+		{Args: []string{"set-option", "-q", "-p", "-t", pane, nameOption, "here"}},
 	}))
-	if err == nil {
-		t.Fatal("a command naming a pane that is not there succeeded")
+	if err != nil {
+		t.Fatalf("writes naming panes that are not there failed the invocation: %v", err)
 	}
-	if got := marksOf(t, tmux, socket)[pane].Name; got != "" {
-		t.Errorf("the command after the failed one ran: pane %s says %q", pane, got)
+	if got := marksOf(t, tmux, socket)[pane].Name; got != "here" {
+		t.Errorf("the command after them did not run: pane %s says %q", pane, got)
 	}
 }
 
-// TestAPaneThatClosesMidwayIsLookedAtAgain: a pane closes between the look
-// and the write — here, by a tmux that closes it the moment the first write
-// arrives — so the write is refused, and the marks still arrive.
-func TestAPaneThatClosesMidwayIsLookedAtAgain(t *testing.T) {
+// TestAPaneThatClosesMidwayCostsOnlyItsOwnMarks: a pane closes between the
+// look and the write — here, by a tmux that closes it the moment the write
+// arrives — and every other mark arrives in that one write.
+func TestAPaneThatClosesMidwayCostsOnlyItsOwnMarks(t *testing.T) {
 	tmux := realTmux(t)
 	socket := aServer(t, tmux, "an-test")
 	leftover := paneOf(t, tmux, socket, "an-test")
@@ -323,6 +360,9 @@ func TestAPaneThatClosesMidwayIsLookedAtAgain(t *testing.T) {
 
 	closing := Tmux{Binary: script, Timeout: 5 * time.Second}
 	render(t, closing, placedIn("alpha", session.Working, socket, pidOf(t, tmux, socket), agent))
+	if _, err := bare(tmux, socket, "has-session"); err != nil {
+		t.Fatal("the server went with the pane, and this tested nothing")
+	}
 
 	if _, err := os.Stat(marker); err != nil {
 		t.Fatal("the pane was never closed under the write, so this tested nothing")

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -30,6 +31,10 @@ type Command struct {
 // A pane that carries our options and is nobody's is one of ours left over —
 // an agent that ended, a record that is gone — and is given back by unsetting
 // them. Nobody else writes them, so there is nothing to recover but that.
+//
+// Every write says `-q`: a pane that closes between the look and the write
+// is then passed over, rather than stopping every command after it, which is
+// what tmux does with a command it refuses [measured on 3.8].
 func Plan(socket string, records []session.Record, server Server, glyphs session.Palette) []Command {
 	// Sorted here rather than trusted from the caller: which of two claims
 	// wins must not depend on the order they were handed over in.
@@ -72,12 +77,12 @@ func Plan(socket string, records []session.Record, server Server, glyphs session
 			case should[i] == is[i]:
 			case should[i] == "":
 				commands = append(commands, Command{
-					Args: []string{"set-option", "-p", "-u", "-t", pane, option},
+					Args: []string{"set-option", "-q", "-p", "-u", "-t", pane, option},
 					Why:  fmt.Sprintf("%s holds no live agent", pane),
 				})
 			default:
 				commands = append(commands, Command{
-					Args: []string{"set-option", "-p", "-t", pane, option, argument(should[i])},
+					Args: []string{"set-option", "-q", "-p", "-t", pane, option, argument(should[i])},
 					Why:  fmt.Sprintf("%s holds %s, %s", pane, want[pane].Name, want[pane].State),
 				})
 			}
@@ -134,41 +139,39 @@ type Display struct {
 }
 
 // Render is called with the current state, never with a transition (R22).
+// Every server is painted, and the render fails if one that is running could
+// not be: core then hands this view over again at its next sweep, and the
+// marks do not stay wrong until something else moves (D-130).
 func (d *Display) Render(view session.View) error {
+	var failed []error
 	for socket, records := range Group(view.Sessions) {
-		d.paint(socket, records)
+		if err := d.paint(socket, records); err != nil {
+			failed = append(failed, err)
+		}
 	}
-	return nil
+	return errors.Join(failed...)
 }
 
 // paint is one server: one look, and every write it plans in one invocation.
-// If tmux refuses that, it is because something moved between the two — a
-// pane closed, and the command naming it stopped the rest — so it looks once
-// more and tries once more. Past that, the next render starts from a fresh
-// look anyway (R13).
-func (d *Display) paint(socket string, records []session.Record) {
-	for attempt := 1; ; attempt++ {
-		server, err := d.Tmux.Look(socket)
-		if err != nil {
-			// A failed look is what guarantees nothing is written to a server
-			// that is not there (R13).
-			d.Logger.Debug("skipped a tmux server", "socket", socket, "why", err.Error())
-			return
-		}
+// A server that is not running — and an ended agent's record may name one
+// for a while — has nothing to paint, and is not a failure.
+func (d *Display) paint(socket string, records []session.Record) error {
+	server, err := d.Tmux.Look(socket)
+	if err == nil {
 		commands := Plan(socket, records, server, d.Glyphs)
 		if len(commands) == 0 {
-			return
+			return nil
 		}
-		err = d.Tmux.Do(socket, chain(commands))
-		if err == nil {
+		if err = d.Tmux.Do(socket, chain(commands)); err == nil {
 			for _, command := range commands {
 				d.Logger.Debug("painted", "socket", socket, "what", command.Why)
 			}
-			return
-		}
-		if attempt == 2 {
-			d.Logger.Warn("tmux refused the marks", "socket", socket, "problem", err.Error())
-			return
+			return nil
 		}
 	}
+	if errors.Is(err, ErrNotThere) {
+		d.Logger.Debug("skipped a tmux server", "socket", socket, "why", err.Error())
+		return nil
+	}
+	return err
 }

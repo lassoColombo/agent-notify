@@ -5885,6 +5885,210 @@ of this section is that it prevents re-litigating.
     considered and refused: undocumented, slow, and a guess at Claude's
     internals.
 
+- **D-129** (2026-11-23) — **agent-notify-tmux-manager, rebuilt around the
+  swap: an empty pane for a stand-in, a way home the server runs by itself,
+  and no poll.** *Keeps* D-125's borrow, its hidden session and its rule that
+  the state is in tmux and every action starts from a read of it. *Reverses*
+  D-125's stand-in program, the socket between it and the list, and the
+  second terminal's stand-in with its Enter. *Amends* "away only while the
+  tab is on screen". Brings D-126's server pid to the list.
+  - **What was wrong.** The swap and the planner held: twelve rounds of
+    cursor moves and toggles interleaved left every layout as it was. What
+    stood around them did not. An agent stayed away for up to a second after
+    the tab was left, until the list's next look, and a give-back that runs
+    after the switch is one drawn frame of the stand-in where the agent
+    lives. The window the agent lives in took the stand-in's name for as
+    long as it was away. One rule needed two programs, a socket, a respawn
+    and a `list-panes -a` every second for as long as the tab existed. And
+    the list matched a record to a pane by socket and pane id, without the
+    pid.
+  - **What else was tried, and refused** [all measured on 3.8]. The list
+    visiting the agent's window (`join-pane -f`, and out again) moves no
+    agent, but the space it frees goes to a neighbour: a pane went from 80
+    columns to 98 to 142 in six visits, so it needs a saved layout to undo,
+    and it unzooms the window and resizes every pane in it. A nested client
+    on the agent's window, linked into a session of its own, moves nothing
+    either, and shows the whole window, cropped with `ignore-size` or
+    resized and left so without; and it is a second terminal that `focus`
+    and every count of who is looking would have to learn to skip. Control
+    mode is told of every session's changes, and is itself an attached
+    terminal on the session it joins. `wait-for`, which is what tmux has for
+    waking a program, does not both keep every signal and stay quiet: `-E`
+    loses what fires between two waits; of two `-S` nobody was waiting for,
+    the second cancels the first; and of two `-U` the second is an error.
+    `choose-tree -f '#{@agent-notify-state}'` is tmux's own list of agents
+    with its own preview, and is a picker.
+  - **The stand-in is an empty pane.** `split-window ''` makes a pane with
+    no program in it, and `display-message -I` writes into it. So there is
+    nothing to die, to respawn or to be told anything, and no second
+    process: `stand-in`, the link and `remain-on-exit` are gone.
+  - **A borrow writes its own way back, as hooks, before it swaps.** One
+    invocation sets a member named `agent-notify-tab` on five hooks —
+    `session-window-changed`, `client-session-changed`, `client-attached`,
+    `client-detached`, and `after-swap-window`, the one change of what a
+    terminal shows that fires none of the others — and then swaps, only if
+    tmux finds the tab on screen, the pane's window not, and the pane not
+    away already. The hook sends the pane home when no terminal shows the
+    tab or one has come to the window the pane lives in. The pane and
+    stand-in ids are written into it: a command with its ids in it runs
+    before the server draws, so a terminal never sees the stand-in at home,
+    where one that expands them as it runs (`run-shell -C`) is a frame late.
+    Leaving by a key, a second terminal arriving, and the terminal being
+    killed outright all sent the agent home with nothing of this program
+    running.
+  - **Every test in a hook names what it is aimed at.** An `if-shell -t`
+    whose target is gone is not refused: it tests whatever pane is in front
+    instead. And a hook command tmux does refuse says so on the status line
+    of whoever pressed the key, every time. So each test also compares the
+    window's or the pane's id, and is false of everything else: hooks left
+    behind by a tab that was killed run nothing and say nothing until the
+    next tab writes over them. What acts — `swap-pane`, `set-option`,
+    `kill-pane` — is refused when its target is gone, and the swap comes
+    first among what a borrow does, so one refused has written nothing.
+  - **Nothing is taken from under a terminal.** An agent whose window some
+    terminal is showing is not borrowed; the stage says where it is, and
+    takes it when that terminal leaves. D-125 let a second terminal find a
+    stand-in there, with Enter to bring the agent back, and a released
+    state in the list to remember it. All three are gone.
+  - **The window keeps its name.** A window that names itself has
+    `automatic-rename` turned off by the borrow, written on the pane as
+    `@agent-notify-renamed`, and unset again by whatever sends the pane
+    home. A window somebody named is not touched.
+  - **The list is woken by a key, and looks every five seconds besides.**
+    The same hooks type `F12` into the list's pane (`send-keys`) when the
+    tab is on screen, and a hook on the tab's window does when its panes
+    change. Keys wait in the pane's terminal until they are read, so none
+    is lost and nothing has to be waiting for them: no second process, and
+    the key does the same under a finger. A terminal has to rest on the tab
+    for as long as the cursor has to rest on an agent before anything is
+    staged, so passing through the tab resizes nothing. The slow look is
+    for what no hook announces, the hooks themselves being wiped among it:
+    no agent waits on it to go home (R22).
+  - **A tab whose list is gone closes itself.** The hook on its window
+    finds no list among its panes, sends the borrowed pane home, takes the
+    five hooks away and closes the stand-in, and the tab with it. This is
+    what the stand-in's socket was for.
+  - **A record belongs to a server by socket and pid** (D-126), so one from
+    a server that was started again on the same socket lists nothing.
+  - **What it still costs.** An agent is resized on its way onto the stage
+    and again on its way home. `kill-window` on the tab kills the agent it
+    is showing, and tmux has no hook that runs before a window dies: only a
+    binding can keep it from happening, so every key that kills a window
+    should ask the tab to `close` instead. A configuration that sets one of
+    the five hooks without an index wipes this program's member of it until
+    the next borrow.
+
+- **D-130** (2026-11-23) — **A render that fails is drawn again at the next
+  sweep; agent-notify-tmux says when it failed, and names the session it
+  focuses through.** *Amends* the renderer's "nothing is retried: the next
+  change renders the whole world again", and D-126's write and focus. *Keeps*
+  R13: a display that cannot draw costs itself and nobody else.
+  - **What was wrong** [measured on 3.8]. A tmux slower than its 2s bound for
+    one render left a pane saying `finished-a-turn` on an agent that was
+    `blocked-on-you`, and it still said so after two sweeps with tmux fast
+    again: the render logged the skip at Debug, which is not written, and
+    answered success; and core had already counted the view as shown, so
+    nothing was drawn until a field the marks show moved. A state that waits
+    on a person is the one most likely not to move. That is a wrong render
+    from a missed delivery, which R15 forbids.
+  - **Core puts the picture back.** A renderer keeps what it last handed a
+    display (`LastShown`). When `render` fails, it puts back what it had
+    before that render (`LastShown.Clone`), unless a reload forgot it in the
+    meantime, and the next wake — the sweep at the latest — hands the same
+    change over again, against the world as it is by then. A display that
+    keeps failing is run once a sweep, which is the retry rate the sweep
+    already sets for everything else, and its failure is logged when it
+    starts or changes, not once a sweep, with one line when it draws again.
+    Displays that answer success when their tool fails, as zellij's and the
+    notifier's do, see no difference.
+  - **agent-notify-tmux fails a render only for a server that is there.**
+    One whose tmux exits saying no server is running is nothing to paint —
+    an ended agent's record may name one for a while — and is not a
+    failure, or it would be run every sweep for as long as the record is
+    kept. A server that does not answer in time, or answers what it was not
+    asked, is.
+  - **No second write.** Every `set-option` says `-q`, under which a pane
+    that closed between the look and the write is passed over instead of
+    stopping every command after it [measured on 3.8], so the read-again-
+    and-write-again loop is gone: one look, one write.
+  - **Focus names the session.** `switch-client -t <pane>` sends the
+    terminal through the session that was active last among those the
+    pane's window is linked into, and with the pane on the agents tab's
+    stage that was `_agents` whenever the tab had just been made: the
+    terminal was left in the hidden session. The target is now
+    `<session>:<window>.<pane>`, through the terminal's own session when it
+    holds the window, else the one a terminal was attached to last, which a
+    session nobody attaches to never is; and the read-back checks the
+    session as well as the pane.
+  - **Names are escaped where they are drawn, not where they are written.**
+    A name holding `#[…]` restyled the border, and `##` lost a character.
+    The option keeps the name as it is, for whatever reads it, and the
+    configuration draws it as `#{q/h:@agent-notify-name}`.
+
+- **D-131** (2026-11-23) — **agent-notify-tmux-manager is
+  agent-notify-tmux-cockpit.** A rename and nothing else: the module, the
+  binary and the config table (`integrations.tmux-cockpit`). The decisions
+  before this one keep the old name, as they were written. The options it
+  writes in tmux (`@agent-notify-tab`, `@agent-notify-tab-role`, …), its hook
+  name and its hidden session `_agents` keep theirs, so a tab opened by the
+  old binary is found and carried on by the new one.
+
+- **D-132** (2026-11-23) — **The cockpit's list says the state, the name and
+  the wait, and nothing else.** *Amends* D-124's and D-128's rows, which
+  carried the `session:window` and directory under each name. Three layouts
+  were drawn at the real terminal (a refined column, a table above a
+  full-width stage, an inbox with a brief above the stage), each with more
+  than today; all three were judged to show too much, and the brief was then
+  cut to two lines, one, and none. None was chosen.
+  - **Kept.** A header per state in its colour, its glyph once; one line per
+    agent, its name and its wait; the wait bold for an agent waiting on you
+    and gold for a turn past fifteen minutes; the background group, each row
+    with its state's glyph since no header says it; the line of keys.
+  - **Gone.** The counts. The glyph on every row. Where an agent lives, which
+    `o` uses without anybody reading it. The directory. What the agent said,
+    which the stage shows as the agent's own screen. Model, spend and history
+    were considered and left to the picker.
+- **D-133** (2026-11-23) — **The picker is the cockpit's list beside what the
+  agent said, and nothing else.** *Amends* D-132's "left to the picker": the
+  model, the spend and the history leave the picker too. Three layouts were
+  drawn in a tmux popup (the list above the message, the list beside it, and
+  lines with no preview); beside it was chosen, the cockpit's shape.
+  - **Kept.** Typing to filter, the urgency order with `--no-sort`, enter to go
+    there and esc to leave. A row is the state's glyph in its hue, the name and
+    the wait, under the cockpit's rules: bold for an agent waiting on you, gold
+    for a turn past fifteen minutes. The message, as markdown, in the preview.
+  - **Gone.** The state's word and detail, the directory and the branch from
+    the row. The facts (where, model, tokens, pid), the history, and the pane
+    label with the `--label` process that drew it. The count beside the prompt.
+  - **The split.** The list takes 36 columns, the cockpit's default, and the
+    preview takes the rest as `right,<columns>`; a terminal too narrow for a
+    readable message gives the list half.
+
+- **D-134** (2026-11-24) — **agent-notify-zellij is removed, and tmux is the
+  one multiplexer.** *Retires* the zellij integration, display and container
+  both. *Amends* D-122, whose "a second multiplexer" is now the only one, and
+  the aerospace container's `title`, which loses its default. Does not amend
+  D-72, D-90 or D-126, whose reasoning was found against zellij and stands.
+  - **The same argument as D-79 and D-87, and it is the owner's to make.**
+    tmux does everything zellij did here, and since D-125 the cockpit does
+    something zellij never did. A module left standing has to be kept
+    compiling on every core change (D-77), so the choice was delete or keep
+    paying for a multiplexer nobody here runs.
+  - **The aerospace title key is empty by default.** It was
+    `{ZELLIJ_SESSION_NAME} | `, zellij's convention for titling its terminal
+    window. tmux puts no session name in an agent's environment, so there is
+    no convention to put in its place: behind a multiplexer the key is now
+    configuration or nothing, and the process chain, which is exact, is the
+    default way in.
+  - **The picker's keybinding is a tmux popup.** It was a `Run` in zellij's
+    KDL; the README now gives the `display-popup` line first.
+  - **What went beyond the directory.** Core's tests that used `zellij` as the
+    name of an example integration use `tmux`, and comments that explained
+    core's shape by zellij's behaviour say it in terms of what is here. The
+    mentions in this file are history and stay, as D-79 kept sketchybar's.
+  - **Where it is**: `tool-integrations/agent-notify-zellij/` in `ffb0ff4`
+    and every commit before it.
+
 **The payload discussion of 2026-09-17 is now ratified**
  in D-10 through D-18.
 What is still marked [proposed] elsewhere — the field list of §A7.4, the event

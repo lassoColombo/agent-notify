@@ -24,6 +24,20 @@ func (p Pane) as(role string) Pane { p.Role = role; return p }
 func (p Pane) active() Pane        { p.Active = true; return p }
 func (p Pane) dead() Pane          { p.Dead = true; return p }
 
+// naming is a pane whose window takes its name from it, and onScreen one
+// whose window some terminal is showing.
+func (p Pane) naming() Pane { p.AutoRename = true; return p }
+
+func (p Pane) sized(width, height int) Pane { p.Width, p.Height = width, height; return p }
+
+func (p Pane) onScreen() Pane {
+	p.Views = slices.Clone(p.Views)
+	for i := range p.Views {
+		p.Views[i].WindowActive = true
+	}
+	return p
+}
+
 func (p Pane) awayFrom(standIn string) Pane {
 	p.StandIn, p.HomeSession = standIn, "$1"
 	return p
@@ -35,9 +49,13 @@ func (p Pane) in(id, name string) Pane {
 	return p
 }
 
+// serverPID is the pid of the server the worlds here are read from, which is
+// the one `placed` captures its sessions in.
+const serverPID = 42
+
 // world is these panes, with the tab's window in front or not.
 func world(tabInFront bool, panes ...Pane) World {
-	w := World{Panes: map[string]Pane{}}
+	w := World{Server: serverPID, Panes: map[string]Pane{}}
 	for _, pane := range panes {
 		if pane.Window == tab {
 			pane.Views = slices.Clone(pane.Views)
@@ -50,7 +68,12 @@ func world(tabInFront bool, panes ...Pane) World {
 	return w
 }
 
-func line(fields ...string) string { return strings.Join(fields, separator) }
+// line is one row of `list-panes`: what a test says of the pane, its window
+// and its session, and then the server's pid, the pane's size, whether its
+// window names itself, and no window held from doing so.
+func line(fields ...string) string {
+	return strings.Join(append(fields, "42", "80", "24", "1", ""), separator)
+}
 
 // TestALinkedWindowIsOnePaneSeenTwice: `list-panes -a` prints a pane once per
 // session its window is linked into, which is how the tab looks from its
@@ -75,6 +98,9 @@ func TestALinkedWindowIsOnePaneSeenTwice(t *testing.T) {
 	if got := w.Panes["%5"]; got.StandIn != "%2" || got.HomeSession != "$1" {
 		t.Errorf("the borrowed pane reads %+v", got)
 	}
+	if got := w.Panes["%2"]; w.Server != 42 || got.Width != 80 || got.Height != 24 || !got.AutoRename {
+		t.Errorf("the server is %d and the stand-in reads %+v", w.Server, got)
+	}
 	if got := w.Where("%5"); got != "home:2" {
 		t.Errorf("a borrowed pane is where its stand-in is: got %q, want home:2", got)
 	}
@@ -98,6 +124,21 @@ func TestNobodyLookingIsNotVisible(t *testing.T) {
 	list.Views[0].Attached = 0
 	if world(true, list).Visible("%1") {
 		t.Error("a window no terminal is on was seen as visible")
+	}
+}
+
+// TestAPaneIsOnScreenWhereItLives: in its own window, or in the one its
+// stand-in holds its place in; and never for being on the tab.
+func TestAPaneIsOnScreenWhereItLives(t *testing.T) {
+	w := world(true, theList,
+		at("%5", "@1"), at("%6", "@2").onScreen(),
+		at("%7", tab).awayFrom("%2"), at("%2", "@3").as(roleStandIn).onScreen(),
+		at("%8", tab).awayFrom("%3"), at("%3", "@4").as(roleStandIn),
+	)
+	for pane, want := range map[string]bool{"%5": false, "%6": true, "%7": true, "%8": false, "%99": false} {
+		if got := w.OnScreenAtHome(pane, tab); got != want {
+			t.Errorf("OnScreenAtHome(%s) = %v, want %v", pane, got, want)
+		}
 	}
 }
 

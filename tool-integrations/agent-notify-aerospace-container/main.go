@@ -4,7 +4,7 @@
 // It is the outermost rung of a focus: a session is at a path, and every layer
 // of it has to be right for any of it to be visible.
 //
-//	aerospace   ──▶  Ghostty  ──▶  zellij     ──▶  pane 17
+//	aerospace   ──▶  Ghostty  ──▶  tmux       ──▶  pane %17
 //	window 34                      session home
 //
 // Focusing a pane in a window you cannot see changes nothing on your screen,
@@ -33,19 +33,15 @@ type Settings struct {
 
 	// Title is how to build the window-title key, with {VARIABLE} filled in
 	// from the agent's environment. It is configuration because the coupling it
-	// encodes belongs to whoever set the two programs up: zellij titles its
-	// terminal window `<session> | <active tab>`, and that convention is not
-	// aerospace's business to know and not ours to hard-code (§A11.4).
+	// encodes belongs to whoever set the two programs up: a multiplexer that
+	// titles its terminal window `<session> | …` and puts the session's name
+	// in the environment, and that convention is not aerospace's business to
+	// know and not ours to hard-code (§A11.4).
 	//
-	// Setting it to "" turns the key off, leaving the process chain as the only
-	// way in — which is the right setting for somebody who runs no multiplexer.
+	// Empty, the default, turns the key off, leaving the process chain as the
+	// only way in.
 	Title string `yaml:"title"`
 }
-
-// The zellij convention, which is the one people actually have. The separator
-// is part of the key and is what makes it specific enough to trust: `home`
-// would match any window whose title happens to start that way.
-const defaultTitle = "{ZELLIJ_SESSION_NAME} | "
 
 // aerospaceTimeout bounds one `aerospace` invocation. It has a name and a
 // defined behaviour on expiry, which is what R18 asks for: the subcommand
@@ -103,9 +99,10 @@ func main() {
 }
 
 // Read is this integration's own section of agent-notify's config. Its
-// defaults are the whole configuration for the setup this was built against.
+// defaults are the whole configuration for an agent run in a terminal with no
+// multiplexer.
 func Read(given subscribe.Integration) (Settings, error) {
-	settings := Settings{Title: defaultTitle}
+	settings := Settings{}
 	if err := given.Settings(&settings); err != nil {
 		return Settings{}, err
 	}

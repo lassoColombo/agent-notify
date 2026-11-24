@@ -8,8 +8,8 @@ import (
 	"github.com/lassoColombo/agent-notify/tool"
 )
 
-// Name is the config table, `integrations.tmux-manager`.
-const Name = "tmux-manager"
+// Name is the config table, `integrations.tmux-cockpit`.
+const Name = "tmux-cockpit"
 
 // me answers nothing core calls, which is what keeps core from ever running
 // this as a display: it is started from a key, like the picker. WakeOn is
@@ -36,7 +36,7 @@ var DefaultGlyphs = map[session.Kernel]string{
 	session.Ended:         "",
 }
 
-// Settings is `integrations.tmux-manager.settings`; a key not declared here
+// Settings is `integrations.tmux-cockpit.settings`; a key not declared here
 // is refused by name.
 type Settings struct {
 	// Tmux is where tmux is, when it is not on this process's PATH (D-101).

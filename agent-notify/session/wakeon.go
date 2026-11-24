@@ -192,8 +192,8 @@ func nudge(field reflect.Value, name string) bool {
 		}
 		// Entries that are ALREADY there are changed, rather than a stranger
 		// being added beside them. A renderer usually reads one key by name —
-		// zellij-display reads only its own entry of `captured_context.by`,
-		// which is where the pane it paints is recorded — and a new key
+		// tmux reads only its own entry of `captured_context.by`,
+		// which is where the pane it marks is recorded — and a new key
 		// appearing next to that one changes nothing it looks at. Adding
 		// instead of changing made this sweep pass for a display that reads
 		// the field, which is the failure a sweep must not have.

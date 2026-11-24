@@ -8,7 +8,7 @@ import (
 	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
-type zellijish struct {
+type tmuxish struct {
 	Binary string            `yaml:"binary"`
 	Glyphs map[string]string `yaml:"glyphs"`
 }
@@ -39,9 +39,9 @@ func configured(t *testing.T, body string) string {
 func TestSettingsDecodeAnIntegrationsOwnTable(t *testing.T) {
 	root := configured(t, `
 integrations:
-  zellij:
+  tmux:
     settings:
-      binary: /opt/homebrew/bin/zellij
+      binary: /opt/homebrew/bin/tmux
       glyphs:
         working: "*"
         blocked-on-you/permission-prompt: "?"
@@ -50,11 +50,11 @@ integrations:
       colour: red
 `)
 
-	var mine zellijish
-	if err := (subscribe.Integration{Name: "zellij", Root: root}).Settings(&mine); err != nil {
+	var mine tmuxish
+	if err := (subscribe.Integration{Name: "tmux", Root: root}).Settings(&mine); err != nil {
 		t.Fatalf("Settings: %v", err)
 	}
-	if mine.Binary != "/opt/homebrew/bin/zellij" {
+	if mine.Binary != "/opt/homebrew/bin/tmux" {
 		t.Errorf("binary = %q", mine.Binary)
 	}
 	if mine.Glyphs["working"] != "*" || mine.Glyphs["blocked-on-you/permission-prompt"] != "?" {
@@ -70,10 +70,10 @@ integrations:
 // name with a typo in it changes nothing and says nothing, and the person
 // concludes the feature does not work.
 func TestAMisspelledSettingIsLoud(t *testing.T) {
-	root := configured(t, "integrations:\n  zellij:\n    settings:\n      binry: zellij\n")
+	root := configured(t, "integrations:\n  tmux:\n    settings:\n      binry: tmux\n")
 
-	var mine zellijish
-	err := (subscribe.Integration{Name: "zellij", Root: root}).Settings(&mine)
+	var mine tmuxish
+	err := (subscribe.Integration{Name: "tmux", Root: root}).Settings(&mine)
 	if err == nil {
 		t.Fatal("a key nobody declared was accepted in silence")
 	}
@@ -85,11 +85,11 @@ func TestAMisspelledSettingIsLoud(t *testing.T) {
 func TestNoTableAtAllLeavesTheDisplaysOwnDefaults(t *testing.T) {
 	root := shortRoot(t)
 
-	mine := zellijish{Binary: "zellij"}
-	if err := (subscribe.Integration{Name: "zellij", Root: root}).Settings(&mine); err != nil {
+	mine := tmuxish{Binary: "tmux"}
+	if err := (subscribe.Integration{Name: "tmux", Root: root}).Settings(&mine); err != nil {
 		t.Fatalf("Settings with no config file at all: %v", err)
 	}
-	if mine.Binary != "zellij" {
+	if mine.Binary != "tmux" {
 		t.Errorf("binary = %q, want the default the display arrived with", mine.Binary)
 	}
 }

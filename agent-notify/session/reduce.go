@@ -183,9 +183,9 @@ func Apply(previous Record, report Report, now time.Time) Record {
 		default:
 			// The same process, so the same environment: what arrived is a
 			// top-up for integrations that were missing, and only their
-			// entries change. What zellij derived from a capture that has
-			// not moved is still true, and voiding it would have the
-			// session-watcher ask zellij again for nothing (D-90).
+			// entries change. What a container derived from a capture that
+			// has not moved is still true, and voiding it would have the
+			// session-watcher ask it again for nothing (D-90).
 			if next.CapturedContext.By == nil && len(report.CapturedContext.By) > 0 {
 				next.CapturedContext.By = map[string]json.RawMessage{}
 			}

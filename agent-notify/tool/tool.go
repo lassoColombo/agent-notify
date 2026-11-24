@@ -1,7 +1,7 @@
 // Package tool runs the external program an integration drives, under a
 // timeout, and says what came of it.
 //
-// Every tool-integration has one of these: zellij, aerospace, sketchybar. The
+// Every tool-integration has one of these: tmux, aerospace, alerter. The
 // running of it is a dozen lines, four of which are easy to get wrong, and
 // before this package there were five copies of them — one in core and one in
 // each of four integrations — which had already drifted into disagreeing about
@@ -198,8 +198,8 @@ func asked(binary string, args []string) string {
 // error message or a log.
 //
 // The FIRST non-empty line, because a tool that failed says why first and then
-// prints something large: zellij answers a missing session with a coloured list
-// of every session that does exist.
+// prints something large: a usage text, or a coloured list of everything that
+// does exist.
 //
 // Cleaned through core's own [session.CleanMessage] and
 // [session.CleanLine] rather than a local strip. These are somebody else's

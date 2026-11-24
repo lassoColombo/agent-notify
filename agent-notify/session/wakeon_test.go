@@ -37,8 +37,8 @@ func full() session.Record {
 			StartedAt: time.Date(2026, 9, 21, 7, 0, 0, 0, time.UTC)},
 		CapturedContext: session.CapturedContext{
 			CapturedAt: time.Date(2026, 9, 21, 8, 30, 0, 0, time.UTC),
-			Ancestry:   []session.Ancestor{{PID: 4241, Command: "zellij"}},
-			By:         map[string]json.RawMessage{"zellij-display": json.RawMessage(`{"pane":7}`)},
+			Ancestry:   []session.Ancestor{{PID: 4241, Command: "tmux"}},
+			By:         map[string]json.RawMessage{"tmux": json.RawMessage(`{"pane":7}`)},
 		},
 	}
 }

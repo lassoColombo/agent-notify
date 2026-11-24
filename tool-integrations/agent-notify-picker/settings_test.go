@@ -8,7 +8,6 @@ import (
 
 	fzf "github.com/junegunn/fzf/src"
 
-	"github.com/lassoColombo/agent-notify/session"
 	"github.com/lassoColombo/agent-notify/subscribe"
 )
 
@@ -65,24 +64,24 @@ func TestAUserWithNoOpinionKeepsThePalette(t *testing.T) {
 }
 
 // TestAHueIsSpentEverywhereItIsUsed is the test the whole design is for: one
-// table, three renderers. base0D is paths in a row, the prompt and the label in
-// fzf's chrome, and a link in a rendered message — and a window half in your
-// palette and half in mine is worse than one wholly in mine.
+// table, three renderers — the rows, fzf's chrome, and a rendered message —
+// because a window half in your palette and half in mine is worse than one
+// wholly in mine.
 func TestAHueIsSpentEverywhereItIsUsed(t *testing.T) {
 	if complaints := appliedWith(t, `
 integrations:
   picker:
     settings:
       colors:
+        base08: "#070809"
         base0D: "#010203"
         base13: "#040506"
 `); len(complaints) > 0 {
 		t.Fatalf("a colour was refused: %v", complaints)
 	}
 
-	row := Row(aSession(), noon, Measure([]session.Record{aSession()}))
-	if !strings.Contains(row, "1;2;3") {
-		t.Errorf("the path in a row is not drawn in the hue that was asked for: %q", row)
+	if row := Row(aSession(), noon, 28); !strings.Contains(row, "7;8;9") {
+		t.Errorf("the glyph in a row is not drawn in the hue that was asked for: %q", row)
 	}
 	if !strings.Contains(fzfColours(), "#010203") {
 		t.Errorf("fzf's chrome is still in the default iris: %s", fzfColours())
@@ -286,24 +285,6 @@ integrations:
 	if _, err := fzf.ParseOptions(true,
 		Arguments("/usr/bin/true", "down,34", Ghost(false), said)); err != nil {
 		t.Fatalf("the fallback is not one: %v", err)
-	}
-}
-
-// TestTheLabelBindIsNotTheUsers: `focus` redraws the preview's label and is not
-// a key at all, so it lives in a --bind of its own where no table can take it.
-func TestTheLabelBindIsNotTheUsers(t *testing.T) {
-	if complaints := appliedWith(t, `
-integrations:
-  picker:
-    settings:
-      keys:
-        down: ["j"]
-`); len(complaints) > 0 {
-		t.Fatalf("a keymap was refused: %v", complaints)
-	}
-	told := strings.Join(Arguments("/usr/bin/true", "down,34", Ghost(false), ""), " ")
-	if !strings.Contains(told, "focus:bg-transform-preview-label") {
-		t.Errorf("the label stopped being redrawn: %s", told)
 	}
 }
 

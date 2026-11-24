@@ -263,10 +263,10 @@ watcher      ok    pid 86777, version 0.0.0-dev, since 2026-09-22T22:15:40Z
 integrations ok    reported by pid 86777 at 2026-09-22T22:15:40Z
              claude                 yours to start; core never runs it
                                     answers install, uninstall, none of which core calls
-             zellij                 drawn when something it watches moves
+             tmux                   drawn when something it watches moves
                                     answers capture-environment, interpret, focus, focused, render — built against 0.0.0-dev
              …
-containers   ok    outermost first: aerospace-container, zellij
+containers   ok    outermost first: aerospace-container, tmux
 ```
 
 This program is in the set because it is on PATH — that is the whole of what

@@ -13,7 +13,10 @@ import (
 // read afresh before anything is decided, and never remembered across a
 // decision (R17, R22).
 type World struct {
-	Panes map[string]Pane
+	// Server is the server's pid, which tells it from one started again on
+	// the same socket (D-126).
+	Server int
+	Panes  map[string]Pane
 }
 
 // Pane is one pane and what this program wrote on it.
@@ -23,11 +26,16 @@ type Pane struct {
 	// Active is whether it is its window's active pane.
 	Active bool
 	// Dead is a pane whose program exited and which `remain-on-exit` kept.
-	Dead bool
+	Dead          bool
+	Width, Height int
 	// Role is `list` or `stand-in` on the tab's own two panes.
 	Role string
-	// StandIn and HomeSession are set on a borrowed pane.
-	StandIn, HomeSession string
+	// StandIn and HomeSession are set on a borrowed pane, and Renamed on one
+	// whose window has its `automatic-rename` held off: it is that window.
+	StandIn, HomeSession, Renamed string
+	// AutoRename is whether the pane's window takes its name from its active
+	// pane.
+	AutoRename bool
 	// Views is one per session the pane's window is linked into.
 	Views []View
 }
@@ -46,9 +54,10 @@ var worldFormat = strings.Join([]string{
 	"#{pane_id}", "#{window_id}", "#{pane_active}", "#{pane_dead}",
 	"#{" + roleOption + "}", "#{" + standInOption + "}", "#{" + homeSessionOption + "}",
 	"#{session_id}", "#{session_name}", "#{window_index}", "#{window_active}", "#{session_attached}",
+	"#{pid}", "#{pane_width}", "#{pane_height}", "#{automatic-rename}", "#{" + renamedOption + "}",
 }, separator)
 
-const worldFields = 12
+const worldFields = 17
 
 // Observe asks the server what it holds.
 func (t Tmux) Observe() (World, error) {
@@ -77,8 +86,12 @@ func ParseWorld(output string) (World, error) {
 			pane = Pane{
 				ID: fields[0], Window: fields[1], Active: fields[2] == "1", Dead: fields[3] == "1",
 				Role: fields[4], StandIn: fields[5], HomeSession: fields[6],
+				AutoRename: fields[15] == "1", Renamed: fields[16],
 			}
+			pane.Width, _ = strconv.Atoi(fields[13])
+			pane.Height, _ = strconv.Atoi(fields[14])
 		}
+		world.Server, _ = strconv.Atoi(fields[12])
 		index, _ := strconv.Atoi(fields[9])
 		attached, _ := strconv.Atoi(fields[11])
 		pane.Views = append(pane.Views, View{
@@ -169,6 +182,31 @@ func (w World) StandIns(tab string) []Pane {
 func (w World) Visible(pane string) bool {
 	for _, view := range w.Panes[pane].Views {
 		if view.Attached > 0 && view.WindowActive {
+			return true
+		}
+	}
+	return false
+}
+
+// OnScreenAtHome is whether some terminal is showing the window `pane` lives
+// in: its own, or the one its stand-in holds its place in while it is away.
+// Such a pane is not borrowed, and one that is goes back: nothing is taken
+// from under a terminal that is looking at it.
+func (w World) OnScreenAtHome(pane, tab string) bool {
+	at, exists := w.Panes[pane]
+	if !exists {
+		return false
+	}
+	if standIn, away := w.Panes[at.StandIn]; away {
+		at = standIn
+	}
+	return at.Window != tab && w.Visible(at.ID)
+}
+
+// hasWindow is whether a window is still there.
+func (w World) hasWindow(window string) bool {
+	for _, pane := range w.Panes {
+		if pane.Window == window {
 			return true
 		}
 	}

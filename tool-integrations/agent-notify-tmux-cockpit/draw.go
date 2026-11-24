@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -17,11 +16,11 @@ import (
 // agent is doing, and the selected row sits on overlay with a bright rose bar.
 var (
 	base02 = lipgloss.Color("#26233a") // overlay — the selected row
-	base03 = lipgloss.Color("#6e6a86") // muted — counts, the keys
+	base03 = lipgloss.Color("#6e6a86") // muted — the background, the keys
 	base04 = lipgloss.Color("#8c88a6") // subtle — where, age
 	base05 = lipgloss.Color("#e0def4") // text — names
 	base08 = lipgloss.Color("#eb6f92") // love — needs you
-	base09 = lipgloss.Color("#f6c177") // gold — broke
+	base09 = lipgloss.Color("#f6c177") // gold — broke, and a turn gone on too long
 	base0C = lipgloss.Color("#9ccfd8") // foam — finished a turn
 	base13 = lipgloss.Color("#fff0ee") // bright rose — the pointer
 	base14 = lipgloss.Color("#609fbb") // bright pine — working
@@ -47,11 +46,17 @@ func hueOf(kernel session.Kernel) lipgloss.Style {
 // keys is the list's last line: what it takes besides moving.
 const keys = " ⏎ type   o go to   q close"
 
-// Draw is the list: per state a header with its count, then two lines per
-// agent, its name and age and then where it lives; below them the sessions in
-// the background, each wearing its own state's glyph since no header says it
-// (D-128). Scrolled to keep the cursor on screen, with the keys on the last
-// line.
+// stuckAfter is how long a turn runs before its wait turns gold: a working
+// agent that has gone on this long is more often stuck than busy.
+const stuckAfter = 15 * time.Minute
+
+// Draw is the list, and holds only what decides where you look next (D-132):
+// per state a header in its colour, then one line per agent, its name and how
+// long it has been so; below them the sessions in the background, each
+// wearing its own state's glyph since no header says it (D-128). Where an
+// agent lives, its directory and what it said are not here: `o` goes where it
+// lives, and the stage is the agent's own screen. Scrolled to keep the cursor
+// on screen, with the keys on the last line.
 func Draw(sections []Section, background []session.Record, selected string, glyphs session.Palette, width, height int, now time.Time) string {
 	width, height = max(width, narrowestList), max(height, 3)
 	if len(sections) == 0 && len(background) == 0 {
@@ -70,27 +75,25 @@ func Draw(sections []Section, background []session.Record, selected string, glyp
 		if glyph := glyphs.For(session.Record{Kernel: section.Kernel, Rank: section.Agents[0].Record.Rank}); glyph != "" {
 			title = glyph + " " + title
 		}
-		lines = append(lines, hueOf(section.Kernel).Bold(true).Render(" "+title)+
-			lipgloss.NewStyle().Foreground(base03).Render(fmt.Sprintf(" %d", len(section.Agents))))
+		lines = append(lines, hueOf(section.Kernel).Bold(true).Render(" "+fit(title, width-1)))
 		for _, agent := range section.Agents {
 			if agent.Pane == selected {
 				cursor = len(lines)
 			}
-			lines = append(lines, row(agent, agent.Pane == selected, "", width, now)...)
+			lines = append(lines, row(agent.Record, agent.Pane == selected, "", width, now))
 		}
 	}
 	if len(background) > 0 {
 		if len(lines) > 0 {
 			lines = append(lines, "")
 		}
-		lines = append(lines, lipgloss.NewStyle().Foreground(base04).Bold(true).Render(" in background")+
-			lipgloss.NewStyle().Foreground(base03).Render(fmt.Sprintf(" %d", len(background))))
+		lines = append(lines, lipgloss.NewStyle().Foreground(base03).Bold(true).Render(" in background"))
 		for _, record := range background {
-			mark := ""
+			mark := "  "
 			if glyph := glyphs.For(session.Record{Kernel: record.Kernel, Rank: record.Rank}); glyph != "" {
 				mark = hueOf(record.Kernel).Render(glyph) + " "
 			}
-			lines = append(lines, row(Agent{Record: record}, false, mark, width, now)...)
+			lines = append(lines, row(record, false, mark, width, now))
 		}
 	}
 
@@ -102,35 +105,33 @@ func Draw(sections []Section, background []session.Record, selected string, glyp
 	return strings.Join(append(shown, "", lipgloss.NewStyle().Foreground(base03).Render(fit(keys, width))), "\n")
 }
 
-// row is one agent: a bar if it is selected, its name after `mark`, its age at
-// the far edge, and under it the session:window and directory it lives in.
-func row(agent Agent, selected bool, mark string, width int, now time.Time) []string {
+// row is one session on one line: a bar if it is selected, its name after
+// `mark`, and how long it has been in its state at the far edge. Only the
+// wait carries a colour, and only when it says something: bold for an agent
+// waiting on you, gold for a turn that has run too long. A row with a mark
+// is a background one, and its name is dimmed: there is no pane to borrow.
+func row(record session.Record, selected bool, mark string, width int, now time.Time) string {
 	bar, base := "  ", lipgloss.NewStyle()
 	if selected {
 		bar = lipgloss.NewStyle().Foreground(base13).Background(base02).Render("▌ ")
 		base = base.Background(base02)
 	}
-	inside := width - 2
-	age := session.Ago(agent.Record.Elapsed(now))
-	room := max(inside-lipgloss.Width(age)-lipgloss.Width(mark)-1, 1)
-
-	name := base.Foreground(base05).Bold(selected).Width(room).Render(fit(agent.Record.DisplayName(), room))
-	when := base.Foreground(base04).Render(" " + age)
-
-	where := agent.Where
-	if leaf := leafOf(agent.Record.Cwd); leaf != "" {
-		where = strings.TrimLeft(where+"  "+leaf, " ")
+	elapsed := record.Elapsed(now)
+	age := session.Ago(elapsed)
+	wait := base.Foreground(base04)
+	switch {
+	case record.Kernel == session.BlockedOnYou:
+		wait = base.Foreground(base05).Bold(true)
+	case record.Kernel == session.Working && elapsed >= stuckAfter:
+		wait = base.Foreground(base09)
 	}
-	under := base.Foreground(base04).Width(inside).Render(fit(where, inside))
-	return []string{bar + mark + name + when, bar + under}
-}
-
-func leafOf(path string) string {
-	path = strings.TrimRight(path, "/")
-	if at := strings.LastIndex(path, "/"); at >= 0 {
-		return path[at+1:]
+	ink := base05
+	if mark != "" {
+		ink = base04
 	}
-	return path
+	room := max(width-2-lipgloss.Width(mark)-lipgloss.Width(age)-1, 1)
+	name := base.Foreground(ink).Bold(selected).Width(room).Render(fit(record.DisplayName(), room))
+	return bar + mark + name + wait.Render(" "+age)
 }
 
 // fit makes text one clean line of at most `width` cells, cut with an
