@@ -35,25 +35,13 @@ func WhatToWakeFor() []string {
 	return []string{"kernel", "detail", "rank", "name", "cwd", "captured_context"}
 }
 
-// DefaultGlyphs are Nerd Font codepoints, chosen so states are told apart by
-// shape, since a status line may carry no colour. Written as escapes: tooling
-// quietly drops private-use characters. Idle and ended are empty on purpose.
-var DefaultGlyphs = map[session.Kernel]string{
-	session.BlockedOnYou:  "", // warning triangle
-	session.Broke:         "", // a cross
-	session.FinishedATurn: "", // speech bubble
-	session.Working:       "", // circular arrows
-	session.Idle:          "",
-	session.Ended:         "",
-}
-
 // Settings is `integrations.tmux.settings`; a key not declared here is
 // refused by name.
 type Settings struct {
 	// Tmux is where tmux is, when it is not on this process's PATH (D-101).
 	Tmux string `yaml:"tmux"`
 	// Glyphs is the user's table, keyed on `kernel` or `kernel/detail`,
-	// layered over DefaultGlyphs.
+	// layered over session.DefaultGlyphs.
 	Glyphs map[string]string `yaml:"glyphs"`
 }
 
@@ -77,6 +65,6 @@ func Read(given subscribe.Integration) (Resolved, error) {
 	}
 	return Resolved{
 		Tmux:   Tmux{Binary: binary, Timeout: tmuxTimeout},
-		Glyphs: session.NewPalette(DefaultGlyphs, settings.Glyphs),
+		Glyphs: session.NewPalette(session.DefaultGlyphs, settings.Glyphs),
 	}, nil
 }

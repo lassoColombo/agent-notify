@@ -80,11 +80,3 @@ func (e Event) Known() bool {
 // AssertsState reports whether this event makes a claim about what the agent is
 // doing, as opposed to telling us something about the session.
 func (e Event) AssertsState() bool { return events[e] }
-
-// Events returns the nine, in the order they are documented.
-func Events() []Event {
-	return []Event{
-		SessionStarted, UserSentPrompt, AgentProgressed, TurnFinished,
-		TurnFailed, TurnInterrupted, BlockedOnHuman, SessionEnded, ContextChanged,
-	}
-}

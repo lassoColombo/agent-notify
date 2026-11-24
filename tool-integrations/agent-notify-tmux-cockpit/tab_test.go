@@ -130,7 +130,7 @@ func aScene(t *testing.T) scene {
 	if !found {
 		t.Fatal("the tab was opened and has no list")
 	}
-	s.tab = Tab{Tmux: tmux, List: list.ID, Layout: Layout{ListWidth: 30}, Logger: quiet}
+	s.tab = Tab{Tmux: tmux, List: list.ID, ListWidth: 30, Logger: quiet}
 	return s
 }
 
@@ -178,6 +178,22 @@ func TestOpeningMakesTheTabAndPutsItInFront(t *testing.T) {
 	}
 	if must(t, s.tmux, "display-message", "-p", "-t", s.tab.List, "#{"+tabOption+"}") != "1" {
 		t.Errorf("the tab's window does not say it is the tab")
+	}
+}
+
+// TestOpeningWhereUnattachedSessionsAreDestroyed: the tab lives in a session
+// nobody attaches to, which a server set to destroy those would destroy the
+// moment it was made.
+func TestOpeningWhereUnattachedSessionsAreDestroyed(t *testing.T) {
+	tmux := aServer(t)
+	client := viewer(t, tmux, "home")
+	// After somebody is attached: set first, it destroys the only session.
+	must(t, tmux, "set-option", "-g", "destroy-unattached", "on")
+	if err := Open(tmux, client, idle); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if out, err := bare(tmux, "has-session", "-t", "="+tabSession); err != nil {
+		t.Errorf("the tab's session is gone: %s", out)
 	}
 }
 
@@ -313,6 +329,29 @@ func TestAnAgentThatClosesOnTheStageLeavesTheTabWhole(t *testing.T) {
 	}
 }
 
+// TestAWindowWhoseAgentClosedOnTheStageGetsItsNameBack: the hold on the
+// window's naming was written on the agent's pane, which is gone, and on the
+// stand-in, which comes back from the window and gives the name back as it
+// leaves.
+func TestAWindowWhoseAgentClosedOnTheStageGetsItsNameBack(t *testing.T) {
+	s := aScene(t)
+	home := must(t, s.tmux, "display-message", "-p", "-t", s.a, "#{window_id}")
+	s.show(t, Desire{Staged: s.a})
+	if got := must(t, s.tmux, "show-options", "-w", "-t", home, "automatic-rename"); got != "automatic-rename off" {
+		t.Fatalf("while its agent is away the window has %q", got)
+	}
+	must(t, s.tmux, "kill-pane", "-t", s.a)
+
+	world := s.show(t, Desire{Staged: s.a})
+	if stage, found := world.Stage(s.tab.List); !found || world.Panes[stage].Role != roleStandIn ||
+		world.Panes[stage].Renamed != "" {
+		t.Fatalf("the stage holds %+v", world.Panes[stage])
+	}
+	if got := must(t, s.tmux, "show-options", "-w", "-t", home, "automatic-rename"); got != "" {
+		t.Errorf("the window its agent closed in was left with %q", got)
+	}
+}
+
 // TestGivingBackTwiceIsGivingBackOnce: the list, a stand-in left alone and
 // `restore` may all send one pane home, and a swap done twice is a swap
 // undone.
@@ -419,7 +458,7 @@ func TestATerminalComingToItsWindowFindsTheAgentThere(t *testing.T) {
 	// as it runs it
 	stale := s.see(t)
 	stale.Panes[agent] = unseen(stale.Panes[agent])
-	if step, more := Next(stale, s.tab.List, agent, s.tab.Layout); !more {
+	if step, more := Next(stale, s.tab.List, agent, s.tab.ListWidth); !more {
 		t.Fatal("nothing was planned on the old read")
 	} else {
 		s.tab.do(step)

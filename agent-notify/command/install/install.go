@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -81,7 +82,7 @@ wrote and nothing else.`,
 // on PATH that answers the verb is run with nothing.
 func run(verb string, arguments []string) int {
 	names, rest := arguments, []string(nil)
-	if len(arguments) > 1 && arguments[1][0] == '-' {
+	if len(arguments) > 1 && strings.HasPrefix(arguments[1], "-") {
 		names, rest = arguments[:1], arguments[1:]
 	}
 	if len(names) == 0 {

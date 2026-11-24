@@ -96,9 +96,7 @@ func ByUrgency(records []Record) {
 	slices.SortStableFunc(records, moreUrgent)
 }
 
-// moreUrgent is the one comparison. Ordering a list and picking the single most
-// urgent out of it are the same question asked twice, and two spellings of it
-// would eventually disagree about which of two equals comes first.
+// moreUrgent is the one comparison.
 func moreUrgent(a, b Record) int {
 	if order := cmp.Compare(b.Rank, a.Rank); order != 0 {
 		return order
@@ -107,25 +105,6 @@ func moreUrgent(a, b Record) int {
 		return order
 	}
 	return cmp.Compare(a.DisplayName(), b.DisplayName())
-}
-
-// MostUrgent is the one record a single light is for: a tmux window that holds
-// four panes, a menu-bar LED, a dock badge (§A12.1).
-//
-// It returns the record rather than its rank because what a display paints is
-// resolved from the whole record — the detail can carry its own glyph (§A5.3),
-// and a rank cannot be asked for one.
-func MostUrgent(records []Record) (Record, bool) {
-	if len(records) == 0 {
-		return Record{}, false
-	}
-	highest := records[0]
-	for _, record := range records[1:] {
-		if moreUrgent(record, highest) < 0 {
-			highest = record
-		}
-	}
-	return highest, true
 }
 
 // WantsYou reports whether arriving in this state is worth interrupting a
@@ -246,6 +225,11 @@ func (r Record) Elapsed(now time.Time) time.Duration {
 func (u Usage) Total() uint64 {
 	return u.Input + u.Output + u.CacheRead + u.CacheWrite
 }
+
+// StuckAfter is how long a turn runs before a list marks its wait: a working
+// agent that has gone on this long is more often stuck than busy. One number,
+// so that the cockpit and the picker say the same thing about the same agent.
+const StuckAfter = 15 * time.Minute
 
 // Ago is how a person reads a duration on a bar, where there is room for three
 // characters and no room for "1h23m45.6s".

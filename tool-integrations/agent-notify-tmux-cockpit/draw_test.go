@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	testGlyphs = session.NewPalette(DefaultGlyphs, nil)
+	testGlyphs = session.NewPalette(session.DefaultGlyphs, nil)
 	testNow    = time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
 )
 
@@ -103,10 +103,10 @@ func TestATurnThatRunsLongIsMarked(t *testing.T) {
 		return Draw(sections, nil, "", testGlyphs, 40, 10, testNow)
 	}
 	gold := "\x1b[38;2;246;193;119m"
-	if strings.Contains(waitOf(stuckAfter-time.Minute), gold) {
+	if strings.Contains(waitOf(session.StuckAfter-time.Minute), gold) {
 		t.Error("a turn shorter than the threshold is marked")
 	}
-	if !strings.Contains(waitOf(stuckAfter+time.Minute), gold) {
+	if !strings.Contains(waitOf(session.StuckAfter+time.Minute), gold) {
 		t.Error("a turn longer than the threshold is not marked")
 	}
 }

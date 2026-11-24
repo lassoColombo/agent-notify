@@ -2,6 +2,20 @@ package session
 
 import "sort"
 
+// DefaultGlyphs are the Nerd Font marks a display puts beside a state, chosen
+// so states are told apart by shape, since a status line may carry no colour.
+// They are here, once, because a state has to look the same on a pane's border
+// and in the lists beside it: tmux, the cockpit and the picker all start from
+// them. Idle and ended have none. Written as escapes: tooling quietly drops
+// private-use characters, and three copies of this table written as literals
+// were three chances for an editor to empty one.
+var DefaultGlyphs = map[Kernel]string{
+	BlockedOnYou:  "\uf071", // warning triangle
+	Broke:         "\uf00d", // a cross
+	FinishedATurn: "\uf075", // speech bubble
+	Working:       "\uf021", // circular arrows
+}
+
 // Palette is the user's table of what a state looks like: a glyph, a colour, a
 // class name — whatever short string a display paints per state.
 //

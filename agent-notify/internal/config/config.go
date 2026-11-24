@@ -36,11 +36,6 @@ type Config struct {
 	// that resuming it is recognised as a return rather than a birth.
 	KeepEndedSessions session.Duration `yaml:"keep-ended-sessions"`
 
-	// HistoryMessages and HistoryChanges bound the per-session history by
-	// count (§A7.7). Zero keeps none.
-	HistoryMessages int `yaml:"history-messages"`
-	HistoryChanges  int `yaml:"history-changes"`
-
 	// Integrations is keyed by the program's name, one entry per program a
 	// person has something to say about.
 	Integrations map[string]Integration `yaml:"integrations"`
@@ -139,8 +134,6 @@ func (c Config) WrittenAndNotOnPath(file string) []error {
 func Defaults() Config {
 	return Config{
 		KeepEndedSessions: session.NewDuration(7 * 24 * time.Hour),
-		HistoryMessages:   20,
-		HistoryChanges:    100,
 		Integrations:      map[string]Integration{},
 		scan:              &onceScanned{},
 	}
@@ -211,20 +204,6 @@ func (c *Config) problemsWith(name string) []error {
 			"%s: keep-ended-sessions must be positive, not %s; using %s",
 			name, c.KeepEndedSessions, defaults.KeepEndedSessions))
 		c.KeepEndedSessions = defaults.KeepEndedSessions
-	}
-
-	for _, count := range []struct {
-		key   string
-		value *int
-	}{
-		{"history-messages", &c.HistoryMessages},
-		{"history-changes", &c.HistoryChanges},
-	} {
-		if *count.value < 0 {
-			problems = append(problems, fmt.Errorf(
-				"%s: %s cannot be negative; using 0, which keeps none", name, count.key))
-			*count.value = 0
-		}
 	}
 	return problems
 }

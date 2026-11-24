@@ -33,16 +33,31 @@ func TestWhatCaptureReturnsIsWhatPlaceOfReads(t *testing.T) {
 	}
 }
 
-// TestWhereNothingIsPlaced: a session outside tmux captures two empty
+// TestOutsideAnyPaneIsAnAnswer: a session outside tmux captures two empty
 // strings, and a popup or a `run-shell` has $TMUX and no $TMUX_PANE [measured
-// on 3.8]. Neither is anywhere, and interpreting either says why.
+// on 3.8]. Neither is anywhere, and interpreting either answers nothing
+// rather than failing, so core does not ask three times and log an error
+// for every session in a plain terminal (D-135).
+func TestOutsideAnyPaneIsAnAnswer(t *testing.T) {
+	for _, captured := range []Captured{{}, {Server: "/tmp/tmux-501/default,4242,0"}} {
+		blob, _ := json.Marshal(captured)
+		record := session.Record{CapturedContext: session.CapturedContext{By: map[string]json.RawMessage{Name: blob}}}
+		if place, found := PlaceOf(record); found {
+			t.Errorf("%+v is placed at %+v", captured, place)
+		}
+		if interpreted, err := Interpret(blob); interpreted != nil || err != nil {
+			t.Errorf("interpreting %+v: %v, %v, want nothing and no error", captured, interpreted, err)
+		}
+	}
+}
+
+// TestWhereNothingIsPlaced: a capture that is inside tmux and malformed is
+// nowhere, and interpreting it says why.
 func TestWhereNothingIsPlaced(t *testing.T) {
 	for _, given := range []struct {
 		captured Captured
 		why      string
 	}{
-		{Captured{}, "not started inside tmux"},
-		{Captured{Server: "/tmp/tmux-501/default,4242,0"}, "outside any pane"},
 		{Captured{Server: "/tmp/tmux-501/default", Pane: "%7"}, "does not name a server"},
 		{Captured{Server: "/tmp/tmux-501/default,4242,0", Pane: "7"}, "not a pane id"},
 	} {

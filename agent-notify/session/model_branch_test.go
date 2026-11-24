@@ -15,10 +15,10 @@ import (
 // third, and it left with the rest of what no display could be trusted to read
 // (D-76).
 
-func TestModelAndBranchAreReplacedAndNeverCleared(t *testing.T) {
+func TestModelAndBranchAreReplacedAndNotClearedBySilence(t *testing.T) {
 	known := session.Apply(session.Record{}, session.Report{
 		Key: key, Event: session.SessionStarted,
-		Model: "claude-opus-5", Branch: "main",
+		Model: "claude-opus-5", Branch: new("main"),
 	}, when)
 	if known.Model != "claude-opus-5" || known.Branch != "main" {
 		t.Fatalf("model = %q, branch = %q", known.Model, known.Branch)
@@ -35,10 +35,22 @@ func TestModelAndBranchAreReplacedAndNeverCleared(t *testing.T) {
 	// mid-session are both ordinary.
 	moved := session.Apply(quiet, session.Report{
 		Key: key, Event: session.AgentProgressed,
-		Model: "claude-haiku-4-5", Branch: "release/2.1",
+		Model: "claude-haiku-4-5", Branch: new("release/2.1"),
 	}, later)
 	if moved.Model != "claude-haiku-4-5" || moved.Branch != "release/2.1" {
 		t.Errorf("model = %q, branch = %q, want both to have followed", moved.Model, moved.Branch)
+	}
+}
+
+// TestNoBranchClearsTheBranch: a hook that looked and found no branch — a
+// detached head, or a `cd` out of the repository — says so, and the record
+// stops naming the branch it was on, which would otherwise be confidently
+// wrong for the rest of the session (§A7.4.4, D-136).
+func TestNoBranchClearsTheBranch(t *testing.T) {
+	on := session.Apply(session.Record{}, session.Report{Key: key, Event: session.AgentProgressed, Branch: new("main")}, when)
+	detached := session.Apply(on, session.Report{Key: key, Event: session.AgentProgressed, Branch: new("")}, later)
+	if detached.Branch != "" {
+		t.Errorf("after a hook that found no branch the record says %q", detached.Branch)
 	}
 }
 
@@ -48,7 +60,7 @@ func TestNeitherMovesStateSince(t *testing.T) {
 	blocked := session.Apply(session.Record{}, session.Report{Key: key, Event: session.BlockedOnHuman}, when)
 	after := session.Apply(blocked, session.Report{
 		Key: key, Event: session.ContextChanged,
-		Model: "gpt-5.6-terra", Branch: "spike",
+		Model: "gpt-5.6-terra", Branch: new("spike"),
 	}, later)
 
 	if !after.StateSince.Equal(blocked.StateSince) {
@@ -66,7 +78,7 @@ func TestBothWakeADisplay(t *testing.T) {
 		report session.Report
 	}{
 		{"the model changed", session.Report{Key: key, Event: session.AgentProgressed, Model: "gpt-5.6-terra"}},
-		{"the branch changed", session.Report{Key: key, Event: session.AgentProgressed, Branch: "spike"}},
+		{"the branch changed", session.Report{Key: key, Event: session.AgentProgressed, Branch: new("spike")}},
 	} {
 		if !session.Differs(before, session.Apply(before, one.report, later), nil) {
 			t.Errorf("%s and no display was told", one.why)
@@ -90,7 +102,7 @@ func TestNothingIsWrittenUntilThereIsSomething(t *testing.T) {
 
 	full := session.Apply(record, session.Report{
 		Key: key, Event: session.AgentProgressed,
-		Model: "claude-opus-5", Branch: "main",
+		Model: "claude-opus-5", Branch: new("main"),
 	}, later)
 	encoded, err = json.Marshal(full)
 	if err != nil {

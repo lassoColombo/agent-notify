@@ -18,7 +18,10 @@ func translate(t *testing.T, hook, raw string) (session.Report, bool) {
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
 		t.Fatalf("the fixture is not JSON: %v", err)
 	}
-	return Translate(hook, payload, ClaudeSession{}, ClaudeTranscript{}, "", "")
+	// The hook named here is the one translated, so that one fixture can be
+	// sent as a hook it is not.
+	payload.HookEventName = hook
+	return Translate(payload, ClaudeSession{}, ClaudeTranscript{}, "")
 }
 
 func mustTranslate(t *testing.T, hook, raw string) session.Report {
@@ -161,16 +164,19 @@ func TestTheTurnWrapperIsNotASubagent(t *testing.T) {
 	}
 }
 
-// TestCompactionIsWorkingAndNotABeginning is D-31 in the adapter: splitting
-// SessionStart on its source is this program's job, not core's.
-func TestCompactionIsWorkingAndNotABeginning(t *testing.T) {
+// TestCompactionMovesNoState is D-31 in the adapter — splitting SessionStart
+// on its source is this program's job, not core's — as D-137 amends it: a
+// compaction is not a beginning, and not the agent working either, because
+// [verified 2026-11-24] 234 of 252 of them began after the turn had finished.
+func TestCompactionMovesNoState(t *testing.T) {
 	compact := mustTranslate(t, "SessionStart", realCompact)
-	if compact.Event != session.AgentProgressed {
-		t.Errorf("a compaction is %q, want agent-progressed: it keeps the session id and is the "+
-			"agent working mid-turn", compact.Event)
+	if compact.Event != session.ContextChanged {
+		t.Errorf("a compaction is %q, want context-changed", compact.Event)
 	}
-	if got := session.Reduce(session.Working, compact.Event); got != session.Working {
-		t.Errorf("a compaction left a working session at %q", got)
+	for _, kernel := range []session.Kernel{session.FinishedATurn, session.Working, session.BlockedOnYou} {
+		if got := session.Reduce(kernel, compact.Event); got != kernel {
+			t.Errorf("a compaction moved %q to %q", kernel, got)
+		}
 	}
 
 	for _, source := range []string{"startup", "resume", "clear"} {
@@ -181,9 +187,10 @@ func TestCompactionIsWorkingAndNotABeginning(t *testing.T) {
 		}
 	}
 
-	precompact := mustTranslate(t, "PreCompact", realPreCompact)
-	if precompact.Event != session.AgentProgressed || precompact.Detail != "compacting" {
-		t.Errorf("a compaction beginning is %q/%q", precompact.Event, precompact.Detail)
+	// PreCompact is not subscribed any more, and an install from before
+	// D-137 that still sends it is told nothing.
+	if _, worth := translate(t, "PreCompact", realPreCompact); worth {
+		t.Error("a compaction beginning was reported")
 	}
 }
 
@@ -224,15 +231,15 @@ func TestTheSessionsDirectoryBeatsTheHooks(t *testing.T) {
 		t.Fatalf("the fixture is not JSON: %v", err)
 	}
 
-	moved, _ := Translate("PostToolUse", payload,
-		ClaudeSession{Cwd: "/Users/x/projects/personal/agent-notify"}, ClaudeTranscript{}, "", "")
+	moved, _ := Translate(payload,
+		ClaudeSession{Cwd: "/Users/x/projects/personal/agent-notify"}, ClaudeTranscript{}, "")
 	if moved.Cwd != "/Users/x/projects/personal/agent-notify" {
 		t.Errorf("cwd = %q, want the session's own", moved.Cwd)
 	}
 
 	// And the payload's when Claude is too old to keep a file, because no cwd
 	// at all leaves a display with the session id to paint.
-	old, _ := Translate("PostToolUse", payload, ClaudeSession{}, ClaudeTranscript{}, "", "")
+	old, _ := Translate(payload, ClaudeSession{}, ClaudeTranscript{}, "")
 	if old.Cwd != payload.Cwd {
 		t.Errorf("cwd = %q, want the payload's as the fallback", old.Cwd)
 	}

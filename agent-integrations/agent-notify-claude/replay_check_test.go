@@ -51,19 +51,14 @@ func TestReplayOfRealCaptures(t *testing.T) {
 		if err := json.Unmarshal([]byte(parts[4]), &payload); err != nil {
 			continue
 		}
-		var named struct {
-			Hook string `json:"hook_event_name"`
-		}
-		_ = json.Unmarshal([]byte(parts[4]), &named)
-
 		total++
-		report, worth := Translate(named.Hook, payload, ClaudeSession{}, ClaudeTranscript{}, "", "")
+		report, worth := Translate(payload, ClaudeSession{}, ClaudeTranscript{}, "")
 		if !worth {
-			ignored[named.Hook+"/"+payload.NotificationType]++
+			ignored[payload.HookEventName+"/"+payload.NotificationType]++
 			continue
 		}
 		bySession[payload.SessionID] = append(bySession[payload.SessionID],
-			step{when: parts[0], hook: named.Hook, report: report, worth: worth})
+			step{when: parts[0], hook: payload.HookEventName, report: report, worth: worth})
 	}
 
 	t.Logf("replayed %d captured payloads across %d sessions", total, len(bySession))

@@ -10,6 +10,7 @@ package find
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -28,6 +29,9 @@ import (
 //
 // It reads through the one cold read, ended sessions included: a session that
 // is over can still be focused, since its pane may be there, and annotated.
+// But a live match wins over ended ones, which is what the completion below
+// offers: a name TAB put on the line must not be refused as ambiguous because
+// a session that ended last week went by it too.
 func Session(openedCore *core.Core, wanted string) (session.Record, error) {
 	var matched []session.Record
 	for _, record := range openedCore.WhatIsRunning(true) {
@@ -38,6 +42,11 @@ func Session(openedCore *core.Core, wanted string) (session.Record, error) {
 			len(wanted) >= 4 && strings.HasPrefix(record.Key.SessionID, wanted):
 			matched = append(matched, record)
 		}
+	}
+	if live := slices.DeleteFunc(slices.Clone(matched), func(record session.Record) bool {
+		return !record.Kernel.Live()
+	}); len(live) > 0 {
+		matched = live
 	}
 
 	switch len(matched) {

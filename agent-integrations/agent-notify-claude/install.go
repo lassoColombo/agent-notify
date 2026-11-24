@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -43,15 +44,15 @@ func install(arguments []string) int {
 		return 1
 	}
 
-	updated, changes := merge(settings, program)
-	rendered, err := json.MarshalIndent(updated, "", "  ")
+	updated, changes, err := merge(settings, program)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "agent-notify-claude install: %v\n", err)
+		fmt.Fprintf(os.Stderr, "agent-notify-claude install: %s: %v\n", *settingsPath, err)
 		return 1
 	}
+	rendered := encode(updated, "  ")
 
 	if *print {
-		fmt.Println(string(rendered))
+		fmt.Print(string(rendered))
 		return 0
 	}
 	if len(changes) == 0 {
@@ -89,12 +90,13 @@ func uninstall(arguments []string) int {
 		fmt.Fprintf(os.Stderr, "agent-notify-claude uninstall: %v\n", err)
 		return 1
 	}
-	if updated, removed := unmerge(settings, program); removed > 0 {
-		rendered, err := json.MarshalIndent(updated, "", "  ")
-		if err == nil {
-			err = writeSettings(*settingsPath, rendered)
-		}
-		if err != nil {
+	updated, removed, err := unmerge(settings, program)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "agent-notify-claude uninstall: %s: %v\n", *settingsPath, err)
+		return 1
+	}
+	if removed > 0 {
+		if err := writeSettings(*settingsPath, encode(updated, "  ")); err != nil {
 			fmt.Fprintf(os.Stderr, "agent-notify-claude uninstall: %v\n", err)
 			return 1
 		}
@@ -107,10 +109,10 @@ func uninstall(arguments []string) int {
 
 // unmerge is merge's opposite: every command naming this program goes, a
 // group left empty goes with it, and everybody else's stays byte for byte.
-func unmerge(settings map[string]json.RawMessage, program string) (map[string]json.RawMessage, int) {
-	hooks := map[string][]json.RawMessage{}
-	if raw, present := settings["hooks"]; present {
-		_ = json.Unmarshal(raw, &hooks)
+func unmerge(settings map[string]json.RawMessage, program string) (map[string]json.RawMessage, int, error) {
+	hooks, err := hooksIn(settings)
+	if err != nil {
+		return nil, 0, err
 	}
 	name := filepath.Base(program)
 	ours := func(rawCommand json.RawMessage) bool {
@@ -136,9 +138,7 @@ func unmerge(settings map[string]json.RawMessage, program string) (map[string]js
 				continue
 			}
 			parsed.Hooks = remaining
-			if regrouped, err := json.Marshal(parsed); err == nil {
-				kept = append(kept, regrouped)
-			}
+			kept = append(kept, encode(parsed, ""))
 		}
 		if len(kept) == 0 {
 			delete(hooks, event)
@@ -147,14 +147,14 @@ func unmerge(settings map[string]json.RawMessage, program string) (map[string]js
 		}
 	}
 	if removed == 0 {
-		return settings, 0
+		return settings, 0, nil
 	}
 	if len(hooks) == 0 {
 		delete(settings, "hooks")
-	} else if encoded, err := json.Marshal(hooks); err == nil {
-		settings["hooks"] = encoded
+	} else {
+		settings["hooks"] = encode(hooks, "")
 	}
-	return settings, removed
+	return settings, removed, nil
 }
 
 // defaultSettings is ~/.claude/settings.json, or wherever the user moved the
@@ -176,20 +176,55 @@ func defaultSettings() string {
 
 // readSettings returns the file as a map of untouched raw values. An absent
 // file is an empty one: installing into a machine that has never configured
-// Claude is the ordinary case.
+// Claude is the ordinary case. So is a file with nothing in it, or `null`,
+// which decodes to no map at all.
 func readSettings(path string) (map[string]json.RawMessage, error) {
 	content, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
+	if os.IsNotExist(err) || err == nil && len(bytes.TrimSpace(content)) == 0 {
 		return map[string]json.RawMessage{}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("cannot read %s: %w", path, err)
 	}
-	settings := map[string]json.RawMessage{}
+	var settings map[string]json.RawMessage
 	if err := json.Unmarshal(content, &settings); err != nil {
 		return nil, fmt.Errorf("%s is not readable as JSON, and this will not overwrite it: %w", path, err)
 	}
+	if settings == nil {
+		settings = map[string]json.RawMessage{}
+	}
 	return settings, nil
+}
+
+// hooksIn is the settings' `hooks`, which is an object of arrays, or a refusal:
+// one of any other shape is the user's, and writing ours over it would lose it.
+func hooksIn(settings map[string]json.RawMessage) (map[string][]json.RawMessage, error) {
+	hooks := map[string][]json.RawMessage{}
+	if raw, present := settings["hooks"]; present {
+		if err := json.Unmarshal(raw, &hooks); err != nil {
+			return nil, fmt.Errorf("`hooks` is not the shape Claude writes, and this will not overwrite it: %w", err)
+		}
+	}
+	if hooks == nil {
+		hooks = map[string][]json.RawMessage{}
+	}
+	return hooks, nil
+}
+
+// encode is json.Marshal, indented, without its HTML escaping: a settings file
+// holds commands, and `&&` written back as `\u0026\u0026` is the same JSON
+// and no longer the file its owner wrote. It cannot fail: everything handed
+// to it is strings and raw values that have just been decoded.
+func encode(value any, indent string) []byte {
+	var out bytes.Buffer
+	encoder := json.NewEncoder(&out)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", indent)
+	_ = encoder.Encode(value)
+	if indent == "" {
+		return bytes.TrimSuffix(out.Bytes(), []byte("\n"))
+	}
+	return out.Bytes()
 }
 
 // writeSettings replaces the file atomically, keeping a copy of what was there.
@@ -204,7 +239,7 @@ func writeSettings(path string, content []byte) error {
 		return err
 	}
 	temporary := path + ".writing"
-	if err := os.WriteFile(temporary, append(content, '\n'), 0o600); err != nil {
+	if err := os.WriteFile(temporary, content, 0o600); err != nil {
 		return err
 	}
 	return os.Rename(temporary, path)
@@ -223,10 +258,10 @@ type group struct {
 
 // merge adds this program to every hook it subscribes to, and reports what it
 // changed.
-func merge(settings map[string]json.RawMessage, program string) (map[string]json.RawMessage, []string) {
-	hooks := map[string][]json.RawMessage{}
-	if raw, present := settings["hooks"]; present {
-		_ = json.Unmarshal(raw, &hooks)
+func merge(settings map[string]json.RawMessage, program string) (map[string]json.RawMessage, []string, error) {
+	hooks, err := hooksIn(settings)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	var changes []string
@@ -241,14 +276,10 @@ func merge(settings map[string]json.RawMessage, program string) (map[string]json
 	}
 
 	if len(changes) == 0 {
-		return settings, nil
+		return settings, nil, nil
 	}
-	encoded, err := json.Marshal(hooks)
-	if err != nil {
-		return settings, nil
-	}
-	settings["hooks"] = encoded
-	return settings, changes
+	settings["hooks"] = encode(hooks, "")
+	return settings, changes, nil
 }
 
 // place puts one command into one hook's groups, replacing an entry that names
@@ -272,27 +303,13 @@ func place(groups []json.RawMessage, wanted command, program string) ([]json.Raw
 			if existing.Command == wanted.Command {
 				return groups, ""
 			}
-			encoded, err := json.Marshal(wanted)
-			if err != nil {
-				return groups, ""
-			}
-			parsed.Hooks[j] = encoded
-			if regrouped, err := json.Marshal(parsed); err == nil {
-				groups[i] = regrouped
-				return groups, "updated the path for"
-			}
-			return groups, ""
+			parsed.Hooks[j] = encode(wanted, "")
+			groups[i] = encode(parsed, "")
+			return groups, "updated the path for"
 		}
 	}
 
-	encoded, err := json.Marshal(wanted)
-	if err != nil {
-		return groups, ""
-	}
-	added, err := json.Marshal(group{Hooks: []json.RawMessage{encoded}})
-	if err != nil {
-		return groups, ""
-	}
+	added := encode(group{Hooks: []json.RawMessage{encode(wanted, "")}}, "")
 	return append(slices.Clone(groups), added), "added"
 }
 

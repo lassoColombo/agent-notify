@@ -24,25 +24,13 @@ func WhatToWakeFor() []string {
 	return []string{"kernel", "rank", "state_since", "name", "cwd", "captured_context", "derived_context"}
 }
 
-// DefaultGlyphs are agent-notify-tmux's, so that a state looks the same on a
-// pane's border and in the list. Written as escapes: tooling quietly drops
-// private-use characters.
-var DefaultGlyphs = map[session.Kernel]string{
-	session.BlockedOnYou:  "", // warning triangle
-	session.Broke:         "", // a cross
-	session.FinishedATurn: "", // speech bubble
-	session.Working:       "", // circular arrows
-	session.Idle:          "",
-	session.Ended:         "",
-}
-
 // Settings is `integrations.tmux-cockpit.settings`; a key not declared here
 // is refused by name.
 type Settings struct {
 	// Tmux is where tmux is, when it is not on this process's PATH (D-101).
 	Tmux string `yaml:"tmux"`
 	// Glyphs is the user's table, keyed on `kernel`, layered over
-	// DefaultGlyphs.
+	// session.DefaultGlyphs.
 	Glyphs map[string]string `yaml:"glyphs"`
 	// ListWidth is how many columns the list is given when the tab is made.
 	ListWidth int `yaml:"list_width"`
@@ -79,7 +67,7 @@ func Read() (Resolved, error) {
 	}
 	return Resolved{
 		Binary:    binary,
-		Glyphs:    session.NewPalette(DefaultGlyphs, settings.Glyphs),
+		Glyphs:    session.NewPalette(session.DefaultGlyphs, settings.Glyphs),
 		ListWidth: width,
 	}, nil
 }

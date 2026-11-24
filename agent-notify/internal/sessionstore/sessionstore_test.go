@@ -198,115 +198,6 @@ func TestListIncludingEndedSettlesTheSameTwoFiles(t *testing.T) {
 	}
 }
 
-func TestHistoryRecordsWhatChangedAndNothingElse(t *testing.T) {
-	opened, _ := open(t)
-
-	say := func(text string, event session.Event) {
-		t.Helper()
-		if _, err := opened.Apply(session.Report{
-			Key: key, Event: event, Message: &text,
-		}, when); err != nil {
-			t.Fatalf("Apply: %v", err)
-		}
-	}
-	say("starting", session.UserSentPrompt)
-	say("still going", session.AgentProgressed)
-	say("still going", session.AgentProgressed) // same text, same state
-	say("done", session.TurnFinished)
-
-	history, err := opened.History(key)
-	if err != nil {
-		t.Fatalf("History: %v", err)
-	}
-	if len(history.Messages) != 3 {
-		t.Errorf("kept %d messages, want 3 — repeating itself is not saying something new: %+v",
-			len(history.Messages), history.Messages)
-	}
-	if len(history.Changes) != 2 {
-		t.Errorf("kept %d changes, want working then finished-a-turn: %+v",
-			len(history.Changes), history.Changes)
-	}
-	if last := history.Changes[len(history.Changes)-1]; last.From != session.Working ||
-		last.To != session.FinishedATurn {
-		t.Errorf("last change was %q -> %q", last.From, last.To)
-	}
-	if first := history.Messages[0]; first.Kernel != session.Working {
-		t.Errorf("a message does not carry the state it was said in: %+v", first)
-	}
-}
-
-func TestHistoryIsBoundedByCount(t *testing.T) {
-	root, err := os.MkdirTemp("/tmp", "an-store")
-	if err != nil {
-		t.Fatalf("MkdirTemp: %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(root) })
-	t.Setenv(paths.TheVariableThatNamesTheRoot, root)
-	layout, err := paths.FromEnvironment()
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
-
-	settings := config.Defaults()
-	settings.HistoryMessages = 3
-	settings.HistoryChanges = 2
-	opened, err := sessionstore.Open(layout, settings)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-
-	for i := range 10 {
-		text := "message " + strconv.Itoa(i)
-		event := session.TurnFinished
-		if i%2 == 0 {
-			event = session.UserSentPrompt
-		}
-		if _, err := opened.Apply(session.Report{
-			Key: key, Event: event, Message: &text,
-		}, when); err != nil {
-			t.Fatalf("Apply: %v", err)
-		}
-	}
-
-	history, err := opened.History(key)
-	if err != nil {
-		t.Fatalf("History: %v", err)
-	}
-	if len(history.Messages) != 3 || len(history.Changes) != 2 {
-		t.Fatalf("kept %d messages and %d changes, want 3 and 2",
-			len(history.Messages), len(history.Changes))
-	}
-	if history.Messages[2].Message != "message 9" {
-		t.Errorf("kept %q as the newest; the tail is what anybody asked for",
-			history.Messages[2].Message)
-	}
-}
-
-func TestHistoryCanBeTurnedOff(t *testing.T) {
-	root, _ := os.MkdirTemp("/tmp", "an-store")
-	t.Cleanup(func() { os.RemoveAll(root) })
-	t.Setenv(paths.TheVariableThatNamesTheRoot, root)
-	layout, _ := paths.FromEnvironment()
-
-	settings := config.Defaults()
-	settings.HistoryMessages = 0
-	settings.HistoryChanges = 0
-	opened, err := sessionstore.Open(layout, settings)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-
-	text := "something private"
-	if _, err := opened.Apply(session.Report{
-		Key: key, Event: session.TurnFinished, Message: &text,
-	}, when); err != nil {
-		t.Fatalf("Apply: %v", err)
-	}
-	if exists(layout.HistoryFile(key.String())) {
-		t.Error("a history file was written despite both bounds being zero (§A15)")
-	}
-}
-
 func TestPruneForgetsOnlyWhatIsPastItsWelcome(t *testing.T) {
 	opened, layout := open(t)
 
@@ -327,6 +218,13 @@ func TestPruneForgetsOnlyWhatIsPastItsWelcome(t *testing.T) {
 	}
 	// Age only the stale one, by rewriting its ended_at.
 	age(t, layout.EndedFile(stale.String()), when.Add(-30*24*time.Hour))
+	// And give it the history file a build before D-139 would have written.
+	if err := os.MkdirAll(layout.History(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(layout.HistoryFile(stale.String()), []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	removed, err := opened.ForgetWhatIsTooOld(when)
 	if err != nil {
@@ -336,7 +234,7 @@ func TestPruneForgetsOnlyWhatIsPastItsWelcome(t *testing.T) {
 		t.Fatalf("Prune removed %v, want only the stale one", removed)
 	}
 	if exists(layout.HistoryFile(stale.String())) {
-		t.Error("pruning a session left its history behind — what it said outlived it")
+		t.Error("pruning a session left an older build's history behind — what it said outlived it")
 	}
 	if !exists(layout.EndedFile(fresh.String())) {
 		t.Error("an ended session still within its window was forgotten")

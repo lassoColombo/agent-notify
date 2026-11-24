@@ -273,7 +273,7 @@ integrations:
 	}
 
 	told := Arguments("/usr/bin/true", "down,34", Ghost(false), "")
-	_, err := fzf.ParseOptions(true, told)
+	_, err := fzf.ParseOptions(false, told)
 	if err == nil {
 		t.Fatal("fzf took a key nobody has")
 	}
@@ -282,7 +282,7 @@ integrations:
 	if !strings.Contains(said, "ctrl-shmuck") || !strings.Contains(said, "keys this program") {
 		t.Errorf("the window would not say why: %s", said)
 	}
-	if _, err := fzf.ParseOptions(true,
+	if _, err := fzf.ParseOptions(false,
 		Arguments("/usr/bin/true", "down,34", Ghost(false), said)); err != nil {
 		t.Fatalf("the fallback is not one: %v", err)
 	}

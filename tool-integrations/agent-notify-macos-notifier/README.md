@@ -113,16 +113,16 @@ cannot see happen. Two consequences you can rely on: **starting it never opens w
 banners** for every agent that happens to be blocked, and **the session-watcher restarting
 posts nothing**.
 
-The fields it asks the watcher to wake it for are exactly the ones a banner is made of:
+It asks the watcher to wake it for the kernel and nothing else:
 
 ```go
-[]string{"kernel", "detail", "rank", "name", "cwd", "message"}
+[]string{"kernel"}
 ```
 
-A test moves one record field at a time and fails if a banner comes out different for
-something not on that list, which is the failure this system has no other way of catching:
-a field a renderer reads and the declaration omits means a display that is right when it
-starts and wrong an hour later, with nothing logged anywhere.
+A banner is made of the name, the detail and the message as well, but it is only ever
+for a kernel that moved, and the record it is handed then is the whole of it as it is.
+A wake for anything else is a render that posts nothing. A test shows one stream of
+writes waking on everything and on this, and fails if the banners differ (D-138).
 
 ### What tapping one does
 
@@ -240,7 +240,7 @@ Notifications under **alerter**.
 To see what it is reacting to, without any notifications in the way:
 
 ```sh
-agent-notify tail --wake-on kernel,detail,rank,name,cwd,message
+agent-notify tail --wake-on kernel
 ```
 
 That is the same subscription this display makes, printed.

@@ -46,10 +46,6 @@ func hueOf(kernel session.Kernel) lipgloss.Style {
 // keys is the list's last line: what it takes besides moving.
 const keys = " ⏎ type   o go to   q close"
 
-// stuckAfter is how long a turn runs before its wait turns gold: a working
-// agent that has gone on this long is more often stuck than busy.
-const stuckAfter = 15 * time.Minute
-
 // Draw is the list, and holds only what decides where you look next (D-132):
 // per state a header in its colour, then one line per agent, its name and how
 // long it has been so; below them the sessions in the background, each
@@ -122,7 +118,7 @@ func row(record session.Record, selected bool, mark string, width int, now time.
 	switch {
 	case record.Kernel == session.BlockedOnYou:
 		wait = base.Foreground(base05).Bold(true)
-	case record.Kernel == session.Working && elapsed >= stuckAfter:
+	case record.Kernel == session.Working && elapsed >= session.StuckAfter:
 		wait = base.Foreground(base09)
 	}
 	ink := base05

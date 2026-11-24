@@ -158,13 +158,3 @@ func (i Integration) read(includeEnded bool) ([]session.Record, error) {
 	}
 	return opened.WhatIsRunning(includeEnded), nil
 }
-
-// History is one session's history, read on demand (§A7.7). A session with
-// nothing recorded yet is an empty History and no error.
-func (i Integration) History(key session.Key) (session.History, error) {
-	opened, err := i.core()
-	if err != nil {
-		return session.History{}, err
-	}
-	return opened.Store.History(key)
-}

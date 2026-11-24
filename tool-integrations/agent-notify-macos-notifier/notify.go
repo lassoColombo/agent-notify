@@ -60,10 +60,10 @@ type Notifier struct {
 // about anything remembered:
 //
 //   - THE STATE HAS TO HAVE MOVED. A change is anything this display asked to
-//     be woken for, and it asked for `message` as well, because the message is
-//     the body of the banner. So a blocked agent revising what it said arrives
-//     here again and again, and must not produce a banner each time. The
-//     kernel it moved from is what tells the two apart, and before D-63 it was
+//     be woken for, which is only the kernel since D-138; but a session it has
+//     never seen arrives as a change too, and one whose kernel moved and moved
+//     back between two views arrives with the kernel it was last shown in. The
+//     kernel it moved from is what tells them apart, and before D-63 it was
 //     decoded by the SDK and thrown away.
 //   - IT HAS TO BE WORTH INTERRUPTING FOR, which is Record.WantsYou: a rank
 //     above working. Rank rather than a list of kernels, so that a state a

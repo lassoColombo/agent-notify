@@ -59,6 +59,16 @@ type Watcher struct {
 	store  *storewatch.Watch
 	logger *slog.Logger
 
+	// answers is what each integration said to `capabilities`, asked at
+	// startup and on reload; unanswered is why one did not say. Both are the
+	// loop's alone, as is asked.
+	answers    map[string]session.Capabilities
+	unanswered map[string]string
+	// asked is whatIsInstalled as it was when the answers were taken. The
+	// sweep compares it, and a difference is a reload (D-105).
+	asked string
+
+	// mu guards what the deriving goroutine shares with the loop.
 	mu sync.Mutex
 	// refused counts how often a container failed to interpret one capture,
 	// so that a broken one stops being run every sweep. Keyed on the
@@ -66,16 +76,6 @@ type Watcher struct {
 	// new capture, and failures against the old pane say nothing about the
 	// new one (D-109). Cleared on reload.
 	refused map[string]int
-	// complained remembers a configuration mistake already reported.
-	complained map[string]bool
-
-	// answers is what each integration said to `capabilities`, asked at
-	// startup and on reload; unanswered is why one did not say.
-	answers    map[string]session.Capabilities
-	unanswered map[string]string
-	// asked is whatIsInstalled as it was when the answers were taken. The
-	// sweep compares it, and a difference is a reload (D-105).
-	asked string
 	// containers is `containers` resolved against those answers, which
 	// is the one piece of configuration the deriving goroutine reads.
 	containers []containers.Container
@@ -306,12 +306,12 @@ func (w *Watcher) reconcile(why string) {
 }
 
 // askWhatEachIntegrationAnswers is the handshake, at startup and on reload:
-// what came back is logged and kept under the mutex for the renderers, the
-// containers and the report.
+// what came back is logged and kept for the renderers, the containers and the
+// report. A mistake in the configuration is logged here too, once an ask.
 func (w *Watcher) askWhatEachIntegrationAnswers() {
 	settings := &w.opened.Settings
 	for _, problem := range settings.WrittenAndNotOnPath(w.opened.Layout.ConfigFile) {
-		w.complainOnce(problem.Error())
+		w.logger.Warn("configuration", "problem", problem.Error())
 	}
 	// The fingerprint is taken before the ask, so a program replaced while
 	// the ask runs — `make install` writes six of them — is seen to have
@@ -330,9 +330,7 @@ func (w *Watcher) askWhatEachIntegrationAnswers() {
 			"methods", answers[name].Methods, "version", answers[name].Version)
 	}
 
-	w.mu.Lock()
 	w.answers, w.unanswered, w.asked = answers, unanswered, asked
-	w.mu.Unlock()
 }
 
 // whatIsInstalled is the configuration file and every agent-notify-<name> on
@@ -359,29 +357,20 @@ func whatIsInstalled(layout paths.Layout) string {
 // one stat per integration, which makes `watcher reload` something nobody has
 // to know about.
 func (w *Watcher) whatIsInstalledMoved() bool {
-	w.mu.Lock()
-	asked := w.asked
-	w.mu.Unlock()
-	return whatIsInstalled(w.opened.Layout) != asked
+	return whatIsInstalled(w.opened.Layout) != w.asked
 }
 
 // writeReport files what was answered where `doctor` and a focus read it.
 func (w *Watcher) writeReport() {
-	w.mu.Lock()
-	answers, unanswered := w.answers, w.unanswered
-	w.mu.Unlock()
-	handshake.Write(w.opened.Layout, w.opened.Settings, answers, unanswered)
+	handshake.Write(w.opened.Layout, w.opened.Settings, w.answers, w.unanswered)
 }
 
 // resolveContainers reads `containers` against what each integration
 // answered, once per ask, so the deriving goroutine never touches Settings.
 func (w *Watcher) resolveContainers() {
-	w.mu.Lock()
-	answers := w.answers
-	w.mu.Unlock()
-	configured, problems := containers.Configured(w.opened.Settings, answers)
+	configured, problems := containers.Configured(w.opened.Settings, w.answers)
 	for _, problem := range problems {
-		w.complainOnce(problem.Error())
+		w.logger.Warn("configuration", "problem", problem.Error())
 	}
 	w.mu.Lock()
 	w.containers = configured
@@ -423,8 +412,11 @@ func (w *Watcher) derive(world []session.Record) {
 			continue
 		}
 		for _, one := range configured {
+			// An empty capture is still asked about: a container may place by
+			// the chain alone, and one with nothing to go on answers `null`,
+			// which is stored and asked about never again (D-135).
 			captured, present := record.CapturedContext.By[one.Name]
-			if !present || isEmptyObject(captured) {
+			if !present {
 				continue
 			}
 			if _, already := record.DerivedContext[one.Name]; already {
@@ -435,6 +427,15 @@ func (w *Watcher) derive(world []session.Record) {
 			}
 			if !slices.Contains(one.Methods, session.MethodInterpret) {
 				continue
+			}
+			// The world was read before this goroutine's own last write could
+			// land, so the store is asked whether it already holds the answer:
+			// a container is asked once per capture, not once per wake that
+			// raced it.
+			if current, found, err := w.opened.Store.Read(record.Key); err == nil && found {
+				if _, already := current.DerivedContext[one.Name]; already {
+					continue
+				}
 			}
 
 			coordinates, err := containers.Interpret(one, record.CapturedContext, interpretTimeout)
@@ -474,12 +475,6 @@ func (w *Watcher) derive(world []session.Record) {
 	}
 }
 
-// isEmptyObject is what an integration with nothing to read captured.
-func isEmptyObject(captured json.RawMessage) bool {
-	var fields map[string]json.RawMessage
-	return json.Unmarshal(captured, &fields) == nil && len(fields) == 0
-}
-
 // attemptsBeforeGivingUp is small and not one: the first failure is usually
 // the session-watcher asking a multiplexer about a pane a moment before it exists.
 const attemptsBeforeGivingUp = 3
@@ -507,19 +502,6 @@ func (w *Watcher) giveUpOn(record session.Record, container string) int {
 	key := oneCapture(record, container)
 	w.refused[key]++
 	return w.refused[key]
-}
-
-func (w *Watcher) complainOnce(message string) {
-	w.mu.Lock()
-	if w.complained == nil {
-		w.complained = map[string]bool{}
-	}
-	said := w.complained[message]
-	w.complained[message] = true
-	w.mu.Unlock()
-	if !said {
-		w.logger.Warn("configuration", "problem", message)
-	}
 }
 
 // end files a session that stopped without saying so, through the same
@@ -561,7 +543,7 @@ func (w *Watcher) reloadConfiguration(ctx context.Context) {
 
 	w.askWhatEachIntegrationAnswers()
 	w.mu.Lock()
-	w.refused, w.complained = nil, nil
+	w.refused = nil
 	w.mu.Unlock()
 	w.resolveContainers()
 	w.startRenderers(ctx)

@@ -60,14 +60,21 @@ type ClaudeTranscript struct {
 	// an empty string into the record on every hook since the day it was added.
 	// It is on every assistant line instead, beside the usage already read here.
 	Model string
+	// Title is Claude's own title for the session, when this read passed one
+	// (sessiontitle.go).
+	Title string
 }
 
 // WhatTheTranscriptSays reads the newest responses off the end of the
-// transcript, and which model produced the newest of them.
+// transcript, which model produced the newest of them, and the newest title
+// Claude wrote among them.
 func WhatTheTranscriptSays(transcriptPath string) ClaudeTranscript {
 	var said ClaudeTranscript
 	said.Responses = hook.LastResponses(strings.TrimSpace(transcriptPath),
 		func(line []byte) (session.Spend, bool) {
+			if title, itIsTheTitle := titleInLine(line); itIsTheTitle && said.Title == "" {
+				said.Title = title
+			}
 			response, model, itCost := whatThisLineCost(line)
 			if itCost && said.Model == "" {
 				// Newest first, and the newest response is the only one whose

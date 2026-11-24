@@ -21,7 +21,10 @@ import (
 // all of that through a TOML encoder to add seven blocks would hand it back
 // stripped of the comments and reordered. Appending at the end of the file is
 // safe for one reason worth stating: a table header ends the table before it,
-// and nothing follows what we add.
+// and nothing follows what we add. Safe, that is, unless `hooks` is already
+// written another way — inline, or as a plain table of arrays — and then the
+// two cannot both be TOML; so what would be written is parsed first, and a file
+// it would break is left as it is.
 //
 // It is idempotent: a file that already names this program anywhere in its
 // hooks is left alone. There is no merge and no update of a stale path — the
@@ -60,8 +63,8 @@ func install(arguments []string) int {
 		return 1
 	}
 
+	var parsed map[string]any
 	if len(existing) > 0 {
-		var parsed map[string]any
 		if err := toml.Unmarshal(existing, &parsed); err != nil {
 			// Refusing is the point: appending to a file that does not parse
 			// turns one problem into two, and the second one looks like ours.
@@ -76,10 +79,6 @@ func install(arguments []string) int {
 		}
 	}
 
-	if err := os.MkdirAll(filepath.Dir(*path), 0o700); err != nil {
-		fmt.Fprintf(os.Stderr, "agent-notify-codex install: cannot create %s: %v\n", filepath.Dir(*path), err)
-		return 1
-	}
 	addition := block
 	if len(existing) > 0 {
 		if !strings.HasSuffix(string(existing), "\n") {
@@ -87,7 +86,15 @@ func install(arguments []string) int {
 		}
 		addition = "\n" + addition
 	}
-	if err := appendTo(*path, addition); err != nil {
+	written := string(existing) + addition
+	if err := toml.Unmarshal([]byte(written), &parsed); err != nil {
+		fmt.Fprintf(os.Stderr,
+			"agent-notify-codex install: %s already says something about `hooks` that the block cannot be\n"+
+				"added beside, so nothing was changed; `--print` shows the block to merge by hand:\n%v\n",
+			*path, err)
+		return 1
+	}
+	if err := replace(*path, written); err != nil {
 		fmt.Fprintf(os.Stderr, "agent-notify-codex install: %v\n", err)
 		return 1
 	}
@@ -135,8 +142,8 @@ func uninstall(arguments []string) int {
 	default:
 		cleaned := strings.Replace(string(existing), hookBlock(program), "", 1)
 		cleaned = strings.TrimRight(cleaned, "\n") + "\n"
-		if err := os.WriteFile(*path, []byte(cleaned), 0o600); err != nil {
-			fmt.Fprintf(os.Stderr, "agent-notify-codex uninstall: cannot write %s: %v\n", *path, err)
+		if err := replace(*path, cleaned); err != nil {
+			fmt.Fprintf(os.Stderr, "agent-notify-codex uninstall: %v\n", err)
 			return 1
 		}
 		fmt.Printf("removed %d hook(s) from %s.\n", len(SubscribedHooks), *path)
@@ -144,17 +151,28 @@ func uninstall(arguments []string) int {
 	return 0
 }
 
-func appendTo(path, text string) error {
-	handle, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-	if err != nil {
-		return fmt.Errorf("cannot write %s: %w", path, err)
+// replace puts content where path is, all of it or none of it: a config cut
+// short by an interrupted write is a codex that does not start. A symbolic
+// link is followed, so a config kept with somebody's dotfiles stays there, and
+// the mode the file had is the mode it keeps.
+func replace(path, content string) error {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = resolved
 	}
-	if _, err := handle.WriteString(text); err != nil {
-		handle.Close()
-		return fmt.Errorf("cannot write %s: %w", path, err)
+	mode := os.FileMode(0o600)
+	if info, err := os.Stat(path); err == nil {
+		mode = info.Mode().Perm()
 	}
-	if err := handle.Close(); err != nil {
-		return fmt.Errorf("cannot write %s: %w", path, err)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("cannot create %s: %w", filepath.Dir(path), err)
+	}
+	temporary := path + ".writing"
+	if err := os.WriteFile(temporary, []byte(content), mode); err != nil {
+		return fmt.Errorf("cannot write %s: %w", temporary, err)
+	}
+	if err := os.Rename(temporary, path); err != nil {
+		os.Remove(temporary)
+		return fmt.Errorf("cannot put %s in place: %w", path, err)
 	}
 	return nil
 }

@@ -98,7 +98,7 @@ func runList() error {
 	tmux := Tmux{Binary: settings.Binary, Socket: socket}
 
 	program := tea.NewProgram(&list{
-		tab:    Tab{Tmux: tmux, List: self, Logger: logger, Layout: Layout{ListWidth: settings.ListWidth}},
+		tab:    Tab{Tmux: tmux, List: self, Logger: logger, ListWidth: settings.ListWidth},
 		glyphs: settings.Glyphs,
 	})
 

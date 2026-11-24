@@ -73,7 +73,7 @@ var (
 	// Text is identity and prose. A session's name is this colour whatever it
 	// is doing, so that a name can be learned.
 	Text lipgloss.Style
-	// Long is the wait of a turn that has run past stuckAfter, in gold: the
+	// Long is the wait of a turn that has run past session.StuckAfter, in gold: the
 	// one place a state hue is spent off a glyph, and it is the cockpit's.
 	Long lipgloss.Style
 )
@@ -130,9 +130,11 @@ func StateColour(rank int) string {
 	return base03
 }
 
-// Glyphs are the marks tmux already puts on agents' panes — Font
-// Awesome's BMP block, written as escapes rather than literals because they
-// are private-use codepoints and a great deal of tooling drops them silently.
+// Glyph is the mark for a state: the one tmux puts on agents' panes
+// (session.DefaultGlyphs), and a dot for idle and a hollow one for ended,
+// which a list shows and a pane's border does not. A kernel this build has
+// never met is a dot too — which is what the rank on the wire is for (§A5.5,
+// R21).
 //
 // A glyph is not decoration here. The list is scanned rather than read, and a
 // shape resolves before a word does: the question is "which of these wants me",
@@ -140,22 +142,14 @@ func StateColour(rank int) string {
 // rather than instead of it — a glyph-only column was tried, with a legend
 // above the list, and the legend read as a sixth row while three identical
 // speech bubbles still had to be looked up.
-var Glyphs = map[session.Kernel]string{
-	session.BlockedOnYou:  "", // warning triangle
-	session.Broke:         "", // a cross
-	session.FinishedATurn: "", // speech bubble
-	session.Working:       "", // circular arrows
-	session.Idle:          "", // a dot
-	session.Ended:         "", // a hollow dot
-}
-
-// Glyph is the mark for a state, falling back to a dot for a kernel this build
-// has never met — which is what the rank on the wire is for (§A5.5, R21).
 func Glyph(record session.Record) string {
-	if mark, known := Glyphs[record.Kernel]; known {
+	if record.Kernel == session.Ended {
+		return "\uf10c" // a hollow dot
+	}
+	if mark, known := session.DefaultGlyphs[record.Kernel]; known {
 		return mark
 	}
-	return ""
+	return "\uf111" // a dot
 }
 
 // fzfColours is fzf's chrome, in the hues in force.

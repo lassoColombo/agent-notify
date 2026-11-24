@@ -1067,7 +1067,9 @@ deliberately, and the rule is amended rather than quietly broken.
 - **Empty is an ordinary answer** and there are three ways to reach it: no
   repository above `cwd`, a detached head, and anything unreadable. The first is
   not rare — a session opened on a directory that holds three checkouts has no
-  one branch, and saying so is better than picking one.
+  one branch, and saying so is better than picking one. **[amended 2026-11-24
+  — D-136]** And it is said: an empty answer clears the stored branch, where
+  until D-136 it left the last one standing.
 - It costs a few `os.Stat` calls on a path that already tolerates a second of
   capture (§A10.3), and it is recomputed every hook, so a mid-session checkout
   lands on the next tool call.
@@ -1155,6 +1157,9 @@ What remains of the file read path, and why it must stay fast:
   Its steady state is the opening snapshot plus deltas.
 
 ### A7.7 History: what a session carries, and what we refuse to keep
+
+**[amended 2026-11-24 — D-139]** The per-session history this section designs
+is no longer kept: nothing read it. What follows is the design as it was.
 
 **[decided 2026-09-17 — D-10]** Two different things were being called history,
 and collapsing them was an error:
@@ -6088,6 +6093,108 @@ of this section is that it prevents re-litigating.
     mentions in this file are history and stay, as D-79 kept sketchybar's.
   - **Where it is**: `tool-integrations/agent-notify-zellij/` in `ffb0ff4`
     and every commit before it.
+
+- **D-135** (2026-11-24) — **Every container that answers
+  `interpret-environment` is asked, once per capture, whatever it captured;
+  nil is an answer.** *Amends* D-45, whose `null` is now how every container
+  says "nothing here", and D-93, which made the chain an input without
+  revisiting who is asked.
+  - **What was wrong.** [verified 2026-11-24, the store and the log] The
+    session-watcher skipped a container whose capture was `{}`. Aerospace
+    captures exactly that by default since D-134 and places by the chain,
+    so it was never asked: none of the live records had its coordinates, and
+    its last `placed` line was 2026-11-20. tmux, the other way round,
+    captured two empty strings outside tmux, which is not `{}`, and refused
+    to interpret them: three failed runs and an ERROR line for every session
+    in a plain terminal or in Claude's daemon.
+  - **And nil was not an answer.** `subscribe.Main` let a nil answer from
+    `Interpret` fall through to the usage, exit 1. Aerospace's own "no key
+    at all" therefore failed the way a broken container fails. It prints
+    `null` now, with exit 0.
+  - **`null` is stored and ends the asking.** It lands in
+    `derived_context` like any coordinates, so the record says the question
+    was asked; `focus` already reads it as never-placed and steps past, and
+    a new capture voids it as it voids coordinates.
+
+- **D-136** (2026-11-24) — **Four fixes from the review of 2026-11-24 that
+  decide something.** *Amends* §A7.4.4's "empty is an ordinary answer".
+  - **No branch clears the branch.** `Report.Branch` is a pointer, like
+    `Message`: the hook says what it found at `cwd`, and "" — a detached
+    head, a `cd` out of the repository — clears the stored one, which until
+    now named the last branch for the rest of the session: the confidently
+    wrong answer §A7.4.4 exists to avoid. A report with no `cwd` did not
+    look and says nothing.
+  - **A relative `gitdir:` is relative to the `.git` file.** A submodule
+    writes one, and so does a worktree made with relative paths; it was
+    resolved against the hook's working directory and found nothing.
+  - **A live session wins its name.** `focus` and `annotate` match ended
+    sessions too, and TAB offers only live ones, so a name TAB put on the
+    line could be refused as ambiguous. The live match wins; an ended one is
+    still found when it is the only match.
+  - **The hook's `recorded` line is Debug.** [measured 2026-11-24] It was
+    95% of a 15 MB log after eight weeks, and nothing trims the log; the
+    record itself says what the line did.
+
+- **D-137** (2026-11-24) — **Claude's title is read off the tail, and a
+  compaction moves no state.** *Amends* D-107, which read the title off the
+  head once a turn, and D-31, which called a compaction the agent working
+  mid-turn.
+  - **The title came back, at the other end.** [verified 2026-11-24,
+    2.1.311] 89 of 311 transcripts hold an `ai-title`; Claude writes it
+    several times as the session goes on, the newest within 34 KiB of the
+    end, and the first inside the head's 64 KiB in one. The head read found
+    one title on the machine. It is read now in the tail pass the spend
+    already makes, on every hook, and found 88: what the name was missing.
+    A pass that stops before it reaches one reports none, which leaves the
+    stored name alone.
+  - **A compaction is not work.** [verified 2026-11-24, the hook capture and
+    the history files] 234 of 252 `PreCompact`s came after the turn had
+    finished, and 28 of 29 moves into `working/compacting` came from
+    `finished-a-turn`; the session then read `working` until the next
+    prompt — two hours in one case. `SessionStart(compact)` is
+    `context-changed` and `PreCompact` is not subscribed. The 18 that came
+    mid-turn lose nothing: the session was working and stays so.
+  - **An install from before this keeps `PreCompact`**, which is translated
+    to nothing; `agent-notify-claude uninstall` then `install` drops it.
+
+- **D-138** (2026-11-24) — **The notifier wakes on the kernel alone, and the
+  picker and the notifier stop trusting text to look like what it is.**
+  *Amends* D-73 for a display that draws edges.
+  - **D-73's sweep is for a display that draws state.** A banner reads the
+    name, the detail and the message, and the sweep asked the notifier to be
+    woken for all of them; but `Fresh` drops every change whose kernel did
+    not move, and the record handed over with a kernel that did is the whole
+    of it. So the other five wakes were renders that posted nothing — a
+    process each that read the config and looked up alerter. The notifier's
+    test now shows one stream of writes both ways and asks for the same
+    banners.
+  - **alerter is handed `--message=<text>`, not `--message <text>`.**
+    [verified 2026-11-24, alerter 26.5] A value that begins with `-` is
+    taken for an option, so a message that opened with a markdown bullet
+    exited 64 and posted nothing; the log had one.
+  - **The picker does not read `$FZF_DEFAULT_OPTS`.** A person's `--tac`
+    reversed the urgency order the picker keeps, and `--multi` or
+    `--print-query` handed two lines to a channel that holds one and hung
+    it. Its preview runs under `/bin/sh` with the program's path quoted,
+    since a path with a space failed every preview.
+
+- **D-139** (2026-11-24) — **A session's history is not kept.** *Retires*
+  §A7.7's per-session history file, `history-messages` and
+  `history-changes`; does not touch D-10's refusal to keep a transcript.
+  - **Nothing read it.** [verified 2026-11-24] Outside its own tests no
+    caller asked `SessionStore.History` or the SDK's `Integration.History`:
+    the hover preview it was for went with the menu bar (D-87), and the
+    picker and the cockpit show the record's own message (D-133). Every
+    change of state or message still paid for it on the hook path, with a
+    second fsynced file.
+  - **What goes.** `session.History` and `Bounds`, the store's write and
+    read of it, the SDK's `History`, the two keys, and `history/` from the
+    directories core creates. A file an older build wrote is removed with
+    its session when retention forgets it, so what is on disk ages out; a
+    config that still names either key is told it is not recognised.
+  - **What it was worth once.** It was the evidence D-137 measured
+    compactions against. A question like that is asked of the log and of
+    the agent's own transcripts now, which keep more and are kept anyway.
 
 **The payload discussion of 2026-09-17 is now ratified**
  in D-10 through D-18.

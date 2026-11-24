@@ -149,10 +149,7 @@ func (w *Watcher) startRenderers(ctx context.Context) {
 	if w.renderers == nil {
 		w.renderers = map[string]*renderer{}
 	}
-	settings := w.opened.Settings
-	w.mu.Lock()
-	answers := w.answers
-	w.mu.Unlock()
+	settings, answers := w.opened.Settings, w.answers
 
 	wanted := map[string]bool{}
 	for _, name := range settings.Enabled() {

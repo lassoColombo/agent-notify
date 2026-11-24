@@ -128,7 +128,7 @@ func TestTheClimbStopsRatherThanRunningAway(t *testing.T) {
 		10: {PID: 10, Parent: 11, Command: "a"},
 		11: {PID: 11, Parent: 10, Command: "b"},
 	}}
-	if chain := process.Ancestry(10, cycle); len(chain) != 2 {
+	if _, chain, _ := process.FindAgent("", 10, cycle); len(chain) != 2 {
 		t.Errorf("walked %d steps around a cycle, want 2 then stop", len(chain))
 	}
 
@@ -136,7 +136,7 @@ func TestTheClimbStopsRatherThanRunningAway(t *testing.T) {
 	for pid := 2; pid < 200; pid++ {
 		deep.processes[pid] = process.Facts{PID: pid, Parent: pid + 1, Command: "sh"}
 	}
-	if chain := process.Ancestry(2, deep); len(chain) != process.MostAncestorsWorthClimbing {
+	if _, chain, _ := process.FindAgent("", 2, deep); len(chain) != process.MostAncestorsWorthClimbing {
 		t.Errorf("walked %d steps up an endless chain, want the bound of %d",
 			len(chain), process.MostAncestorsWorthClimbing)
 	}

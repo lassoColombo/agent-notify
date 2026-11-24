@@ -17,40 +17,6 @@ func waiting(name string, kernel session.Kernel, since time.Time) session.Record
 	}
 }
 
-// TestMostUrgentIsWhatOneLightShows: a tmux window holding four panes, an LED
-// and a dock badge are the same question, and it is asked here once (R24).
-func TestMostUrgentIsWhatOneLightShows(t *testing.T) {
-	nine := time.Date(2026, 9, 18, 9, 0, 0, 0, time.UTC)
-
-	if _, found := session.MostUrgent(nil); found {
-		t.Error("an empty set has no most urgent record")
-	}
-
-	tab := []session.Record{
-		waiting("one", session.Working, nine),
-		waiting("two", session.BlockedOnYou, nine.Add(time.Minute)),
-		waiting("three", session.Idle, nine),
-	}
-	highest, found := session.MostUrgent(tab)
-	if !found || highest.Name != "two" {
-		t.Errorf("MostUrgent picked %q, want the blocked one", highest.Name)
-	}
-
-	// Between two sessions at the same urgency the one waiting longer wins,
-	// and it wins identically here and in ByUrgency because both ask the same
-	// comparison.
-	both := []session.Record{
-		waiting("newer", session.BlockedOnYou, nine.Add(time.Minute)),
-		waiting("older", session.BlockedOnYou, nine),
-	}
-	highest, _ = session.MostUrgent(both)
-	session.ByUrgency(both)
-	if highest.Name != "older" || both[0].Name != "older" {
-		t.Errorf("MostUrgent said %q and ByUrgency put %q first; they must agree, and on the "+
-			"one that has been waiting longer", highest.Name, both[0].Name)
-	}
-}
-
 // TestAgoRoundsDown: the number on a bar is a floor a person can trust, not a
 // value that reads as longer than the truth.
 func TestAgoRoundsDown(t *testing.T) {

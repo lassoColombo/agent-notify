@@ -12,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/lassoColombo/agent-notify/hook"
 )
 
 // [verified 2026-11-23, 2.1.311] A `/compact` no longer compacts in place.
@@ -42,7 +44,7 @@ import (
 // took 1.5ms.
 const (
 	// theEndOfATranscript is how much of the end of each transcript is read,
-	// in one call. The line is the last thing written to the old session and
+	// newest line first. The line is the last thing written to the old session and
 	// is under 200 bytes; the rest is room for bookkeeping that lands after it.
 	theEndOfATranscript = 16 << 10
 )
@@ -90,50 +92,28 @@ type tailLine struct {
 // continuedIn is the session one transcript belongs to, when the last word at
 // its end is that it was continued in sessionID.
 func continuedIn(path, sessionID string) string {
-	file, err := os.Open(path)
-	if err != nil {
-		return ""
-	}
-	defer file.Close()
-	facts, err := file.Stat()
-	if err != nil {
-		return ""
-	}
-	start := max(facts.Size()-theEndOfATranscript, 0)
-	end := make([]byte, facts.Size()-start)
-	read, _ := file.ReadAt(end, start)
-	end = end[:read]
-	// Almost every transcript stops here: it does not mention this session.
-	if !bytes.Contains(end, []byte(sessionID)) {
-		return ""
-	}
-
-	lines := bytes.Split(end, []byte("\n"))
-	if start > 0 {
-		// The read began in the middle of a line.
-		lines = lines[1:]
-	}
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := lines[i]
+	from := ""
+	_ = hook.ReadBackwards(path, theEndOfATranscript, theEndOfATranscript, func(line []byte) bool {
 		if !bytes.Contains(line, continuedInLine) && !bytes.Contains(line, userLine) &&
 			!bytes.Contains(line, assistantLine) {
-			continue
+			return true
 		}
 		var written tailLine
 		if err := json.Unmarshal(line, &written); err != nil {
 			// Claude may be midway through appending it.
-			continue
+			return true
 		}
 		switch written.Type {
 		case "continued-in":
-			from := strings.TrimSpace(written.SessionID)
-			if written.ContinuedInSessionID != sessionID || from == sessionID {
-				return ""
+			if claimed := strings.TrimSpace(written.SessionID); written.ContinuedInSessionID == sessionID &&
+				claimed != sessionID {
+				from = claimed
 			}
-			return from
+			return false
 		case "user", "assistant":
-			return ""
+			return false
 		}
-	}
-	return ""
+		return true
+	})
+	return from
 }

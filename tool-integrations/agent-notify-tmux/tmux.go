@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"slices"
@@ -124,10 +125,16 @@ func (t Tmux) Look(socket string) (Server, error) {
 	return server, nil
 }
 
-// notThere names the error of a tmux that said no as ErrNotThere.
+// notThere names the error of a tmux that found no server as ErrNotThere,
+// and only that one. [measured on 3.8] A socket that is not there, or not a
+// socket, says `error connecting to`; a socket nobody is listening on says
+// `no server running on`. Anything else a running server refuses — a command
+// line too long, a target it does not know — is a failure, logged and drawn
+// again (D-130).
 func notThere(socket string, err error) error {
 	var said *tool.SaidNo
-	if errors.As(err, &said) {
+	if errors.As(err, &said) && (bytes.Contains(said.Stderr, []byte("no server running on")) ||
+		bytes.Contains(said.Stderr, []byte("error connecting to"))) {
 		return fmt.Errorf("tmux server %q is %w (%v)", socket, ErrNotThere, err)
 	}
 	return err

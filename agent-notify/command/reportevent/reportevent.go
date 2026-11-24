@@ -45,9 +45,7 @@ exactly the same function.`,
 		SilenceUsage:       true,
 		SilenceErrors:      true,
 		Run: func(command *cobra.Command, arguments []string) {
-			if code := reportEvent(reported); code != 0 {
-				os.Exit(code)
-			}
+			reportEvent(reported)
 		},
 	}
 	flags := command.Flags()
@@ -78,18 +76,17 @@ type reportedEvent struct {
 	noMessage bool
 }
 
-func reportEvent(reported reportedEvent) int {
+func reportEvent(reported reportedEvent) {
 	report, err := buildReport(reported)
 	if err != nil {
 		LogTheProblemBecauseTheHookMayNotSpeak(err.Error())
-		return 0
+		return
 	}
 
 	if reported.process == "" {
 		reported.process = reported.agent
 	}
 	hook.Record(report, reported.process)
-	return 0
 }
 
 // LogTheProblemBecauseTheHookMayNotSpeak puts a usage problem where R2 says

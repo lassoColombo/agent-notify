@@ -7,13 +7,14 @@ import (
 	"strings"
 )
 
-// Tab is the list's hold on tmux: the server, the list's own pane, and how the
-// tab is built.
+// Tab is the list's hold on tmux: the server, the list's own pane, and the
+// list's width in columns, set when the stand-in is put beside it and left to
+// the user after that.
 type Tab struct {
-	Tmux   Tmux
-	List   string
-	Layout Layout
-	Logger *slog.Logger
+	Tmux      Tmux
+	List      string
+	ListWidth int
+	Logger    *slog.Logger
 }
 
 // rounds bounds one Reconcile. Showing another agent is one step; a tab found
@@ -31,7 +32,7 @@ func (t Tab) Reconcile(desire Desire) (World, error) {
 		if err != nil {
 			return World{}, err
 		}
-		step, more := Next(world, t.List, Want(world, t.List, desire), t.Layout)
+		step, more := Next(world, t.List, Want(world, t.List, desire), t.ListWidth)
 		if !more {
 			return world, nil
 		}
@@ -63,7 +64,7 @@ func (t Tab) do(step Step) {
 	mark := block{
 		{"set-option", "-p", "-t", out, roleOption, roleStandIn},
 		{"set-option", "-w", "-t", t.List, tabOption, "1"},
-		{"resize-pane", "-t", t.List, "-x", strconv.Itoa(t.Layout.ListWidth)},
+		{"resize-pane", "-t", t.List, "-x", strconv.Itoa(t.ListWidth)},
 	}
 	if _, err := t.Tmux.run(mark.argv()...); err != nil {
 		t.Logger.Warn("tmux refused", "why", "marking the stand-in "+out, "problem", err.Error())
@@ -237,7 +238,10 @@ func linkedInto(views []View, session string) bool {
 func create(tmux Tmux, list []string, width, height string) (Pane, error) {
 	target := "=" + tabSession + ":"
 	session := append([]string{"new-session", "-d", "-s", tabSession, "-n", tabName, "-x", width, "-y", height}, list...)
+	// Nobody is attached to the hidden session, ever, so a server that
+	// destroys unattached sessions would destroy it the moment this returns.
 	_, refused := tmux.run(append(session, ";",
+		"set-option", "-t", target, "destroy-unattached", "off", ";",
 		"set-option", "-p", "-t", target, roleOption, roleList, ";",
 		"set-option", "-w", "-t", target, tabOption, "1")...)
 	if refused != nil {
@@ -293,11 +297,9 @@ func Close(tmux Tmux, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	// One at a time: a hook that is not there cannot be taken away, and tmux
-	// stops an invocation at the first command it refuses.
-	for _, hook := range unwatching() {
-		_, _ = tmux.run(block{hook}.argv()...)
-	}
+	// One invocation: [measured on 3.8] taking away a hook that is not there
+	// is not refused, so nothing stops it partway.
+	_, _ = tmux.run(unwatching().argv()...)
 	var lists []string
 	for _, pane := range world.sorted() {
 		switch pane.Role {

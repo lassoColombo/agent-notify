@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -55,23 +57,55 @@ func plain(text string) string {
 // otherwise be found by somebody pressing the key it is bound to.
 func TestFzfAcceptsWhatItIsTold(t *testing.T) {
 	_, preview := Split(133)
-	if _, err := fzf.ParseOptions(true,
+	if _, err := fzf.ParseOptions(false,
 		Arguments("/usr/bin/true", preview, Ghost(false), "")); err != nil {
 		t.Fatalf("fzf refused its own arguments: %v", err)
 	}
 	// And the fallback spec, which is the one a pipe gets.
 	_, preview = Split(0)
-	if _, err := fzf.ParseOptions(true,
+	if _, err := fzf.ParseOptions(false,
 		Arguments("/usr/bin/true", preview, Ghost(true), "")); err != nil {
 		t.Fatalf("fzf refused the fallback layout: %v", err)
 	}
 	// And the window that has something to say about the config file, which is
 	// the one somebody sees exactly once — on the run after they edited it.
 	_, preview = Split(133)
-	if _, err := fzf.ParseOptions(true, Arguments("/usr/bin/true",
+	if _, err := fzf.ParseOptions(false, Arguments("/usr/bin/true",
 		preview, Ghost(false), Complaint([]string{"base0D is not a colour"})),
 	); err != nil {
 		t.Fatalf("fzf refused a complaint in the header: %v", err)
+	}
+}
+
+// TestAPersonsFzfDefaultsAreNotThePickers: `--tac` reverses the urgency
+// order, and `--multi` or `--print-query` hands back two lines where the
+// picker reads one and never returns.
+func TestAPersonsFzfDefaultsAreNotThePickers(t *testing.T) {
+	t.Setenv("FZF_DEFAULT_OPTS", "--tac --multi --print-query")
+	_, preview := Split(133)
+	options, err := fzf.ParseOptions(false, Arguments("/usr/bin/true", preview, Ghost(false), ""))
+	if err != nil {
+		t.Fatalf("fzf refused its own arguments: %v", err)
+	}
+	if options.Tac || options.Multi > 0 || options.PrintQuery {
+		t.Errorf("the picker took a person's defaults: tac %v, multi %d, print-query %v",
+			options.Tac, options.Multi, options.PrintQuery)
+	}
+}
+
+// TestThePreviewIsRunWherePathsHaveSpaces: the preview is this program, run
+// by sh, and a path with a space or a quote in it is one word to sh.
+func TestThePreviewIsRunWherePathsHaveSpaces(t *testing.T) {
+	program := "/Users/First Last/it's/agent-notify-picker"
+	arguments := Arguments(program, "right,50%", Ghost(false), "")
+	at := slices.Index(arguments, "--preview")
+	if at < 0 || !slices.Contains(arguments, "--with-shell=/bin/sh -c") {
+		t.Fatalf("no preview run by sh in %v", arguments)
+	}
+	command := strings.Replace(arguments[at+1], "{1}", "'k'", 1)
+	out, err := exec.Command("/bin/sh", "-c", "set -- "+command+`; printf '%s\n' "$1"`).Output()
+	if err != nil || strings.TrimSpace(string(out)) != program {
+		t.Errorf("sh read the program as %q (%v), want %q", out, err, program)
 	}
 }
 
@@ -101,7 +135,7 @@ func TestTheListIsTheCockpitsWidth(t *testing.T) {
 func TestARowIsTheGlyphTheNameAndTheWait(t *testing.T) {
 	row := Row(aSession(), noon, 28)
 	drawn := plain(row)
-	for _, want := range []string{Glyphs[session.BlockedOnYou], "agent-notify", "12m"} {
+	for _, want := range []string{session.DefaultGlyphs[session.BlockedOnYou], "agent-notify", "12m"} {
 		if !strings.Contains(drawn, want) {
 			t.Errorf("row is missing %q: %q", want, drawn)
 		}
@@ -158,7 +192,7 @@ func TestTheWaitSaysWhenToLook(t *testing.T) {
 	if wait := waitOf(working); !strings.Contains(wait, "140;136;166") {
 		t.Errorf("a turn of five minutes is not dim: %q", wait)
 	}
-	working.StateSince = noon.Add(-stuckAfter)
+	working.StateSince = noon.Add(-session.StuckAfter)
 	if wait := waitOf(working); !strings.Contains(wait, "246;193;119") {
 		t.Errorf("a turn of fifteen minutes is not gold: %q", wait)
 	}

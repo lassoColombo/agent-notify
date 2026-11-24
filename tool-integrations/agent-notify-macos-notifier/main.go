@@ -125,11 +125,12 @@ func check(arguments []string) int {
 	return 0
 }
 
-// WhatToWakeFor is what this display asks to be woken for. The message is
-// here because it is the body of the banner; `state_since` is not, because a
-// notification is an edge and nothing about time passing is one. A test moves
-// one record field at a time and fails when a banner comes out different for
-// something not named here (D-73).
+// WhatToWakeFor is what this display asks to be woken for: the kernel and
+// nothing else. A banner reads the name, the detail and the message too, but
+// it is only ever for a kernel that moved, and the record it is handed then is
+// the whole of it as it is; a wake for anything else is a render that posts
+// nothing. A test shows one stream of writes waking on everything and on this,
+// and the banners must be the same (D-138).
 func WhatToWakeFor() []string {
-	return []string{"kernel", "detail", "rank", "name", "cwd", "message"}
+	return []string{"kernel"}
 }

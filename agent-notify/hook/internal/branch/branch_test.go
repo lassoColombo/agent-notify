@@ -77,6 +77,24 @@ func TestAWorktreeIsFollowedToItsOwnHead(t *testing.T) {
 	}
 }
 
+// TestARelativeGitdirIsReadFromWhereTheFileIs: a submodule's `.git` says
+// `gitdir: ../.git/modules/sub`, and so does a worktree made with
+// `worktree.useRelativePaths`. The path is relative to the file, never to the
+// hook's working directory, which is wherever the agent happened to be.
+func TestARelativeGitdirIsReadFromWhereTheFileIs(t *testing.T) {
+	super := checkout(t, "ref: refs/heads/main\n")
+	write(t, filepath.Join(super, ".git", "modules", "sub", "HEAD"), "ref: refs/heads/library\n")
+	write(t, filepath.Join(super, "sub", ".git"), "gitdir: ../.git/modules/sub\n")
+	if err := os.MkdirAll(filepath.Join(super, "sub", "pkg"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(t.TempDir())
+
+	if got := branch.At(filepath.Join(super, "sub", "pkg")); got != "library" {
+		t.Errorf("At(inside a submodule) = %q, want library", got)
+	}
+}
+
 // TestADirectoryInNoRepositoryIsAnOrdinaryAnswer, and it is not a rare one: a
 // workspace that merely contains checkouts is exactly where somebody runs an
 // agent across three of them.

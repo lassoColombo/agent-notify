@@ -59,7 +59,7 @@ func TestResponsesAreReportedOldestFirstWithTheirIds(t *testing.T) {
 	))
 
 	var order []string
-	for _, response := range spending.Responses {
+	for _, response := range spending {
 		order = append(order, response.Response)
 	}
 	if got, want := strings.Join(order, ","), "resp-1,resp-2"; got != want {
@@ -73,10 +73,10 @@ func TestResponsesAreReportedOldestFirstWithTheirIds(t *testing.T) {
 func TestTheCachedShareIsNotCountedTwice(t *testing.T) {
 	spending := WhatCodexHasSpent(rollout(t, usageRecordLine("resp-1", 14335, 14080, 30, 14365)))
 
-	if len(spending.Responses) != 1 {
-		t.Fatalf("reported %d responses, want 1", len(spending.Responses))
+	if len(spending) != 1 {
+		t.Fatalf("reported %d responses, want 1", len(spending))
 	}
-	got := spending.Responses[0]
+	got := spending[0]
 	if want := uint64(14335 - 14080); got.Input != want {
 		t.Errorf("input = %d, want %d — the fresh part only", got.Input, want)
 	}
@@ -97,7 +97,7 @@ func TestTheRunningTotalCodexKeepsIsNotWhatIsReported(t *testing.T) {
 		usageRecordLine("resp-1", 100, 0, 10, 999_999),
 	))
 
-	if got := spending.Responses[0].Input; got != 100 {
+	if got := spending[0].Input; got != 100 {
 		t.Errorf("input = %d, want the response's own 100 and not the thread's total", got)
 	}
 }
@@ -110,8 +110,8 @@ func TestALineBeingWrittenIsWorthNothingMoreThanSkipping(t *testing.T) {
 		`{"type":"token_usage_record","payload":{"response_id":"resp-2","usa`,
 	))
 
-	if len(spending.Responses) != 1 || spending.Responses[0].Response != "resp-1" {
-		t.Errorf("responses = %+v, want only the line that was finished", spending.Responses)
+	if len(spending) != 1 || spending[0].Response != "resp-1" {
+		t.Errorf("responses = %+v, want only the line that was finished", spending)
 	}
 }
 
@@ -127,8 +127,8 @@ func TestAResponseBehindAnEnormousTurnIsStillFound(t *testing.T) {
 		huge,
 	))
 
-	if len(spending.Responses) != 1 || spending.Responses[0].Response != "resp-1" {
-		t.Fatalf("responses = %+v, want resp-1 found behind a 300 KiB line", spending.Responses)
+	if len(spending) != 1 || spending[0].Response != "resp-1" {
+		t.Fatalf("responses = %+v, want resp-1 found behind a 300 KiB line", spending)
 	}
 }
 
@@ -137,7 +137,7 @@ func TestAResponseBehindAnEnormousTurnIsStillFound(t *testing.T) {
 // "leave the totals alone".
 func TestNoRolloutIsAnOrdinaryAnswer(t *testing.T) {
 	for _, path := range []string{"", "   ", filepath.Join(t.TempDir(), "never-written.jsonl")} {
-		if spending := WhatCodexHasSpent(path); len(spending.Responses) != 0 {
+		if spending := WhatCodexHasSpent(path); len(spending) != 0 {
 			t.Errorf("WhatCodexHasSpent(%q) = %+v, want nothing", path, spending)
 		}
 	}
@@ -153,10 +153,10 @@ func TestTheWindowStopsAtEnoughResponses(t *testing.T) {
 	spending := WhatCodexHasSpent(rollout(t, lines...))
 
 	// Bounded by core at eight (hook.LastResponses).
-	if len(spending.Responses) != 8 {
-		t.Fatalf("reported %d responses, want 8", len(spending.Responses))
+	if len(spending) != 8 {
+		t.Fatalf("reported %d responses, want 8", len(spending))
 	}
-	if last := spending.Responses[len(spending.Responses)-1].Response; last != "resp-39" {
+	if last := spending[len(spending)-1].Response; last != "resp-39" {
 		t.Errorf("the newest reported is %q, want resp-39", last)
 	}
 }

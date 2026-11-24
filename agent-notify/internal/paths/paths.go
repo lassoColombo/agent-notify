@@ -133,8 +133,9 @@ func (l Layout) Ended() string { return filepath.Join(l.State, "ended") }
 // while referenced (plan.md §A7.2).
 func (l Layout) Locks() string { return filepath.Join(l.State, "locks") }
 
-// History holds the last few things each session said and the last few times
-// its state moved (§A7.7).
+// History is where a build before D-139 kept the last few things each
+// session said; nothing writes it now, and a session's file goes when the
+// session is forgotten.
 func (l Layout) History() string { return filepath.Join(l.State, "history") }
 
 func (l Layout) SessionFile(key string) string {
@@ -168,7 +169,7 @@ func (l Layout) LogFile() string { return filepath.Join(l.State, "agent-notify.l
 
 // Directories lists every directory agent-notify creates, deepest last.
 func (l Layout) Directories() []string {
-	return []string{l.State, l.Sessions(), l.Ended(), l.History(), l.Locks(), l.Runtime}
+	return []string{l.State, l.Sessions(), l.Ended(), l.Locks(), l.Runtime}
 }
 
 // Create makes every directory, mode 0700, chmod'ed after MkdirAll because

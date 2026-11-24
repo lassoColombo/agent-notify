@@ -174,9 +174,9 @@ func TestEveryHookCarriesTheName(t *testing.T) {
 			if err := json.Unmarshal([]byte(one.payload), &payload); err != nil {
 				t.Fatalf("the fixture is not JSON: %v", err)
 			}
-			report, worth := Translate(one.hook, payload,
+			report, worth := Translate(payload,
 				ClaudeSession{Name: "remove-the-name-command", NameSource: "user"},
-				ClaudeTranscript{}, "", "")
+				ClaudeTranscript{}, "")
 			if !worth {
 				t.Fatalf("%s was ignored", one.hook)
 			}
@@ -225,7 +225,7 @@ func TestTheBestNameClaudeHasIsTheOneReported(t *testing.T) {
 		{"and neither is nothing", ClaudeSession{}, "", ""},
 	} {
 		t.Run(one.what, func(t *testing.T) {
-			report, worth := Translate("PostToolUse", payload, one.claude, ClaudeTranscript{}, one.title, "")
+			report, worth := Translate(payload, one.claude, ClaudeTranscript{Title: one.title}, "")
 			if !worth {
 				t.Fatal("PostToolUse was ignored")
 			}
@@ -278,7 +278,7 @@ func TestATitleTheSessionWasGivenIsReadFromThePayload(t *testing.T) {
 			if err := json.Unmarshal([]byte(one.payload), &payload); err != nil {
 				t.Fatalf("the fixture is not JSON: %v", err)
 			}
-			report, worth := Translate(one.hook, payload, one.claude, ClaudeTranscript{}, one.title, "")
+			report, worth := Translate(payload, one.claude, ClaudeTranscript{Title: one.title}, "")
 			if !worth {
 				t.Fatalf("%s was ignored", one.hook)
 			}

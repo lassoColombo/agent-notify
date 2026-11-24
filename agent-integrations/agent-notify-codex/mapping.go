@@ -7,9 +7,9 @@ package main
 
 import (
 	"encoding/json"
-	"github.com/lassoColombo/agent-notify/hook"
 	"strings"
 
+	"github.com/lassoColombo/agent-notify/hook"
 	"github.com/lassoColombo/agent-notify/session"
 )
 
@@ -92,8 +92,7 @@ type Payload struct {
 // call instead of waiting for one that happens to be special.
 //
 // The bool is false for a hook that should be reported as nothing at all.
-func Translate(payload Payload, whatCodexCallsIt string, spent Spending) (session.Report, bool) {
-	hook := payload.HookEventName
+func Translate(payload Payload, whatCodexCallsIt string, spent []session.Spend) (session.Report, bool) {
 	if payload.SessionID == "" {
 		// Nothing can be written about a session nobody can name.
 		return session.Report{}, false
@@ -109,10 +108,10 @@ func Translate(payload Payload, whatCodexCallsIt string, spent Spending) (sessio
 		// so they cost no extra write, and core counts only the responses it has
 		// not counted before (§A7.4.3, §A7.4.4).
 		Model: payload.Model,
-		Spent: spent.Responses,
+		Spent: spent,
 	}
 
-	switch hook {
+	switch payload.HookEventName {
 	case "SessionStart":
 		// Identity only. The reducer leaves a live session where it is, so a
 		// codex release that starts firing this for a compaction or a fork
@@ -129,7 +128,7 @@ func Translate(payload Payload, whatCodexCallsIt string, spent Spending) (sessio
 
 	case "UserPromptSubmit":
 		report.Event = session.UserSentPrompt
-		report.Message = said(payload.Prompt)
+		report.Message = hook.Message(payload.Prompt)
 
 	case "PostToolUse":
 		// Hundreds a turn. Saying the same thing every time is what lets the
@@ -147,11 +146,11 @@ func Translate(payload Payload, whatCodexCallsIt string, spent Spending) (sessio
 		// it says working again.
 		report.Event = session.BlockedOnHuman
 		report.Detail = "permission-prompt"
-		report.Message = said(whatNeedsApproving(payload))
+		report.Message = hook.Message(whatNeedsApproving(payload))
 
 	case "Stop":
 		report.Event = session.TurnFinished
-		report.Message = said(payload.LastAssistantMessage)
+		report.Message = hook.Message(payload.LastAssistantMessage)
 
 	case "Interrupt":
 		// The hook this integration cannot do without. Stop and Interrupt are
@@ -173,17 +172,6 @@ func Translate(payload Payload, whatCodexCallsIt string, spent Spending) (sessio
 		return session.Report{}, false
 	}
 	return report, true
-}
-
-// said is text worth keeping, or nothing at all. A blank message is not an
-// empty message: nil leaves whatever the session last said in place, and "" is
-// a deliberate erasure nothing here ever means.
-func said(text string) *string {
-	trimmed := strings.TrimSpace(text)
-	if trimmed == "" {
-		return nil
-	}
-	return &trimmed
 }
 
 // approvalFields are the parts of a tool's arguments worth showing a person,

@@ -6,14 +6,14 @@ import (
 	"testing"
 )
 
-var testLayout = Layout{ListWidth: 30}
+const testListWidth = 30
 
 // said is a step as one string, which is how these tests read it.
 func said(step Step) string { return strings.Join(step.Args, " ") }
 
 func next(t *testing.T, w World, want string) (Step, bool) {
 	t.Helper()
-	return Next(w, "%1", want, testLayout)
+	return Next(w, "%1", want, testListWidth)
 }
 
 // nothing fails if there is a step.

@@ -18,9 +18,6 @@ const (
 	glyphColumn = 2
 	// ageColumn is the widest wait session.Ago writes ("59m", "23h", "12d").
 	ageColumn = 4
-	// stuckAfter is how long a turn runs before its wait is gold: the cockpit's
-	// rule, so that the two lists say the same thing about the same agent.
-	stuckAfter = 15 * time.Minute
 )
 
 // Row is one line of the list, and it is also what the matcher matches against:
@@ -43,7 +40,7 @@ func Row(record session.Record, at time.Time, width int) string {
 	switch {
 	case record.Kernel == session.BlockedOnYou:
 		wait = Text.Bold(true)
-	case record.Kernel == session.Working && elapsed >= stuckAfter:
+	case record.Kernel == session.Working && elapsed >= session.StuckAfter:
 		wait = Long
 	}
 	name := max(width-glyphColumn-1-ageColumn, 1)

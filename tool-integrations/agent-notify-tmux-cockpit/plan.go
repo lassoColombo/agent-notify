@@ -32,13 +32,6 @@ type Step struct {
 	Why   string
 }
 
-// Layout is how the tab is built.
-type Layout struct {
-	// ListWidth is the list's width in columns, set when the stand-in is put
-	// beside it and left to the user after that.
-	ListWidth int
-}
-
 // Desire is what the list asks of the tab.
 type Desire struct {
 	// Staged is the pane the stage should show, once the cursor has rested on
@@ -63,7 +56,10 @@ func Want(world World, list string, desire Desire) string {
 // Next is the one step that brings the tab nearer to showing `want`, and false
 // when there is nothing left to do. The caller runs it, looks at the server
 // again and asks again.
-func Next(world World, list, want string, layout Layout) (Step, bool) {
+//
+// listWidth is the list's width in columns, set when the stand-in is put
+// beside it and left to the user after that.
+func Next(world World, list, want string, listWidth int) (Step, bool) {
 	self, alive := world.Panes[list]
 	if !alive {
 		return Step{}, false
@@ -118,12 +114,13 @@ func Next(world World, list, want string, layout Layout) (Step, bool) {
 
 	if standIn.Window != tab {
 		// The agent's pane closed while it was on the stage, and the stand-in
-		// is left holding a place nobody will come back to.
-		return Step{
-			Args: []string{"join-pane", "-h", "-d", "-s", standIn.ID, "-t", list, ";",
-				"resize-pane", "-t", list, "-x", strconv.Itoa(layout.ListWidth)},
-			Why: fmt.Sprintf("the stand-in %s comes back to the tab", standIn.ID),
-		}, true
+		// is left holding a place nobody will come back to. The window it held
+		// it in gets its name back first, while it is still there: the stand-in
+		// may have been all that was left of it.
+		back := append(namingBack(world, standIn),
+			command{"join-pane", "-h", "-d", "-s", standIn.ID, "-t", list},
+			command{"resize-pane", "-t", list, "-x", strconv.Itoa(listWidth)})
+		return Step{Args: back.argv(), Why: fmt.Sprintf("the stand-in %s comes back to the tab", standIn.ID)}, true
 	}
 
 	if next, there := world.Panes[want]; there && borrowable(next, tab) {
@@ -169,9 +166,12 @@ func take(pane Pane, list, standIn, tab string) block {
 	}
 	if pane.AutoRename {
 		// The window would take the stand-in's name, which is no name at all.
+		// Written on the stand-in too, which outlives the agent's pane when
+		// that closes on the stage and is then what gives the name back.
 		taken.Renamed = pane.Window
 		swap = append(swap,
 			command{"set-option", "-p", "-t", pane.ID, renamedOption, pane.Window},
+			command{"set-option", "-p", "-t", standIn, renamedOption, pane.Window},
 			command{"set-option", "-w", "-t", pane.Window, "automatic-rename", "off"})
 	}
 	atHomeAndUnseen := "#{&&:#{==:#{window_active_clients},0},#{?#{" + standInOption + "},0,1}}"
@@ -206,6 +206,7 @@ func giving(pane Pane) command {
 	if pane.Renamed != "" {
 		back = append(back,
 			command{"set-option", "-p", "-u", "-t", pane.ID, renamedOption},
+			command{"set-option", "-p", "-u", "-t", pane.StandIn, renamedOption},
 			command{"set-option", "-w", "-u", "-t", pane.Renamed, "automatic-rename"})
 	}
 	return command{"if-shell", "-F", "-t", pane.ID, "#{==:#{" + standInOption + "}," + pane.StandIn + "}", back}
@@ -278,17 +279,23 @@ func hookOf(event string) string { return event + "[" + hookName + "]" }
 // forgetting takes what was written on a borrowed pane off it, and gives the
 // window it lived in its name back if that window is still there.
 func forgetting(world World, pane Pane) block {
-	forget := block{
+	return append(block{
 		{"set-option", "-p", "-u", "-t", pane.ID, standInOption},
 		{"set-option", "-p", "-u", "-t", pane.ID, homeSessionOption},
+	}, namingBack(world, pane)...)
+}
+
+// namingBack gives back a window's naming that a borrow held off, as a
+// borrowed pane or a stand-in records it, if that window is still there.
+func namingBack(world World, pane Pane) block {
+	if pane.Renamed == "" {
+		return nil
 	}
-	if pane.Renamed != "" {
-		forget = append(forget, command{"set-option", "-p", "-u", "-t", pane.ID, renamedOption})
-		if world.hasWindow(pane.Renamed) {
-			forget = append(forget, command{"set-option", "-w", "-u", "-t", pane.Renamed, "automatic-rename"})
-		}
+	back := block{{"set-option", "-p", "-u", "-t", pane.ID, renamedOption}}
+	if world.hasWindow(pane.Renamed) {
+		back = append(back, command{"set-option", "-w", "-u", "-t", pane.Renamed, "automatic-rename"})
 	}
-	return forget
+	return back
 }
 
 // astray is the step for a borrowed pane whose stand-in is gone, and with it

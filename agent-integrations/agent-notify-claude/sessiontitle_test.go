@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,18 +17,28 @@ const (
 	realAssistant   = `{"type":"assistant","requestId":"req_011","message":{"model":"claude-opus-5","usage":{"input_tokens":2,"output_tokens":366}}}`
 )
 
-// TestTheTitleIsReadOutOfTheHead is the ordinary head of a titled session.
-func TestTheTitleIsReadOutOfTheHead(t *testing.T) {
-	title := WhatClaudeTitlesThisSession(transcript(t,
+// TestTheTitleIsReadOffTheTail is a titled session as Claude 2.1.311 writes
+// it: the title among the newest lines, read in the pass that reads the spend.
+func TestTheTitleIsReadOffTheTail(t *testing.T) {
+	said := WhatTheTranscriptSays(transcript(t,
 		realTypedPrompt, realAssistant, realTitle, realToolResult))
-	if title != "Fix configuration resetting tab name" {
-		t.Errorf("title = %q, want Claude's own", title)
+	if said.Title != "Fix configuration resetting tab name" {
+		t.Errorf("title = %q, want Claude's own", said.Title)
 	}
 }
 
-// TestASessionClaudeHasNotTitledReportsNothing is every session on this machine
-// today, and the whole point of the change that produced it: an empty name is
-// how core learns that nobody has named this one, and core names it after its
+// TestTheNewestTitleWins: Claude writes the title again as the session goes
+// on, and the newest is the one it would show.
+func TestTheNewestTitleWins(t *testing.T) {
+	older := `{"type":"ai-title","aiTitle":"Investigate the tab name"}`
+	said := WhatTheTranscriptSays(transcript(t, older, realAssistant, realTitle))
+	if said.Title != "Fix configuration resetting tab name" {
+		t.Errorf("title = %q, want the newest", said.Title)
+	}
+}
+
+// TestASessionClaudeHasNotTitledReportsNothing: an empty name is how core
+// learns that nobody has named this one, and core names it after its
 // directory rather than this program inventing something (D-75).
 func TestASessionClaudeHasNotTitledReportsNothing(t *testing.T) {
 	for _, one := range []struct{ what, line string }{
@@ -41,28 +50,13 @@ func TestASessionClaudeHasNotTitledReportsNothing(t *testing.T) {
 		{"something else carrying the words", `{"type":"user","message":{"role":"user","content":"grep ai-title"}}`},
 	} {
 		t.Run(one.what, func(t *testing.T) {
-			if got := WhatClaudeTitlesThisSession(transcript(t, one.line)); got != "" {
+			if got := WhatTheTranscriptSays(transcript(t, one.line)).Title; got != "" {
 				t.Errorf("read %q as a title", got)
 			}
-			if got := WhatClaudeTitlesThisSession(transcript(t, one.line, realTitle)); got == "" {
-				t.Error("skipped it and then found nothing after it")
+			if got := WhatTheTranscriptSays(transcript(t, realTitle, one.line)).Title; got == "" {
+				t.Error("passed over it and then found nothing behind it")
 			}
 		})
-	}
-}
-
-// TestTheWindowEndsWhereItEnds is the bound. A transcript is read once, from
-// the front, and a line that begins inside the window and ends outside it is a
-// fragment nothing can be read from.
-func TestTheWindowEndsWhereItEnds(t *testing.T) {
-	padding, err := json.Marshal(map[string]any{
-		"type": "user", "message": map[string]any{"content": strings.Repeat("x", theHeadOfTheTranscript)},
-	})
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-	if got := WhatClaudeTitlesThisSession(transcript(t, string(padding), realTitle)); got != "" {
-		t.Errorf("read %q from beyond the window", got)
 	}
 }
 
@@ -81,7 +75,7 @@ func TestNothingToReadIsNotAProblemEither(t *testing.T) {
 		{"a transcript that is not JSON", transcript(t, "}{ not json", "")},
 	} {
 		t.Run(one.what, func(t *testing.T) {
-			if got := WhatClaudeTitlesThisSession(one.path); got != "" {
+			if got := WhatTheTranscriptSays(one.path).Title; got != "" {
 				t.Errorf("read %q", got)
 			}
 		})
@@ -104,7 +98,7 @@ func TestEveryTranscriptOnThisMachine(t *testing.T) {
 
 	var titled int
 	for _, path := range found {
-		title := WhatClaudeTitlesThisSession(path)
+		title := WhatTheTranscriptSays(path).Title
 		if title == "" {
 			continue
 		}

@@ -52,11 +52,12 @@ func TestTheArgumentsAreOneBannerPerSession(t *testing.T) {
 	notice := Notice{Key: "a/b/c", Title: "lenny", Subtitle: "blocked on you", Body: "Shall I?"}
 	got := theArgumentsFor(notice, "/tmp/love.png", Sound{Plays: true}, 10*time.Second)
 
+	for _, want := range []string{"--group=a/b/c", "--title=lenny", "--subtitle=blocked on you", "--message=Shall I?"} {
+		if !slices.Contains(got, want) {
+			t.Errorf("%v does not say %s", got, want)
+		}
+	}
 	for _, want := range [][2]string{
-		{"--group", "a/b/c"},
-		{"--title", "lenny"},
-		{"--subtitle", "blocked on you"},
-		{"--message", "Shall I?"},
 		// The same file twice: the picture beside the text and the badge on it.
 		{"--content-image", "/tmp/love.png"},
 		{"--app-icon", "/tmp/love.png"},
@@ -67,6 +68,20 @@ func TestTheArgumentsAreOneBannerPerSession(t *testing.T) {
 		if at := slices.Index(got, want[0]); at < 0 || at+1 >= len(got) || got[at+1] != want[1] {
 			t.Errorf("%v does not say %s %s", got, want[0], want[1])
 		}
+	}
+}
+
+// TestTextThatLooksLikeAnOptionIsNotOne: the agent's text is joined to its
+// option, so a message that opens with a markdown bullet is a message.
+func TestTextThatLooksLikeAnOptionIsNotOne(t *testing.T) {
+	got := theArgumentsFor(Notice{Key: "k", Title: "-x", Body: "- first, the tests"}, "", Sound{}, 0)
+	for _, word := range got {
+		if strings.HasPrefix(word, "-") && !strings.HasPrefix(word, "--") {
+			t.Errorf("%q is a word of its own, which alerter reads as an option", word)
+		}
+	}
+	if !slices.Contains(got, "--message=- first, the tests") {
+		t.Errorf("%v does not carry the message as it was", got)
 	}
 }
 

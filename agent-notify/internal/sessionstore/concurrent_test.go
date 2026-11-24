@@ -183,23 +183,6 @@ func TestConcurrentWriterProcesses(t *testing.T) {
 	if record.Kernel != session.Working {
 		t.Errorf("kernel = %q, want working", record.Kernel)
 	}
-
-	// The history file is written under the same lock and faced the same
-	// contention; out-of-order entries would mean a writer wrote history from
-	// a record it no longer held.
-	history, err := opened.History(contended)
-	if err != nil {
-		t.Fatalf("History: %v", err)
-	}
-	if want := config.Defaults().HistoryMessages; len(history.Messages) != want {
-		t.Errorf("history kept %d messages, want the bound of %d", len(history.Messages), want)
-	}
-	for i := 1; i < len(history.Messages); i++ {
-		if history.Messages[i].Sequence <= history.Messages[i-1].Sequence {
-			t.Errorf("history is out of order at %d: sequence %d after %d",
-				i, history.Messages[i].Sequence, history.Messages[i-1].Sequence)
-		}
-	}
 }
 
 // TestLockGivesUpRatherThanWaitingForever is R1 on the hook path: a writer that

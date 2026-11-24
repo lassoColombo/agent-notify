@@ -26,3 +26,14 @@ func Detail(word string) string {
 	}
 	return out.String()
 }
+
+// Message is what an agent said, as a [session.Report] carries it: nil when it
+// said nothing, because blank is not a message, and nil leaves what is stored
+// alone where "" would clear it.
+func Message(said string) *string {
+	trimmed := strings.TrimSpace(said)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
+}

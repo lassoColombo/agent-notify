@@ -1,6 +1,6 @@
 // Command agent-notify-claude is Claude Code's agent-integration: it turns
-// Claude's hooks into agent-notify's events and nothing else. It produces seven
-// of the nine: never `turn-interrupted`, never `context-changed`.
+// Claude's hooks into agent-notify's events and nothing else. It produces eight
+// of the nine: never `turn-interrupted`.
 //
 // Everything peculiar to Claude lives in this file. Everything after it is
 // hook.Record, which is identical for every agent.
@@ -12,9 +12,9 @@ package main
 
 import (
 	"cmp"
-	"github.com/lassoColombo/agent-notify/hook"
 	"strings"
 
+	"github.com/lassoColombo/agent-notify/hook"
 	"github.com/lassoColombo/agent-notify/session"
 )
 
@@ -29,12 +29,14 @@ const AgentName = "claude"
 // waits for on every single tool call — [verified] 3,017 PreToolUse against
 // 2,915 PostToolUse in two days of real use. A `working/running-<tool>` detail
 // is what it would buy, and it is not worth that.
+//
+// PreCompact is absent too, since D-137: a compaction moves no state, and a
+// hook that says nothing is a process Claude waits for to no end.
 var SubscribedHooks = []string{
 	"SessionStart",
 	"UserPromptSubmit",
 	"PostToolUse",
 	"SubagentStop",
-	"PreCompact",
 	"Stop",
 	"StopFailure",
 	"Notification",
@@ -109,17 +111,18 @@ var NotificationsThatWantYou = map[string]bool{
 // Translate is what this hook says about the session, or false to say nothing.
 //
 // PURE, and where all the thinking is: no store, no hook, no agent needed to
-// test it. That is why what Claude knows about the session, what it has spent
-// and which session it continues are parameters rather than lookups — each is
-// a file read (sessionname.go, usage.go and continuation.go), and deciding
-// which hooks carry them is policy, which belongs where policy is tested.
+// test it. That is why what Claude knows about the session, what its
+// transcript says — the spend, the model, Claude's title — and which session
+// it continues are parameters rather than lookups — each is a file read
+// (sessionname.go, usage.go and continuation.go), and deciding which hooks
+// carry them is policy, which belongs where policy is tested. Which hook this
+// is comes from the payload, so no argument can disagree with it.
 //
 // Every hook carries it. The report is being written anyway, so the name costs
 // no extra write, and a `/rename` halfway through a session lands on the next
 // tool call instead of waiting for one that happens to be special.
 func Translate(
-	hookName string, payload Payload, claude ClaudeSession,
-	said ClaudeTranscript, title, continues string,
+	payload Payload, claude ClaudeSession, said ClaudeTranscript, continues string,
 ) (session.Report, bool) {
 	if strings.TrimSpace(payload.SessionID) == "" {
 		// Nothing can be written about a session nobody can name.
@@ -148,7 +151,7 @@ func Translate(
 		Name: cmp.Or(
 			strings.TrimSpace(payload.SessionTitle),
 			claude.NameSomebodyChose(),
-			title,
+			said.Title,
 			claude.NameClaudeGenerated(),
 		),
 		// The session's own directory, and the payload's only when Claude is
@@ -169,14 +172,18 @@ func Translate(
 		ContinuedFrom: continues,
 	}
 
-	switch hookName {
+	switch payload.HookEventName {
 	case "SessionStart":
 		// [verified 2026-09-17] All four sources occur, and they are not the
-		// same event. A compaction keeps the session id and is the agent
-		// working mid-turn, not a session beginning — splitting on `source` is
-		// this program's job, not core's (D-31).
+		// same event. A compaction keeps the session id and is not a session
+		// beginning — splitting on `source` is this program's job, not core's
+		// (D-31). Nor is it the agent working: [verified 2026-11-24] 234 of 252
+		// compactions began after the turn had finished, and calling them
+		// progress held a finished session at `working` until the next prompt.
+		// It moves no state, and carries the name and the spend like any
+		// other hook (D-137).
 		if payload.Source == "compact" {
-			report.Event = session.AgentProgressed
+			report.Event = session.ContextChanged
 			return report, true
 		}
 		report.Event = session.SessionStarted
@@ -184,7 +191,7 @@ func Translate(
 
 	case "UserPromptSubmit":
 		report.Event = session.UserSentPrompt
-		report.Message = text(payload.Prompt)
+		report.Message = hook.Message(payload.Prompt)
 		return report, true
 
 	case "PostToolUse":
@@ -218,14 +225,9 @@ func Translate(
 		report.Detail = "subagent-finished"
 		return report, true
 
-	case "PreCompact":
-		report.Event = session.AgentProgressed
-		report.Detail = "compacting"
-		return report, true
-
 	case "Stop":
 		report.Event = session.TurnFinished
-		report.Message = text(payload.LastAssistantMessage)
+		report.Message = hook.Message(payload.LastAssistantMessage)
 		return report, true
 
 	case "StopFailure":
@@ -236,7 +238,7 @@ func Translate(
 		// better than silence.
 		report.Event = session.TurnFailed
 		report.Detail = hook.Detail(payload.Error)
-		report.Message = text(cmp.Or(payload.LastAssistantMessage, payload.ErrorDetails))
+		report.Message = hook.Message(cmp.Or(payload.LastAssistantMessage, payload.ErrorDetails))
 		return report, true
 
 	case "Notification":
@@ -250,7 +252,7 @@ func Translate(
 		}
 		report.Event = session.BlockedOnHuman
 		report.Detail = hook.Detail(kind)
-		report.Message = text(payload.Message)
+		report.Message = hook.Message(payload.Message)
 		return report, true
 
 	case "SessionEnd":
@@ -281,14 +283,4 @@ func endedBecause(reason string) string {
 	default:
 		return hook.Detail(reason)
 	}
-}
-
-// text is a message worth keeping, or nothing at all. Blank is not a message,
-// and a nil pointer means "leave what is stored alone" rather than "clear it".
-func text(message string) *string {
-	trimmed := strings.TrimSpace(message)
-	if trimmed == "" {
-		return nil
-	}
-	return &trimmed
 }

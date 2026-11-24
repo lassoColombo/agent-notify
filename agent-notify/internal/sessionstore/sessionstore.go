@@ -23,17 +23,10 @@ import (
 type SessionStore struct {
 	layout   paths.Layout
 	patience time.Duration
-	// kept is the two settings a reload can move, swapped whole so that a
-	// writer on another goroutine sees one configuration or the other
-	// (D-117).
-	kept atomic.Pointer[kept]
-}
-
-// kept is what the store takes from the configuration: how much history to
-// keep per session, and how long an ended session is remembered.
-type kept struct {
-	bounds session.Bounds
-	keep   time.Duration
+	// keep is how long an ended session is remembered: the one setting a
+	// reload can move, swapped whole so that a writer on another goroutine
+	// sees one configuration or the other (D-117).
+	keep atomic.Int64
 }
 
 // LockPatience bounds how long a writer waits for another writer to finish with
@@ -57,14 +50,10 @@ func Open(layout paths.Layout, settings config.Config) (*SessionStore, error) {
 	return opened, nil
 }
 
-// Reconfigure hands the store what a reload moved: the history bounds and
-// `keep-ended-sessions`. A write already under way finishes with the
-// configuration it started with (D-117).
+// Reconfigure hands the store what a reload moved: `keep-ended-sessions`
+// (D-117).
 func (s *SessionStore) Reconfigure(settings config.Config) {
-	s.kept.Store(&kept{
-		bounds: session.Bounds{Messages: settings.HistoryMessages, Changes: settings.HistoryChanges},
-		keep:   settings.KeepEndedSessions.Duration(),
-	})
+	s.keep.Store(int64(settings.KeepEndedSessions.Duration()))
 }
 
 // Read returns the record for a key, whether it is live or ended.
@@ -178,13 +167,6 @@ func (s *SessionStore) Update(
 			return next, err
 		}
 	}
-
-	if err := s.recordHistory(key, previous, next); err != nil {
-		// History is a convenience; the record is the truth. Failing the whole
-		// write because the hover preview lost an entry would be the wrong
-		// trade on the hook path.
-		return next, fmt.Errorf("record written, history not: %w", err)
-	}
 	return next, nil
 }
 
@@ -196,40 +178,6 @@ func (s *SessionStore) fileFor(record session.Record) string {
 		return s.layout.EndedFile(record.Key.String())
 	}
 	return s.layout.SessionFile(record.Key.String())
-}
-
-func (s *SessionStore) recordHistory(
-	key session.Key, previous, next session.Record,
-) error {
-	bounds := s.kept.Load().bounds
-	if bounds.Messages <= 0 && bounds.Changes <= 0 {
-		return nil
-	}
-	path := s.layout.HistoryFile(key.String())
-
-	var history session.History
-	if _, err := readJSON(path, &history); err != nil {
-		// A corrupt history file must not stop a session from being recorded.
-		// Starting a fresh one loses previews, not state.
-		history = session.History{}
-	}
-
-	history, changed := history.Record(previous, next, bounds)
-	if !changed {
-		return nil
-	}
-	return writeJSON(path, history)
-}
-
-// History returns what a session has said and how its state has moved. An
-// absent file is an empty history, not an error: most sessions have said
-// nothing yet.
-func (s *SessionStore) History(key session.Key) (session.History, error) {
-	var history session.History
-	if _, err := readJSON(s.layout.HistoryFile(key.String()), &history); err != nil {
-		return session.History{}, err
-	}
-	return history, nil
 }
 
 // List returns every live session. This is the cold read path: it must work
@@ -317,7 +265,7 @@ func (s *SessionStore) listDir(dir string, endedSince time.Time) ([]session.Reco
 }
 
 // ForgetWhatIsTooOld deletes ended sessions that have outlived
-// `keep-ended-sessions`, and the history that belongs to them.
+// `keep-ended-sessions`.
 //
 // It is the only thing in the system that deletes a session, and it deletes
 // only what has been dead longer than the configured memory. Not knowing must
@@ -326,7 +274,7 @@ func (s *SessionStore) listDir(dir string, endedSince time.Time) ([]session.Reco
 func (s *SessionStore) ForgetWhatIsTooOld(
 	now time.Time,
 ) (removed []session.Key, err error) {
-	keep := s.kept.Load().keep
+	keep := time.Duration(s.keep.Load())
 	ended, listErr := s.ListEnded()
 	var problems []error
 	if listErr != nil {
@@ -370,6 +318,8 @@ func (s *SessionStore) forget(key session.Key, expected uint64) error {
 	for _, path := range []string{
 		s.layout.EndedFile(key.String()),
 		s.layout.SessionFile(key.String()),
+		// Nothing writes history since D-139; this takes what an older build
+		// wrote away with the session it described.
 		s.layout.HistoryFile(key.String()),
 	} {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {

@@ -105,14 +105,17 @@ func chooseOne(
 		return Arguments(program, preview, Ghost(all), Complaint(complaints))
 	}
 
-	options, err := fzf.ParseOptions(true, told())
+	// Not with $FZF_DEFAULT_OPTS under these: a person's `--tac` reverses the
+	// urgency order, and `--multi` or `--print-query` hands back two lines to
+	// a one-line channel and the picker never returns.
+	options, err := fzf.ParseOptions(false, told())
 	if err != nil && rebound {
 		// fzf is the only thing that knows what a key is called, so fzf is what
 		// checks: a table it will not take is dropped for this program's own
 		// and the window opens saying so, rather than a keypress answering with
 		// a pane that appears and vanishes.
 		complaints = append(complaints, TheKeysWeShippedWith(err))
-		options, err = fzf.ParseOptions(true, told())
+		options, err = fzf.ParseOptions(false, told())
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %v\n", Name, err)
@@ -269,7 +272,11 @@ func Arguments(program, previewWindow, ghost, complaint string) []string {
 		// fzf keeps the original line for placeholders, so {1} is still the key
 		// even though the row on screen starts at field two.
 		"--with-nth=2..",
-		"--preview", program + " --preview {1}",
+		// The preview is this program, run by a shell that is always sh so
+		// that the quoting is: a path with a space in it otherwise fails in
+		// every preview, and a person's $SHELL may not read quotes as sh does.
+		"--with-shell=/bin/sh -c",
+		"--preview", "'" + strings.ReplaceAll(program, "'", `'\''`) + "' --preview {1}",
 		// The message beside the list, which is the cockpit's shape — see
 		// Split. `noinfo`: fzf otherwise prints the scroll position over the
 		// top-right corner of the pane, over the agent's own first sentence.

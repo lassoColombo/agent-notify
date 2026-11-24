@@ -18,17 +18,6 @@ const (
 	Gone
 )
 
-func (v Verdict) String() string {
-	switch v {
-	case Running:
-		return "running"
-	case Gone:
-		return "gone"
-	default:
-		return "cannot tell"
-	}
-}
-
 // LivenessOf decides whether one session's process is still there.
 //
 // The reboot rule comes first and probes nothing: pids from a previous boot

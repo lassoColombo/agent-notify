@@ -108,22 +108,16 @@ integrations:
 func TestBadValuesFallBackIndividually(t *testing.T) {
 	settings, problems := config.Parse([]byte(`
 keep-ended-sessions: 0
-history-messages: -1
 integrations:
   tmux: {}
 `), "values.yaml")
 
-	if len(problems) != 2 {
-		t.Fatalf("got %d complaints, want 2: %v", len(problems), problems)
+	if len(problems) != 1 {
+		t.Fatalf("got %d complaints, want 1: %v", len(problems), problems)
 	}
 	defaults := config.Defaults()
 	if settings.KeepEndedSessions != defaults.KeepEndedSessions {
 		t.Errorf("KeepEndedSessions = %s, want the default", settings.KeepEndedSessions)
-	}
-	// A negative count falls back to 0 — "keep none" — rather than to the
-	// default, which is what config.go says it does.
-	if settings.HistoryMessages != 0 {
-		t.Errorf("HistoryMessages = %d, want 0", settings.HistoryMessages)
 	}
 	if _, kept := settings.Integrations["tmux"]; !kept {
 		t.Errorf("a good value was thrown away with the bad ones")

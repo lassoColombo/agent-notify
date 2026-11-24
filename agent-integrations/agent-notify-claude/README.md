@@ -213,7 +213,6 @@ added SessionStart
 added UserPromptSubmit
 added PostToolUse
 added SubagentStop
-added PreCompact
 added Stop
 added StopFailure
 added Notification
@@ -319,7 +318,7 @@ Written by `install`, at `~/.claude/settings.json` unless you say otherwise.
 | **Path** | `~/.claude/settings.json`, and `--settings PATH` overrides it |
 | **Format** | Claude's own JSON; only the `hooks` key is touched |
 | **Keys written** | `hooks.<HookEventName>`, one group per hook, each holding `{"type": "command", "command": "\"<path>\" <HookEventName>"}` |
-| **Hooks subscribed** | `SessionStart`, `UserPromptSubmit`, `PostToolUse`, `SubagentStop`, `PreCompact`, `Stop`, `StopFailure`, `Notification`, `SessionEnd` |
+| **Hooks subscribed** | `SessionStart`, `UserPromptSubmit`, `PostToolUse`, `SubagentStop`, `Stop`, `StopFailure`, `Notification`, `SessionEnd` |
 
 Two flags, and that is the whole command line of `install`:
 
@@ -390,14 +389,13 @@ payload, as `transcript_path`, and is used exactly as given.
 
 ### The files it reads
 
-Three on every hook, a fourth once a turn, and none of them is written by this
+Two on every hook, a third once a turn, and none of them is written by this
 program.
 
 | Path | Read for | When it is missing |
 | --- | --- | --- |
 | `~/.claude/sessions/<pid>.json` | `name`, `nameSource`, `cwd`, and the `sessionId` that proves the file is about this session | The name and directory are reported as nothing, and the payload's `cwd` is the fallback. Claude may simply be too old to keep one. |
-| `~/.claude/projects/<slug>/<session-id>.jsonl`, the first 64 KiB | the `ai-title` line | No title, which today is the ordinary case. |
-| the same transcript, the last 64 KiB and up to 4 MiB back | `requestId` and `usage` per response, and the model off the newest assistant line | Nothing is reported, and core leaves the stored totals alone. |
+| `~/.claude/projects/<slug>/<session-id>.jsonl`, the last 64 KiB and up to 4 MiB back | `requestId` and `usage` per response, the model off the newest assistant line, and the newest `ai-title` line | Nothing is reported, and core leaves the stored totals and name alone. |
 | every other transcript in the same directory, the last 16 KiB, on `SessionStart` and `UserPromptSubmit` only | a `continued-in` line naming this session, which says which session this one carries on from | Nothing is reported, and a session left behind by a hand-over stays live until its process exits. |
 
 Nothing here can fail in a way that matters. Every one of these is a best-effort
@@ -409,8 +407,7 @@ the stored one alone".
 | Claude's hook | becomes | detail | message |
 | --- | --- | --- | --- |
 | `SessionStart` (`startup`, `resume`, `clear`) | `session-started` | | |
-| `SessionStart` (`compact`) | `agent-progressed` | | |
-| `PreCompact` | `agent-progressed` | `compacting` | |
+| `SessionStart` (`compact`) | `context-changed` | | |
 | `UserPromptSubmit` | `user-sent-prompt` | | the prompt |
 | `PostToolUse` | `agent-progressed` | | |
 | `SubagentStop` **with** an `agent_type` | `agent-progressed` | `subagent-finished` | |
@@ -458,8 +455,10 @@ fixtures in `mapping_test.go` are what it chose.
   `agent-progressed` costs nothing, because the parent's next `PostToolUse` says
   working anyway.
 - **`SessionStart` is not one event.** A compaction keeps the session id and is
-  the agent working mid-turn, not a session beginning. Splitting on `source` is
-  this program's job, not core's (D-31).
+  not a session beginning. Splitting on `source` is this program's job, not
+  core's (D-31). Nor is it the agent working: [verified 2026-11-24] 234 of 252
+  compactions began after the turn had finished, so it moves no state, and
+  `PreCompact` is not subscribed at all (D-137).
 - **`notification_type` is a reliable discriminator** and the message text does
   not need parsing: every one of the 64 real permission prompts carried
   `permission_prompt`, and all 87 idle nudges carried `idle_prompt`. The kinds
@@ -513,8 +512,8 @@ a name somebody chose too: Claude strips the variable from a hook's environment,
 so the file is the only place it exists. A title a `SessionStart` hook returned
 never reaches the file; it is in the next payload and nowhere else.
 
-So `sessiontitle.go` reads the head of the transcript as well, where Claude
-writes down what the session is about:
+So `sessiontitle.go` reads the transcript as well, where Claude writes down
+what the session is about:
 
 ```
 ~/.claude/projects/<slug>/<session-id>.jsonl
@@ -531,27 +530,13 @@ and the report carries the best of four, or nothing at all:
 | Claude's label for the session | `nameSource: auto` | `session-naming` |
 | **nobody has named it** | — | **nothing is reported** |
 
-**The title is the one you want and it is not being written.** [verified
-2026-09-22, 2.1.267] 26 transcripts on this machine hold an `ai-title`; the
-newest was written on 2026-08-27 under 2.1.231 and none of the 222 written since
-has one. The generator is still in the binary — `querySource:
-"generate_session_title"`, a JSON-schema call returning `{title}` — and the SDK
-still documents a custom title as one that "skips automatic title generation",
-so this is a path that stopped firing rather than a field that went away. It is
-read anyway: it costs one open and one read of a file `usage.go` has just read
-from the other end, and the day it comes back every unnamed session is better
-named for nothing. [verified 2026-10-09, 2.1.285] Still dark: none of the 206
-transcripts on this machine holds one, and an interactive session driven
-through a prompt wrote none.
-
-**The head is read once, forwards, and 64 KiB of it.** That is the opposite of
-`usage.go`, and for the opposite reason: the title is written at the beginning
-and never rewritten, while the numbers are only ever at the end. [verified
-2026-09-22] it lands between 16.8 KiB and 23.7 KiB in 18 of the 26 transcripts
-that have one. The other 8 sit between 316 KiB and 2.2 MB in, at no fixed
-distance from either end, and they are deliberately not chased: the scan to reach
-them is unbounded and would run on every hook of every untitled session, which
-today is all of them.
+**The title is read off the tail, in the pass that reads the spend.** [verified
+2026-11-24, 2.1.311] 89 of the 311 transcripts on this machine hold an
+`ai-title`, and in 88 of them Claude writes it several times as the session
+goes on, always the same title, the newest within 34 KiB of the end. The first
+lies inside the first 64 KiB in one of them, which is why reading the head, as
+this did until D-137, found almost none. A tail read that stops before it reaches
+a title reports none, and an empty name leaves the stored one alone.
 
 **The `cwd` comes from that session file too, and not from the payload.** The
 payload's is the directory the tool ran in, so it follows the agent's `cd` around

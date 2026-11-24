@@ -14,8 +14,7 @@ import (
 // They live in package session rather than beside the others, which are all
 // package session_test and therefore cannot see the tables at all. That is
 // why the drift went unnoticed: a seventh kernel added to `kernels` and left
-// out of Kernels(), or a tenth event added to `events` and left out of
-// Events(), passed the entire suite.
+// out of Kernels() passed the entire suite.
 
 func TestEveryKernelIsEnumerated(t *testing.T) {
 	enumerated := Kernels()
@@ -30,23 +29,6 @@ func TestEveryKernelIsEnumerated(t *testing.T) {
 	for _, kernel := range enumerated {
 		if !kernel.Known() {
 			t.Errorf("Kernels() lists %q, which the table has never heard of", kernel)
-		}
-	}
-}
-
-func TestEveryEventIsEnumerated(t *testing.T) {
-	enumerated := Events()
-	if len(enumerated) != len(events) {
-		t.Errorf("Events() lists %d of the %d events in the table", len(enumerated), len(events))
-	}
-	for event := range events {
-		if !slices.Contains(enumerated, event) {
-			t.Errorf("%q is in the table and Events() does not list it", event)
-		}
-	}
-	for _, event := range enumerated {
-		if !event.Known() {
-			t.Errorf("Events() lists %q, which the table has never heard of", event)
 		}
 	}
 }

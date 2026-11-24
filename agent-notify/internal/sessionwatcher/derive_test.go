@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -74,6 +75,54 @@ func TestASlowContainerDoesNotDelayADraw(t *testing.T) {
 		record, found, _ := store.Read(session.Key{Host: "mac", Agent: "fake", SessionID: "placed"})
 		return found && string(record.DerivedContext["placer"]) == `{"pane":"placed"}`
 	})
+}
+
+// TestAnEmptyCaptureIsAskedAboutOnce: a container that captured nothing can
+// still place by the chain, so it is asked (D-135); and one that answers
+// `null` has said there is nothing to place the session by, which is stored
+// and not asked about again however often the store moves.
+func TestAnEmptyCaptureIsAskedAboutOnce(t *testing.T) {
+	atATestablePace(t, 200*time.Millisecond)
+	root := shortRoot(t)
+	placer := filepath.Join(root, "agent-notify-placer")
+	asked := filepath.Join(root, "placer.asked")
+	write(t, placer, fmt.Sprintf("#!/bin/sh\ncase \"$1\" in\n"+
+		"  %s) printf '%%s\\n' '{\"version\":\"0.0.0-dev\",\"methods\":[\"interpret-environment\",\"focus\",\"focused\"]}' ;;\n"+
+		"  %s) echo asked >> %s; printf '%%s\\n' null ;;\n  *) exit 1 ;;\nesac\n",
+		session.CapabilitiesCommand, session.MethodInterpret, asked))
+	if err := os.Chmod(placer, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	layout := running(t, root)
+	key := session.Key{Host: "mac", Agent: "fake", SessionID: "nowhere"}
+	applyToTheStore(t, layout, session.Report{
+		Key:     key,
+		Event:   session.TurnFinished,
+		Process: session.Process{PID: os.Getpid()},
+		CapturedContext: &session.CapturedContext{
+			By: map[string]json.RawMessage{"placer": json.RawMessage(`{}`)},
+		},
+	})
+	waitFor(t, "the answer to be stored", func() bool {
+		settings, _ := config.Load(layout)
+		store, err := sessionstore.Open(layout, settings)
+		if err != nil {
+			return false
+		}
+		record, found, _ := store.Read(key)
+		answer, stored := record.DerivedContext["placer"]
+		return found && stored && string(answer) == "null"
+	})
+
+	for i := range 3 {
+		somethingWasSaid(t, layout, "nowhere", fmt.Sprintf("said %d", i))
+		time.Sleep(300 * time.Millisecond)
+	}
+	content, _ := os.ReadFile(asked)
+	if times := strings.Count(string(content), "asked"); times != 1 {
+		t.Errorf("the placer was asked %d times about one capture, want once", times)
+	}
 }
 
 // TestAContainerIsHandedItsOwnEntryAndTheChain is the shape of what arrives

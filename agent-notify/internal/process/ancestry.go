@@ -13,20 +13,15 @@ import (
 // hang (R1).
 const MostAncestorsWorthClimbing = 10
 
-// Ancestry walks up from a pid, recording what it passes.
+// climb walks up from a pid, keeping everything it read about each rung, so
+// that whoever matches on the chain matches on what was read rather than
+// reading it again (D-114).
 //
 // This must run in the hook process. By the time the session-watcher reads the
 // event the hook has exited and there is no chain left to walk from (§A8.4).
 //
 // It stops at whatever it cannot read rather than failing: a partial chain is
 // worth more than none, and the caller is a hook that may never fail (R2).
-func Ancestry(start int, prober ReadsProcessFacts) []session.Ancestor {
-	return recorded(climb(start, prober))
-}
-
-// climb is the walk itself, keeping everything it read about each rung, so
-// that whoever matches on the chain matches on what was read rather than
-// reading it again (D-114).
 func climb(start int, prober ReadsProcessFacts) []Facts {
 	var chain []Facts
 	seen := map[int]bool{}

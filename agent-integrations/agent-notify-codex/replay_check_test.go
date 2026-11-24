@@ -154,7 +154,7 @@ func replayCorpus(t *testing.T) ([]replayed, int) {
 			continue
 		}
 		total++
-		report, worth := Translate(payload, "", Spending{})
+		report, worth := Translate(payload, "", nil)
 		steps = append(steps, replayed{
 			when: fields[0], hook: payload.HookEventName, report: report, worth: worth,
 		})

@@ -66,10 +66,15 @@ func theArgumentsFor(notice Notice, mark string, sound Sound, timeout time.Durat
 		// The session, which is also the identity of the banner: a second
 		// notice about one session replaces the first rather than stacking
 		// under it, and reaps the alerter that was holding it.
-		"--group", notice.Key,
-		"--title", notice.Title,
-		"--subtitle", notice.Subtitle,
-		"--message", notice.Body,
+		//
+		// Each value joined to its option, because the text is the agent's:
+		// [verified 2026-11-24, alerter 26.5] a value given as the next word
+		// that begins with `-` — a message that opens with a markdown bullet
+		// — is taken for an option, and alerter exits 64 and posts nothing.
+		"--group=" + notice.Key,
+		"--title=" + notice.Title,
+		"--subtitle=" + notice.Subtitle,
+		"--message=" + notice.Body,
 	}
 	if mark != "" {
 		// Both, and the same file: --content-image is the picture beside the

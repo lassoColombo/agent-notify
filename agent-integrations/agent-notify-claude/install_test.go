@@ -217,6 +217,67 @@ func TestInstallRefusesToOverwriteSomethingItCannotRead(t *testing.T) {
 	}
 }
 
+// TestInstallKeepsTheirCommandsAsTheyWroteThem: `&&` and `>` are the same
+// JSON as `&&` and `>`, and not the file its owner wrote.
+func TestInstallKeepsTheirCommandsAsTheyWroteThem(t *testing.T) {
+	binary := build(t)
+	path := filepath.Join(t.TempDir(), "settings.json")
+	theirs := `{"permissions":{"allow":["Bash(git log && git status > /dev/null)"]},` +
+		`"hooks":{"Stop":[{"hooks":[{"type":"command","command":"a && b > /tmp/log"}]}]}}`
+	if err := os.WriteFile(path, []byte(theirs), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if _, stderr, code := run(t, binary, "install", "--settings", path); code != 0 {
+		t.Fatalf("install exited %d: %s", code, stderr)
+	}
+	content, _ := os.ReadFile(path)
+	for _, kept := range []string{"git log && git status > /dev/null", "a && b > /tmp/log"} {
+		if !strings.Contains(string(content), kept) {
+			t.Errorf("%q was not written back as it was:\n%s", kept, content)
+		}
+	}
+}
+
+// TestInstallRefusesHooksOfAShapeItDoesNotKnow: a `hooks` that is not an
+// object of arrays is the user's, and writing ours over it loses it.
+func TestInstallRefusesHooksOfAShapeItDoesNotKnow(t *testing.T) {
+	binary := build(t)
+	for _, theirs := range []string{
+		`{"hooks":"see hooks.json"}`,
+		`{"hooks":{"Stop":{"not":"an array"}}}`,
+	} {
+		path := filepath.Join(t.TempDir(), "settings.json")
+		if err := os.WriteFile(path, []byte(theirs), 0o600); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+		_, stderr, code := run(t, binary, "install", "--settings", path)
+		if code == 0 || !strings.Contains(stderr, "will not overwrite") {
+			t.Errorf("install of %s exited %d: %q", theirs, code, stderr)
+		}
+		if content, _ := os.ReadFile(path); string(content) != theirs {
+			t.Errorf("%s was changed to %s", theirs, content)
+		}
+	}
+}
+
+// TestInstallTakesNothingAsEmpty: a file holding `null`, or nothing at all,
+// is a settings file with nothing in it, and not a reason to crash.
+func TestInstallTakesNothingAsEmpty(t *testing.T) {
+	binary := build(t)
+	for _, theirs := range []string{"null", "", "\n"} {
+		path := filepath.Join(t.TempDir(), "settings.json")
+		if err := os.WriteFile(path, []byte(theirs), 0o600); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+		if _, stderr, code := run(t, binary, "install", "--settings", path); code != 0 {
+			t.Fatalf("install into %q exited %d: %s", theirs, code, stderr)
+		}
+		if got := commandsFor(t, settingsAt(t, path), "Stop"); len(got) != 1 {
+			t.Errorf("after installing into %q, Stop has %v", theirs, got)
+		}
+	}
+}
+
 func TestPrintWritesNothing(t *testing.T) {
 	binary := build(t)
 	path := filepath.Join(t.TempDir(), "settings.json")

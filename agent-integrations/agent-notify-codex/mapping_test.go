@@ -19,7 +19,7 @@ func mapped(t *testing.T, raw string) (session.Report, bool) {
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
 		t.Fatalf("the fixture is not valid JSON: %v", err)
 	}
-	return Translate(payload, "", Spending{})
+	return Translate(payload, "", nil)
 }
 
 func mustMap(t *testing.T, raw string) session.Report {

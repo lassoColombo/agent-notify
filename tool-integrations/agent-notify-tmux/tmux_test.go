@@ -158,6 +158,17 @@ func TestAMissingServerFails(t *testing.T) {
 	}
 }
 
+// TestARefusalIsNotAMissingServer: a server that is there and says no has
+// not gone, and what it refused is drawn again rather than passed over.
+func TestARefusalIsNotAMissingServer(t *testing.T) {
+	tmux := realTmux(t)
+	socket := aServer(t, tmux, "an-test")
+	err := tmux.Do(socket, []string{"set-option", "-p", "-t", "%999", stateOption, "working"})
+	if err == nil || errors.Is(err, ErrNotThere) {
+		t.Errorf("a running server refusing a command: %v, want a failure that is not ErrNotThere", err)
+	}
+}
+
 // TestARenderFailsOnlyForAServerThatIsThere: a server that is not running has
 // nothing to paint, and an ended agent's record may name one for a while; a
 // server that is too slow to answer leaves its marks wrong, and the render
@@ -199,13 +210,13 @@ func TestReadingWithNoLocale(t *testing.T) {
 		t.Setenv(variable, "")
 	}
 
-	shipped := &Display{Tmux: tmux, Glyphs: session.NewPalette(DefaultGlyphs, nil), Logger: slog.New(slog.DiscardHandler)}
+	shipped := &Display{Tmux: tmux, Glyphs: session.NewPalette(session.DefaultGlyphs, nil), Logger: slog.New(slog.DiscardHandler)}
 	if err := shipped.Render(session.View{Sessions: []session.Record{
 		placedIn("alpha", session.Working, socket, pidOf(t, tmux, socket), pane),
 	}}); err != nil {
 		t.Fatalf("Render: %v", err)
 	}
-	want := Mark{State: "working", Glyph: DefaultGlyphs[session.Working], Name: "alpha"}
+	want := Mark{State: "working", Glyph: session.DefaultGlyphs[session.Working], Name: "alpha"}
 	if got := marksOf(t, tmux, socket)[pane]; got != want {
 		t.Errorf("with no locale, pane %s reads back %+v, want %+v", pane, got, want)
 	}

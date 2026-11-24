@@ -83,9 +83,13 @@ func findTheGitDirectoryAbove(directory string) string {
 	return ""
 }
 
-// whereTheGitFilePoints reads a worktree's `.git` file, which holds one line:
+// whereTheGitFilePoints reads a worktree's or a submodule's `.git` file, which
+// holds one line:
 //
 //	gitdir: /Users/you/project/.git/worktrees/the-worktree
+//	gitdir: ../.git/modules/the-submodule
+//
+// A relative one is relative to the file, not to whoever is asking.
 func whereTheGitFilePoints(path string) string {
 	content, err := readAtMost(path)
 	if err != nil {
@@ -95,7 +99,11 @@ func whereTheGitFilePoints(path string) string {
 	if !found {
 		return ""
 	}
-	return strings.TrimSpace(pointer)
+	pointer = strings.TrimSpace(pointer)
+	if pointer != "" && !filepath.IsAbs(pointer) {
+		pointer = filepath.Join(filepath.Dir(path), pointer)
+	}
+	return pointer
 }
 
 // branchNamedIn reads HEAD, which is either a symbolic ref or a commit:

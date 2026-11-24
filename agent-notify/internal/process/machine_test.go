@@ -111,7 +111,7 @@ func TestBootIdentityIsAStableUUID(t *testing.T) {
 // shape of what comes back, without asserting anything about what happens to be
 // running it.
 func TestTheRealAncestryIsWalkable(t *testing.T) {
-	chain := process.Ancestry(process.Self(), process.ProcessesOnThisMachine{})
+	_, chain, _ := process.FindAgent("", process.Self(), process.ProcessesOnThisMachine{})
 	if len(chain) == 0 {
 		t.Fatal("walked nothing at all from a process that certainly has a parent")
 	}

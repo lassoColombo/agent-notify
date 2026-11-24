@@ -16,15 +16,6 @@ func main() {
 		"claude",
 		map[string]func([]string) int{"install": install, "uninstall": uninstall},
 		func(payload Payload) (session.Report, bool) {
-			// The title is written once, near the start, and never changes,
-			// so the head of the transcript is read once a turn and not once
-			// a tool call: on the prompt, by which time a title written after
-			// the first one has landed (D-107). The tail is read on every
-			// hook, because the responses on it are new on every hook.
-			title := ""
-			if payload.HookEventName == "UserPromptSubmit" {
-				title = WhatClaudeTitlesThisSession(payload.TranscriptPath)
-			}
 			// Which session this one continues is looked for when it starts,
 			// and again on a prompt in case the old transcript said so only
 			// after the start: once a turn, never once a tool call (D-127).
@@ -32,8 +23,10 @@ func main() {
 			if payload.HookEventName == "SessionStart" || payload.HookEventName == "UserPromptSubmit" {
 				continues = WhatThisSessionContinues(payload.TranscriptPath, payload.SessionID)
 			}
-			return Translate(payload.HookEventName, payload,
+			// The tail is read on every hook, because the responses on it,
+			// and the title among them, are new on every hook.
+			return Translate(payload,
 				WhatClaudeKnowsAboutThisSession(payload.SessionID),
-				WhatTheTranscriptSays(payload.TranscriptPath), title, continues)
+				WhatTheTranscriptSays(payload.TranscriptPath), continues)
 		}))
 }

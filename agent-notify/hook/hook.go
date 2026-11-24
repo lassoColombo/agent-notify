@@ -75,8 +75,12 @@ func Record(report session.Report, agentProcess string) (session.Record, bool) {
 	}
 	// Read here rather than reported: [verified 2026-09-20, 2.1.236] a Claude
 	// session whose directory merely contains checkouts writes
-	// `gitBranch: "HEAD"` for a repository sitting on `main` (§A7.4.4).
-	report.Branch = branch.At(report.Cwd)
+	// `gitBranch: "HEAD"` for a repository sitting on `main` (§A7.4.4). No
+	// branch is an answer and clears the stored one; no directory is not
+	// having looked (D-136).
+	if report.Cwd != "" {
+		report.Branch = new(branch.At(report.Cwd))
+	}
 
 	look(opened, &report, agentProcess)
 
@@ -86,7 +90,9 @@ func Record(report session.Report, agentProcess string) (session.Record, bool) {
 			"session", report.Key.String(), "problem", err.Error())
 		return session.Record{}, false
 	}
-	opened.Logger.Info("recorded",
+	// Debug: one line per hook was 95% of a log nothing ever trims, and the
+	// record says what this would (D-136).
+	opened.Logger.Debug("recorded",
 		"session", written.Key.String(), "event", string(report.Event),
 		"kernel", string(written.Kernel), "sequence", written.Sequence)
 

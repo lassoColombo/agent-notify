@@ -381,8 +381,8 @@ match $spans.0 {
 ## Configuration
 
 One file, YAML (D-103), and **there is no file by default**. Running without
-one is the supported case rather than a degraded one: states, counts, liveness,
-history and every integration on your PATH all work with nothing configured.
+one is the supported case rather than a degraded one: states, counts, liveness
+and every integration on your PATH all work with nothing configured.
 What a file buys you is opinions — a tool turned off, a glyph changed, a
 retention window, which shell is outside which.
 
@@ -438,8 +438,6 @@ memory for days.
 | Key | Type | Default | What it changes |
 | --- | --- | --- | --- |
 | `keep-ended-sessions` | duration | `"168h"` (7 days) | How long an ended session's record survives, so that resuming it is recognised as a return rather than a birth. It is also the set `list --all` and a picker offer you. Must be positive. |
-| `history-messages` | integer | `20` | How many of a session's messages are kept in its history file. `0` keeps none, which is the point of it being expressible. |
-| `history-changes` | integer | `100` | How many state transitions are kept, same rules. |
 
 `keep-ended-sessions` is written the way a person writes a duration. It is
 `time.ParseDuration`'s spelling and the only one in this system: core's file and
@@ -607,7 +605,7 @@ Failure is graded, and the grades are not the same thing:
 - **A file that is not YAML is refused whole**, and the defaults apply. Nothing
   in it is used, because a half-decoded file silently mixes your intent with
   defaults in a way nobody can see. The same goes for a value of the wrong type
-  — a word where `history-messages` wants a number. An integration asking for
+  — a word where `keep-ended-sessions` wants a duration. An integration asking for
   its settings from a refused file is told that, rather than "you have none".
 - **A key that is not recognised is ignored**, by name, and everything the file
   got right survives. The strict pass that finds it is a second decode purely to
@@ -615,8 +613,8 @@ Failure is graded, and the grades are not the same thing:
   happens, and a decoder that stopped at the first unknown key would decide how
   much of your file survives based on the order you happened to write it in.
 - **A value that cannot be used is replaced by its default**, one at a time. A
-  negative `history-messages`, or a `keep-ended-sessions` that is not a
-  duration, costs you that line and not the other twelve.
+  `keep-ended-sessions` that is not a positive duration costs you that line and
+  not the other twelve.
 - **A name under `integrations` with no program on PATH is a complaint** named
   after the program, and the rest of the file stands (D-102). A program that is
   on PATH and does not answer is a different thing, and the session-watcher's
@@ -659,8 +657,7 @@ carries the text of what an agent last said.
 | config | `~/.config/agent-notify/config.yaml` | the same | `<root>/config.yaml` |
 
 Inside state: `sessions/<key>.json` for what is live, `ended/<key>.json` for what
-is over and still resumable, `history/<key>.json` for the last few things each
-session said, `locks/<key>.lock` one per session, and `agent-notify.log`, which
+is over and still resumable, `locks/<key>.lock` one per session, and `agent-notify.log`, which
 every process writes to and which is in state rather than runtime because a log
 swept away by a reboot is a log missing exactly the failures worth reading about.
 Inside runtime: `session-watcher.lock` and `integrations.json` (what each integration said it answers, written so that
@@ -1152,8 +1149,7 @@ if err := me.Settings(&mine); err != nil {
 ```
 
 Beside it: `Read()`/`ReadIncludingEnded()` are the cold
-read, `History(key)` is one session's last few messages and transitions,
-`Focus(key)` runs `agent-notify focus-session` for a display that offers a
+read, `Focus(key)` runs `agent-notify focus-session` for a display that offers a
 click, and `CoreBinary()` is where `agent-notify` is, found on PATH. The tool
 you drive is found the same way: `tool.Find(key, name, configured)` returns the
 configured path when the settings give one, checked, and otherwise the name

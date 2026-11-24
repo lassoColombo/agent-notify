@@ -130,8 +130,8 @@ func TestNoPathNoAnswer(t *testing.T) {
 
 // TestTranslateCarriesIt: whatever hook was handed it, the report says it.
 func TestTranslateCarriesIt(t *testing.T) {
-	report, worth := Translate("SessionStart", Payload{SessionID: newSession, Source: "startup"},
-		ClaudeSession{}, ClaudeTranscript{}, "", oldSession)
+	report, worth := Translate(Payload{HookEventName: "SessionStart", SessionID: newSession, Source: "startup"},
+		ClaudeSession{}, ClaudeTranscript{}, oldSession)
 	if !worth || report.ContinuedFrom != oldSession {
 		t.Errorf("report = %+v, want it to carry %q", report, oldSession)
 	}

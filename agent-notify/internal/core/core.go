@@ -56,7 +56,7 @@ func OpenAt(layout paths.Layout, component string) (*Core, error) {
 
 // Reload re-reads the file and hands the store what a reload can move. It is
 // here so that nobody can replace Settings and leave the store with the
-// retention and history bounds it was opened with (D-117). What the loader
+// retention it was opened with (D-117). What the loader
 // complained about is returned for the caller to log, and left in Problems as
 // OpenAt leaves it.
 func (c *Core) Reload() []error {

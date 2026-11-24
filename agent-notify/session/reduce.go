@@ -36,8 +36,11 @@ type Report struct {
 	Cwd string
 	// Branch is filled in by core on the hook path, not by the adapter — it is
 	// read from whatever is checked out at Cwd, so that one answer serves every
-	// agent and no agent's idea of it has to be trusted (§A7.4.4).
-	Branch string
+	// agent and no agent's idea of it has to be trusted (§A7.4.4). A pointer,
+	// like Message: nil is a report that did not look, and "" is a hook that
+	// looked and found no branch — a detached head, or no repository — which
+	// clears the one stored (D-136).
+	Branch *string
 	// Model is what the agent says it is using, in the agent's own spelling.
 	// Empty means "leave the stored one alone", like every other label here.
 	Model string
@@ -152,8 +155,8 @@ func Apply(previous Record, report Report, now time.Time) Record {
 	if report.Cwd != "" {
 		next.Cwd = CleanLine(report.Cwd)
 	}
-	if report.Branch != "" {
-		next.Branch = CleanLine(report.Branch)
+	if report.Branch != nil {
+		next.Branch = CleanLine(*report.Branch)
 	}
 	if report.Model != "" {
 		next.Model = CleanLine(report.Model)

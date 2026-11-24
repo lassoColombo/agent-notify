@@ -169,7 +169,7 @@ func TestEveryHookCarriesTheName(t *testing.T) {
 		if err := json.Unmarshal([]byte(raw), &payload); err != nil {
 			t.Fatalf("the fixture is not valid JSON: %v", err)
 		}
-		report, worth := Translate(payload, "Run exact shell command", Spending{})
+		report, worth := Translate(payload, "Run exact shell command", nil)
 		if !worth {
 			t.Fatalf("%s was discarded", payload.HookEventName)
 		}

@@ -37,21 +37,16 @@ import (
 // codex alone could answer — `model_context_window` and the account's
 // `rate_limits` — and both were read here until the record stopped having
 // anywhere to put them (D-76).
-// Spending is what to report about this thread's tokens, or nothing at all.
+// WhatCodexHasSpent reads the newest responses off the end of the rollout,
+// oldest first, or none at all.
 //
-// Nothing at all is an ordinary answer: a rollout that has not been written
-// yet, a path the payload did not carry, a hook firing before the first
-// response. Core treats no responses as "leave the totals alone".
-type Spending struct {
-	// Responses are the ones this read could see, oldest first. Core counts the
-	// ones it has not counted before, so handing it the same response on twenty
-	// hooks in a row costs nothing and misses nothing.
-	Responses []session.Spend
-}
-
-// WhatCodexHasSpent reads the newest responses off the end of the rollout.
-func WhatCodexHasSpent(rolloutPath string) Spending {
-	return Spending{Responses: hook.LastResponses(strings.TrimSpace(rolloutPath), whatThisLineCost)}
+// None is an ordinary answer: a rollout that has not been written yet, a path
+// the payload did not carry, a hook firing before the first response. Core
+// treats no responses as "leave the totals alone", and counts only the ones it
+// has not counted before, so handing it the same response on twenty hooks in a
+// row costs nothing and misses nothing.
+func WhatCodexHasSpent(rolloutPath string) []session.Spend {
+	return hook.LastResponses(strings.TrimSpace(rolloutPath), whatThisLineCost)
 }
 
 // tokenUsage is codex's per-response accounting, on both kinds of line.

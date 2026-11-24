@@ -158,6 +158,43 @@ func TestInstallWillNotTouchAFileItCannotParse(t *testing.T) {
 	}
 }
 
+// TestInstallWillNotBreakAFileThatParses: `hooks` written inline, or as a
+// plain table of arrays, parses on its own and cannot have the block appended
+// beside it. The file is left as it was rather than handed back broken.
+func TestInstallWillNotBreakAFileThatParses(t *testing.T) {
+	for _, theirs := range []string{
+		"hooks = { Stop = [] }\n",
+		"[hooks]\nStop = [{ hooks = [{ type = \"command\", command = \"/x\" }] }]\n",
+	} {
+		path := configAt(t, theirs)
+		if code := install([]string{"--config", path}); code == 0 {
+			t.Errorf("install reported success against %q", theirs)
+		}
+		if after := read(t, path); after != theirs {
+			t.Errorf("%q was changed to:\n%s", theirs, after)
+		}
+	}
+}
+
+// TestInstallFollowsALink: a config kept with somebody's dotfiles is a link,
+// and it stays one, with the hooks in the file it points at.
+func TestInstallFollowsALink(t *testing.T) {
+	target := configAt(t, "model = \"x\"\n")
+	link := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if code := install([]string{"--config", link}); code != 0 {
+		t.Fatalf("install exited %d", code)
+	}
+	if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("the link was replaced by a file")
+	}
+	if len(hooksIn(t, target)) != len(SubscribedHooks) {
+		t.Errorf("the file the link points at has %v", hooksIn(t, target))
+	}
+}
+
 func TestInstallPrintChangesNothing(t *testing.T) {
 	path := configAt(t, "model = \"x\"\n")
 	if code := install([]string{"--print", "--config", path}); code != 0 {

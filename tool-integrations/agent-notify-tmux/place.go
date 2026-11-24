@@ -89,10 +89,17 @@ func PlaceOf(record session.Record) (Place, bool) {
 // already says which pane of which server, and anything tmux could add would
 // be stale by the first `move-pane`. So it cannot fail for a server that is
 // slow or busy, which would leave the session unplaced for good (D-109).
+//
+// A session outside tmux, or in a popup, is in no pane, and that is an
+// answer rather than a failure: nil, which core stores and never asks about
+// again (D-135).
 func Interpret(captured json.RawMessage) (any, error) {
 	var given Captured
 	if err := json.Unmarshal(captured, &given); err != nil {
 		return nil, fmt.Errorf("what was captured is not this program's: %w", err)
+	}
+	if given.Server == "" || given.Pane == "" {
+		return nil, nil
 	}
 	return given.Place()
 }
