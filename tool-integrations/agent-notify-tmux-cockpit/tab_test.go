@@ -652,18 +652,24 @@ func TestEnterStaysOnTheListWhenTheStageIsEmpty(t *testing.T) {
 
 // TestGoingToAnAgentLeavesTheTabAndLandsOnIt: the agent is given back first,
 // so the terminal lands in the window it lives in and not on the tab.
-func TestGoingToAnAgentLeavesTheTabAndLandsOnIt(t *testing.T) {
+// Where the terminal lands is core's jump and agent-notify-tmux's, tested
+// there; what is the tab's is that the jump finds everything home.
+func TestGoingToAnAgentSendsEverythingHomeBeforeTheJump(t *testing.T) {
 	s := aScene(t)
 	s.show(t, Desire{Staged: s.b})
-	world, err := s.tab.GoTo(s.b)
-	if err != nil {
+	var jumps []string
+	s.tab.Focus = func(key string) error {
+		jumps = append(jumps, key)
+		if away := s.see(t).Borrowed(); len(away) != 0 {
+			t.Errorf("the jump was asked with something still away: %v", away)
+		}
+		return nil
+	}
+	if _, err := s.tab.GoTo("claude:b"); err != nil {
 		t.Fatalf("GoTo: %v", err)
 	}
-	if world.Visible(s.tab.List) || len(world.Borrowed()) != 0 {
-		t.Errorf("the tab is still in front, or something is still away: %v", world.Borrowed())
-	}
-	if got := must(t, s.tmux, "display-message", "-p", "-c", s.client, "#{pane_id}"); got != s.b {
-		t.Errorf("the terminal is on %s, and was sent to %s", got, s.b)
+	if len(jumps) != 1 || jumps[0] != "claude:b" {
+		t.Errorf("the jumps asked were %q, and one to claude:b was wanted", jumps)
 	}
 }
 

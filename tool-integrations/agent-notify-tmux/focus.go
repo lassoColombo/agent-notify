@@ -1,9 +1,11 @@
 package main
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 
 	"github.com/lassoColombo/agent-notify/container"
 )
@@ -48,22 +50,78 @@ func askedFrom(place Place) Asker {
 //     the focus, and failing that the one used last, which is the one tmux
 //     itself would pick.
 //
-// Of several that qualify, the one used last.
+// Of several that qualify, the one used last. A focus handed a window moves
+// that window's terminal instead (D-141).
 func Choose(clients []Client, asker Asker) (Client, bool) {
+	if client, found := askedThrough(clients, asker); found {
+		return client, true
+	}
+	if client, found := latest(clients, func(c Client) bool { return c.Focused }); found {
+		return client, true
+	}
+	return latest(clients, func(Client) bool { return true })
+}
+
+// askedThrough is the terminal a focus was asked from, when it was asked from
+// inside the server.
+func askedThrough(clients []Client, asker Asker) (Client, bool) {
 	if asker.Pane != "" {
 		if client, found := latest(clients, func(c Client) bool { return c.Pane == asker.Pane }); found {
 			return client, true
 		}
 	}
 	if asker.Session != "" {
-		if client, found := latest(clients, func(c Client) bool { return c.Session == asker.Session }); found {
-			return client, true
+		return latest(clients, func(c Client) bool { return c.Session == asker.Session })
+	}
+	return Client{}, false
+}
+
+// Showing is the terminals already on a session the pane's window is in, as
+// the windows they are drawn in: for a window manager to bring one forward
+// before a focus moves it, rather than move the terminal asked from (D-141).
+// The terminal asked from comes first, if it is one of them; then the one used
+// last.
+func Showing(server Server, place Place, asker Asker) []container.Window {
+	sessions := map[string]bool{}
+	for _, view := range server.Views[place.Pane] {
+		sessions[view.Session] = true
+	}
+	var showing []Client
+	for _, client := range server.Clients {
+		if sessions[client.Session] {
+			showing = append(showing, client)
 		}
 	}
-	if client, found := latest(clients, func(c Client) bool { return c.Focused }); found {
-		return client, true
+	first, asked := askedThrough(showing, asker)
+	slices.SortStableFunc(showing, func(a, b Client) int {
+		if asked && (a.Name == first.Name) != (b.Name == first.Name) {
+			if a.Name == first.Name {
+				return -1
+			}
+			return 1
+		}
+		return cmp.Compare(b.Activity, a.Activity)
+	})
+	windows := make([]container.Window, 0, len(showing))
+	for _, client := range showing {
+		windows = append(windows, container.Window{ID: client.Name, PID: client.PID, Title: client.Title})
 	}
-	return latest(clients, func(Client) bool { return true })
+	return windows
+}
+
+// WindowsShowing is Showing for the pane the coordinates name. A pane that is
+// not there, or a server that is not, is shown by nothing: the focus that
+// follows says which.
+func WindowsShowing(tmux Tmux, coordinates json.RawMessage) ([]container.Window, error) {
+	place, ours := placeIn(coordinates)
+	if !ours {
+		return nil, nil
+	}
+	server, err := tmux.Look(place.Socket)
+	if err != nil || goneFrom(server, place) != "" {
+		return nil, nil
+	}
+	return Showing(server, place, askedFrom(place)), nil
 }
 
 func latest(clients []Client, fits func(Client) bool) (Client, bool) {
@@ -107,7 +165,11 @@ func Through(views []View, client Client) (View, bool) {
 // `switch-client -t <session>:<window>.<pane>` is the session, the window and
 // the pane in one command, unzooming a window zoomed on another pane
 // [measured on 3.8].
-func Focus(tmux Tmux, coordinates json.RawMessage) (container.Outcome, error) {
+//
+// Handed a window, it moves that window's terminal. One that has detached
+// since it was named is not there to move, and the terminal is chosen as it
+// would have been without it.
+func Focus(tmux Tmux, coordinates json.RawMessage, window *container.Window) (container.Outcome, error) {
 	place, ours := placeIn(coordinates)
 	if !ours {
 		return container.Failed(container.NeverPlaced, "these are not this program's coordinates"), nil
@@ -121,6 +183,11 @@ func Focus(tmux Tmux, coordinates json.RawMessage) (container.Outcome, error) {
 	}
 
 	client, found := Choose(server.Clients, askedFrom(place))
+	if window != nil {
+		if named, there := latest(server.Clients, func(c Client) bool { return c.Name == window.ID }); there {
+			client = named
+		}
+	}
 	if !found {
 		return container.Failed(NotAttached, fmt.Sprintf(
 			"no terminal is attached to tmux server %q, so there is nothing here to bring — "+

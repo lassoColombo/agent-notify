@@ -9,12 +9,14 @@ import (
 
 // Tab is the list's hold on tmux: the server, the list's own pane, and the
 // list's width in columns, set when the stand-in is put beside it and left to
-// the user after that.
+// the user after that. Focus is the jump every display uses, `agent-notify
+// focus-session` (D-140).
 type Tab struct {
 	Tmux      Tmux
 	List      string
 	ListWidth int
 	Logger    *slog.Logger
+	Focus     func(key string) error
 }
 
 // rounds bounds one Reconcile. Showing another agent is one step; a tab found
@@ -104,19 +106,17 @@ func (t Tab) Enter(desire Desire) (World, error) {
 	return t.Tmux.Observe()
 }
 
-// GoTo leaves the tab for the place a pane lives in: everything goes home, and
-// then the terminal showing the tab goes to that pane.
-func (t Tab) GoTo(pane string) (World, error) {
+// GoTo leaves the tab for the place a session lives in: everything goes home,
+// and then core's jump takes it from there, the window manager first and tmux
+// after, as a banner's tap and the picker's enter do (D-140). It is asked from
+// the list's pane, so the terminal it moves is the one showing the tab.
+func (t Tab) GoTo(key string) (World, error) {
 	world, err := t.Reconcile(Desire{Leaving: true})
 	if err != nil {
 		return world, err
 	}
-	arguments := []string{"switch-client"}
-	if client := t.viewer(world); client != "" {
-		arguments = append(arguments, "-c", client)
-	}
-	if _, err := t.Tmux.run(append(arguments, "-t", pane)...); err != nil {
-		t.Logger.Warn("tmux refused", "why", "going to "+pane, "problem", err.Error())
+	if err := t.Focus(key); err != nil {
+		t.Logger.Warn("cannot focus", "session", key, "problem", err.Error())
 	}
 	return t.Tmux.Observe()
 }
@@ -167,18 +167,6 @@ func latest(clients []Client, fits func(Client) bool) (Client, bool) {
 		}
 	}
 	return best, found
-}
-
-// viewer is the terminal showing the tab, which is the one a key in the list
-// was typed in.
-func (t Tab) viewer(world World) string {
-	clients, err := t.Tmux.Clients()
-	if err != nil {
-		return ""
-	}
-	tab := world.Panes[t.List].Window
-	client, _ := latest(clients, func(client Client) bool { return client.Window == tab })
-	return client.Name
 }
 
 // Open is the key that shows the tab: `client` is the terminal it was pressed

@@ -23,6 +23,7 @@ import (
 	"github.com/lassoColombo/agent-notify/internal/containers"
 	"github.com/lassoColombo/agent-notify/internal/core"
 	"github.com/lassoColombo/agent-notify/internal/handshake"
+	"github.com/lassoColombo/agent-notify/internal/process"
 )
 
 // FocusSession brings one session to the front.
@@ -63,10 +64,15 @@ func focusSession(wanted string, quiet bool) int {
 	}
 
 	steps, outcome := containers.FocusSession(openedCore.Settings,
-		handshake.ByIntegration(openedCore.Layout, openedCore.Settings), record)
+		handshake.ByIntegration(openedCore.Layout, openedCore.Settings), record,
+		process.ProcessesOnThisMachine{})
 	if !quiet {
 		for _, step := range steps {
 			switch {
+			case step.Window != "" && step.Outcome.OK:
+				fmt.Printf("  %-22s focused the window showing %s\n", step.Container, step.Window)
+			case step.Window != "":
+				fmt.Printf("  %-22s skipped the window showing %s — %s\n", step.Container, step.Window, step.Outcome.Detail)
 			case step.Skipped:
 				fmt.Printf("  %-22s skipped — %s\n", step.Container, step.Outcome.Detail)
 			case step.Outcome.OK:

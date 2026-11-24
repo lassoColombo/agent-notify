@@ -164,6 +164,22 @@ screen that is:
 - **No terminal at all**: `not-attached`, naming the `tmux attach` that would
   help.
 
+All of that is what happens with no window manager to help. With one, and
+another terminal already on the agent's session, that terminal is the one to
+go to, as long as its window can be brought forward first (D-141):
+
+- **`windows-showing`** answers, for a pane, the terminals on a session its
+  window is in, each as the window it is drawn in: the client's name, the pid
+  of its `tmux attach`, and the title tmux gives the window. tmux gives a title
+  only with `set-titles on`, and the title is what tells two windows of one
+  terminal application apart, so set it to something that names the session,
+  such as `set -g set-titles-string "#S / #W"`. The terminal asked from comes
+  first, if it is one of them; then the one used last.
+- Core asks the window manager to bring one of those windows forward, and if
+  one comes forward, it hands it to `focus`, which moves that terminal and not
+  the one asked from. If none does, `focus` is not handed a window, and the
+  terminal is chosen as above.
+
 If that terminal already shows the pane, that is it. Otherwise
 `switch-client -c <terminal> -t <session>:<window>.<pane>` brings the session,
 the window and the pane in one command, unzooming a window zoomed on another

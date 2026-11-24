@@ -28,10 +28,18 @@ type Commands struct {
 	// the session by (D-135).
 	Interpret func(captured json.RawMessage, ancestry []session.Ancestor) (any, error)
 	// Focus brings one place to the front, validating the coordinates at the
-	// moment of use (R17).
-	Focus func(coordinates json.RawMessage) (container.Outcome, error)
+	// moment of use (R17). The window is nil unless a container outside has
+	// just brought one to the front for this place, which is then the one to
+	// show it through (D-141).
+	Focus func(coordinates json.RawMessage, window *container.Window) (container.Outcome, error)
 	// Focused answers whether that place is in front, in three values (R27).
 	Focused func(coordinates json.RawMessage) (container.Verdict, error)
+	// WindowsShowing names the windows already showing that place, the one
+	// to prefer first, for a container outside to bring forward (D-141).
+	WindowsShowing func(coordinates json.RawMessage) ([]container.Window, error)
+	// FocusWindow brings forward a window a container inside named, found by
+	// its title and by the process chain core walked from its pid (D-141).
+	FocusWindow func(window container.Window, ancestry []session.Ancestor) (container.Outcome, error)
 	// Named are this program's own subcommands: install, check, and so on.
 	Named map[string]func(arguments []string) int
 	// Default runs when no subcommand matched. Nil prints the usage.
@@ -48,6 +56,8 @@ func (c Commands) capabilities(i Integration) session.Capabilities {
 		{session.MethodInterpret, c.Interpret != nil},
 		{session.MethodFocus, c.Focus != nil},
 		{session.MethodFocused, c.Focused != nil},
+		{session.MethodWindowsShowing, c.WindowsShowing != nil},
+		{session.MethodFocusWindow, c.FocusWindow != nil},
 		{session.MethodRender, c.Render != nil},
 	} {
 		if one.filled {
@@ -61,6 +71,7 @@ func (c Commands) capabilities(i Integration) session.Capabilities {
 var theVerbsCoreRuns = []string{
 	session.CapabilitiesCommand, session.CaptureCommand,
 	session.MethodInterpret, session.MethodFocus, session.MethodFocused, session.MethodRender,
+	session.MethodWindowsShowing, session.MethodFocusWindow,
 }
 
 // Main dispatches one invocation and returns the exit code. The contract with
@@ -162,7 +173,14 @@ func (c Commands) answer(i Integration, command string, stdin io.Reader) (any, e
 		if err != nil {
 			return nil, err
 		}
-		return c.Focus(given)
+		var input container.FocusInput
+		if err := json.Unmarshal(given, &input); err != nil {
+			return nil, fmt.Errorf("what arrived on stdin is not a focus: %w", err)
+		}
+		if len(input.Coordinates) == 0 {
+			input.Coordinates = json.RawMessage("null")
+		}
+		return c.Focus(input.Coordinates, input.Window)
 	case session.MethodFocused:
 		if c.Focused == nil {
 			return nil, nil
@@ -172,6 +190,33 @@ func (c Commands) answer(i Integration, command string, stdin io.Reader) (any, e
 			return nil, err
 		}
 		return c.Focused(given)
+	case session.MethodWindowsShowing:
+		if c.WindowsShowing == nil {
+			return nil, nil
+		}
+		given, err := read(stdin)
+		if err != nil {
+			return nil, err
+		}
+		windows, err := c.WindowsShowing(given)
+		if windows == nil && err == nil {
+			// None is an answer, and an answer is an object or an array.
+			windows = []container.Window{}
+		}
+		return windows, err
+	case session.MethodFocusWindow:
+		if c.FocusWindow == nil {
+			return nil, nil
+		}
+		given, err := read(stdin)
+		if err != nil {
+			return nil, err
+		}
+		var input container.FocusWindowInput
+		if err := json.Unmarshal(given, &input); err != nil {
+			return nil, fmt.Errorf("what arrived on stdin is not a window to focus: %w", err)
+		}
+		return c.FocusWindow(input.Window, input.Ancestry)
 	}
 	return nil, nil
 }

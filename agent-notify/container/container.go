@@ -1,7 +1,42 @@
 // Package container is the vocabulary a container-integration answers in: a
-// typed outcome for a focus and a three-valued answer for whether a session is
-// in front. The functions themselves are filled into [subscribe.Commands].
+// typed outcome for a focus, a three-valued answer for whether a session is
+// in front, and a window one container names for another. The functions
+// themselves are filled into [subscribe.Commands].
 package container
+
+import (
+	"encoding/json"
+
+	"github.com/lassoColombo/agent-notify/session"
+)
+
+// Window is a window showing a container's place, as the container outside
+// it can recognise it: a process under the application that owns it, and its
+// title. A tmux client is one, drawn in a Ghostty window (D-141).
+type Window struct {
+	// ID is the inside container's own name for what it shows the place
+	// through — a tmux client's name — handed back to it by `focus`.
+	ID string `json:"id"`
+	// PID is a process under the application that owns the window: core
+	// walks up from it to the application.
+	PID   int    `json:"pid"`
+	Title string `json:"title,omitempty"`
+}
+
+// FocusInput is what `focus` reads: the container's coordinates, and the
+// window a container outside has just brought to the front for them, if one
+// has. A container that is handed a window shows its place through it.
+type FocusInput struct {
+	Coordinates json.RawMessage `json:"coordinates"`
+	Window      *Window         `json:"window,omitempty"`
+}
+
+// FocusWindowInput is what `focus-window` reads: a window a container inside
+// named, and the process chain core walked up from its pid, nearest first.
+type FocusWindowInput struct {
+	Window   Window             `json:"window"`
+	Ancestry []session.Ancestor `json:"ancestry"`
+}
 
 // Problem is why a focus did not happen, as a word rather than a sentence, so
 // that a caller can act differently on each (§A11.3).

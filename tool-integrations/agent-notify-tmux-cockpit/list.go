@@ -98,7 +98,7 @@ func runList() error {
 	tmux := Tmux{Binary: settings.Binary, Socket: socket}
 
 	program := tea.NewProgram(&list{
-		tab:    Tab{Tmux: tmux, List: self, Logger: logger, ListWidth: settings.ListWidth},
+		tab:    Tab{Tmux: tmux, List: self, Logger: logger, ListWidth: settings.ListWidth, Focus: me.Focus},
 		glyphs: settings.Glyphs,
 	})
 
@@ -208,8 +208,11 @@ func (l *list) key(key string) tea.Cmd {
 		return l.ask(l.tab.Enter)
 	case "o":
 		// To where the agent lives, leaving the tab behind.
-		if pane := l.selected; pane != "" {
-			return l.ask(func(Desire) (World, error) { return l.tab.GoTo(pane) })
+		for _, agent := range l.agents {
+			if agent.Pane == l.selected {
+				key := agent.Record.Key.String()
+				return l.ask(func(Desire) (World, error) { return l.tab.GoTo(key) })
+			}
 		}
 	case "q", "ctrl+c":
 		return tea.Quit

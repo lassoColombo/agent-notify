@@ -132,7 +132,7 @@ func TestFocusBringsThePaneToTheTerminal(t *testing.T) {
 	if verdict, _ := Focused(tmux, coordinates); verdict.Answer != container.No {
 		t.Fatalf("focused = %+v before the focus, want no", verdict)
 	}
-	outcome, err := Focus(tmux, coordinates)
+	outcome, err := Focus(tmux, coordinates, nil)
 	if err != nil || !outcome.OK {
 		t.Fatalf("Focus = %+v, %v", outcome, err)
 	}
@@ -165,7 +165,7 @@ func TestFocusMovesTheTerminalItWasAskedFrom(t *testing.T) {
 		t.Helper()
 		t.Setenv(serverVariable, tmuxValue)
 		t.Setenv(paneVariable, paneValue)
-		outcome, err := Focus(tmux, coordinates)
+		outcome, err := Focus(tmux, coordinates, nil)
 		if err != nil || !outcome.OK {
 			t.Fatalf("from %s: Focus = %+v, %v", how, outcome, err)
 		}
@@ -182,6 +182,66 @@ func TestFocusMovesTheTerminalItWasAskedFrom(t *testing.T) {
 	// The pane decides over the session `$TMUX` names, which is where a pane
 	// was started rather than where it is.
 	focusFrom("a pane", socket+","+server+","+other, here)
+}
+
+// twoTerminals is D-141's scene: one terminal on the agent's session, and one
+// on another session that a focus is asked from, from a pane.
+func twoTerminals(t *testing.T) (tmux Tmux, socket, pane, here string, watching, asking Viewer) {
+	t.Helper()
+	tmux = realTmux(t)
+	socket = aServer(t, tmux, "an-agent")
+	pane = paneOf(t, tmux, socket, "an-agent")
+	must(t, tmux, socket, "new-session", "-d", "-s", "an-here", "sleep", "600")
+	here = paneOf(t, tmux, socket, "an-here")
+	watching = viewer(t, tmux, socket, "an-agent")
+	asking = viewer(t, tmux, socket, "an-here")
+	index := strings.TrimPrefix(must(t, tmux, socket, "display-message", "-p", "-t", "an-here", "#{session_id}"), "$")
+	t.Setenv(serverVariable, socket+","+strconv.Itoa(pidOf(t, tmux, socket))+","+index)
+	t.Setenv(paneVariable, here)
+	return tmux, socket, pane, here, watching, asking
+}
+
+// TestTheWindowsShowingAPaneAreTheTerminalsOnItsSession: the terminal asked
+// from is not on the agent's session and is not one of them; the other is,
+// with its process and the title tmux gives its window, when it gives one.
+func TestTheWindowsShowingAPaneAreTheTerminalsOnItsSession(t *testing.T) {
+	tmux, socket, pane, _, watching, _ := twoTerminals(t)
+	coordinates := coordinatesOf(t, tmux, socket, pane)
+	window := must(t, tmux, socket, "display-message", "-p", "-t", "an-agent", "#{window_name}")
+
+	for _, titles := range []struct{ on, want string }{
+		{"off", ""},
+		{"on", "an-agent / " + window},
+	} {
+		must(t, tmux, socket, "set-option", "-g", "set-titles", titles.on, ";",
+			"set-option", "-g", "set-titles-string", "#S / #W")
+		windows, err := WindowsShowing(tmux, coordinates)
+		if err != nil {
+			t.Fatalf("WindowsShowing: %v", err)
+		}
+		if len(windows) != 1 || windows[0].ID != watching.Name || windows[0].PID <= 0 || windows[0].Title != titles.want {
+			t.Errorf("set-titles %s: windows = %+v, want only %s's, titled %q", titles.on, windows, watching.Name, titles.want)
+		}
+	}
+}
+
+// TestFocusMovesTheTerminalOfTheWindowItIsHanded: asked from one terminal and
+// handed the other's window, which a window manager has just brought forward,
+// it moves the other and leaves the one asked from alone (D-141).
+func TestFocusMovesTheTerminalOfTheWindowItIsHanded(t *testing.T) {
+	tmux, socket, pane, here, watching, asking := twoTerminals(t)
+	must(t, tmux, socket, "new-window", "-t", "an-agent", "sleep", "600")
+
+	outcome, err := Focus(tmux, coordinatesOf(t, tmux, socket, pane), &container.Window{ID: watching.Name})
+	if err != nil || !outcome.OK {
+		t.Fatalf("Focus = %+v, %v", outcome, err)
+	}
+	if shown := watching.shows(t, tmux, socket); shown != pane {
+		t.Errorf("the terminal of the window handed over shows %s, not %s", shown, pane)
+	}
+	if shown := asking.shows(t, tmux, socket); shown != here {
+		t.Errorf("the terminal asked from was moved, to %s", shown)
+	}
 }
 
 // TestFocusNeverLeavesATerminalInAHiddenSession: the agent's window is linked
@@ -213,7 +273,7 @@ func TestFocusNeverLeavesATerminalInAHiddenSession(t *testing.T) {
 		must(t, tmux, socket, "new-session", "-d", "-s", "_hidden", "sleep", "600")
 		must(t, tmux, socket, "link-window", "-d", "-s", window, "-t", "_hidden:")
 
-		if outcome, err := Focus(tmux, coordinates); err != nil || !outcome.OK {
+		if outcome, err := Focus(tmux, coordinates, nil); err != nil || !outcome.OK {
 			t.Fatalf("from %s: Focus = %+v, %v", from, outcome, err)
 		}
 		if shown := terminal.shows(t, tmux, socket); shown != pane {
@@ -239,7 +299,7 @@ func TestFocusFromOutsideMovesTheTerminalWithTheFocus(t *testing.T) {
 	back.lose(t, tmux, socket)
 	outside(t)
 
-	outcome, err := Focus(tmux, coordinatesOf(t, tmux, socket, pane))
+	outcome, err := Focus(tmux, coordinatesOf(t, tmux, socket, pane), nil)
 	if err != nil || !outcome.OK {
 		t.Fatalf("Focus = %+v, %v", outcome, err)
 	}
@@ -286,7 +346,7 @@ func TestFocusWithNobodyAttached(t *testing.T) {
 	coordinates := coordinatesOf(t, tmux, socket, paneOf(t, tmux, socket, "an-agent"))
 	outside(t)
 
-	outcome, err := Focus(tmux, coordinates)
+	outcome, err := Focus(tmux, coordinates, nil)
 	if err != nil {
 		t.Fatalf("Focus: %v", err)
 	}
@@ -305,18 +365,18 @@ func TestWhatIsGoneIsNamed(t *testing.T) {
 	tmux := realTmux(t)
 	socket := aServer(t, tmux, "an-agent")
 	coordinates := coordinatesOf(t, tmux, socket, "%9999")
-	if outcome, _ := Focus(tmux, coordinates); outcome.OK || outcome.Problem != container.PlaceIsGone {
+	if outcome, _ := Focus(tmux, coordinates, nil); outcome.OK || outcome.Problem != container.PlaceIsGone {
 		t.Errorf("a pane that is not there: %+v, want place-is-gone", outcome)
 	}
 
 	must(t, tmux, socket, "kill-server")
-	if outcome, _ := Focus(tmux, coordinates); outcome.OK || outcome.Problem != container.NotRunning {
+	if outcome, _ := Focus(tmux, coordinates, nil); outcome.OK || outcome.Problem != container.NotRunning {
 		t.Errorf("a server that is not there: %+v, want not-running", outcome)
 	}
 	if verdict, _ := Focused(tmux, coordinates); verdict.Answer != container.CannotTell {
 		t.Errorf("focused on a server that is not there = %+v, want cannot-tell", verdict)
 	}
-	if outcome, _ := Focus(tmux, json.RawMessage(`{"socket":"`+socket+`","pane":"%1"}`)); outcome.Problem != container.NeverPlaced {
+	if outcome, _ := Focus(tmux, json.RawMessage(`{"socket":"`+socket+`","pane":"%1"}`), nil); outcome.Problem != container.NeverPlaced {
 		t.Errorf("coordinates that are not ours: %+v, want never-placed", outcome)
 	}
 }

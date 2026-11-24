@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/lassoColombo/agent-notify/container"
@@ -244,10 +245,36 @@ func Focus(a Aerospace, raw json.RawMessage) (container.Outcome, error) {
 	if err != nil {
 		return container.Failed(container.NotRunning, err.Error()), nil
 	}
+	return bringForward(a, Resolve(windows, coordinates)), nil
+}
 
-	placement := Resolve(windows, coordinates)
+// FocusWindow brings forward a window a container inside named (D-141): a
+// tmux client's, found by the title tmux gives it and by the chain core walked
+// up from the client to the terminal. The two keys are the ones Resolve takes,
+// but the title is matched whole: it is the window's title, not a prefix built
+// from an agent's environment, and `home / claude` is not `home / claude-2`.
+func FocusWindow(a Aerospace, window container.Window, ancestry []session.Ancestor) (container.Outcome, error) {
+	coordinates := Coordinates{Title: window.Title}
+	for _, rung := range ancestry {
+		coordinates.Chain = append(coordinates.Chain, Ancestor{PID: rung.PID, Command: rung.Command})
+	}
+	if !coordinates.ours() {
+		return container.Failed(container.NeverPlaced, "nothing says which window "+window.ID+" is"), nil
+	}
+	windows, err := a.Windows()
+	if err != nil {
+		return container.Failed(container.NotRunning, err.Error()), nil
+	}
+	if window.Title != "" {
+		windows = slices.DeleteFunc(windows, func(one Window) bool { return one.Title != window.Title })
+	}
+	return bringForward(a, Resolve(windows, coordinates)), nil
+}
+
+// bringForward focuses the first window a placement found.
+func bringForward(a Aerospace, placement Placement) container.Outcome {
 	if placement.Problem != "" {
-		return container.Failed(placement.Problem, placement.Detail), nil
+		return container.Failed(placement.Problem, placement.Detail)
 	}
 
 	window := placement.Windows[0]
@@ -258,9 +285,9 @@ func Focus(a Aerospace, raw json.RawMessage) (container.Outcome, error) {
 		// place-is-gone is to offer to prune the coordinates — and there is
 		// nothing here to prune, because the window was never stored. What is
 		// useful is aerospace's own sentence, which is on the end of this one.
-		return container.Failed(container.Refused, err.Error()), nil
+		return container.Failed(container.Refused, err.Error())
 	}
-	return container.Done(), nil
+	return container.Done()
 }
 
 // Focused answers whether that window is the one in front.

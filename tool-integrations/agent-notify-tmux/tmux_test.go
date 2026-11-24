@@ -403,7 +403,7 @@ func TestAServerStartedAgainIsAnotherServer(t *testing.T) {
 	}
 
 	coordinates, _ := json.Marshal(Place{Socket: socket, Server: before, Pane: pane})
-	if outcome, _ := Focus(tmux, coordinates); outcome.OK || outcome.Problem != container.PlaceIsGone {
+	if outcome, _ := Focus(tmux, coordinates, nil); outcome.OK || outcome.Problem != container.PlaceIsGone {
 		t.Errorf("focus on the old server's pane = %+v, want place-is-gone", outcome)
 	}
 }

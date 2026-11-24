@@ -75,12 +75,23 @@ func main() {
 		// interpret do not touch aerospace, and a window manager that is not
 		// installed must not be able to fail an agent's hook. Where it does
 		// matter, not finding it is a typed outcome rather than a crash.
-		Focus: func(coordinates json.RawMessage) (container.Outcome, error) {
+		// Nothing is outside a window manager, so nothing hands it a window.
+		Focus: func(coordinates json.RawMessage, _ *container.Window) (container.Outcome, error) {
 			resolved, err := settings()
 			if err == nil {
 				var aerospace Aerospace
 				if aerospace, err = resolved.aerospace(); err == nil {
 					return Focus(aerospace, coordinates)
+				}
+			}
+			return container.Failed(container.NotRunning, err.Error()), nil
+		},
+		FocusWindow: func(window container.Window, ancestry []session.Ancestor) (container.Outcome, error) {
+			resolved, err := settings()
+			if err == nil {
+				var aerospace Aerospace
+				if aerospace, err = resolved.aerospace(); err == nil {
+					return FocusWindow(aerospace, window, ancestry)
 				}
 			}
 			return container.Failed(container.NotRunning, err.Error()), nil

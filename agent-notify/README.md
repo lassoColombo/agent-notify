@@ -864,6 +864,20 @@ $ agent-notify focus-session lenny-load
 lenny-load is in front.
 ```
 
+An agent inside tmux gives the window manager nothing to find its window by,
+so the window manager is skipped. It is asked again with what tmux knows: which
+terminals already show the agent's session, and the title tmux gives each
+one's window. If one of those windows comes forward, tmux moves that terminal
+rather than the one you asked from (D-141):
+
+```
+$ agent-notify focus-session dashboards
+  aerospace-container    skipped — aerospace-container has no coordinates for this session
+  aerospace-container    focused the window showing /dev/ttys000
+  tmux                   focused
+dashboards is in front.
+```
+
 The session argument is a key, a session id, a prefix of one (four characters or
 more), or the name `list` prints — and TAB offers the ones that are running.
 Ambiguity is an error that lists the candidates rather than a guess, because the
@@ -1157,7 +1171,7 @@ looked up on PATH, with a message naming the key when neither answers.
 
 `Main` refuses a `WakeOn` naming a field no record has, and a `Named`
 subcommand called by any word core runs — `capabilities`, `capture-environment`,
-`interpret-environment`, `focus`, `focused`, `render`. One trap it cannot catch, because it
+`interpret-environment`, `focus`, `focused`, `windows-showing`, `focus-window`, `render`. One trap it cannot catch, because it
 is silent: a field your renderer reads and your `WakeOn` omits wakes you never
 for that change. `FieldsRenderedButNotWokenFor` exists so a test can find that
 for you.

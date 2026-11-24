@@ -57,6 +57,13 @@ func recorded(chain []Facts) []session.Ancestor {
 	return ancestors
 }
 
+// Ancestry is the chain from a pid upward, nearest first: what a focus hands a
+// window manager with a window a container inside named, so that it can find
+// the application the window belongs to (D-141).
+func Ancestry(start int, prober ReadsProcessFacts) []session.Ancestor {
+	return recorded(climb(start, prober))
+}
+
 // FindAgent climbs from a pid looking for the process running the agent, and
 // returns it along with everything it walked past.
 //

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/lassoColombo/agent-notify/container"
+	"github.com/lassoColombo/agent-notify/session"
 )
 
 // stand writes a program that answers the way aerospace answers, and records
@@ -124,6 +125,56 @@ func TestARefusalCarriesAerospacesOwnWords(t *testing.T) {
 	}
 	if !strings.Contains(outcome.Detail, "Invalid <window-id>") {
 		t.Errorf("detail = %q, want aerospace's own words in it", outcome.Detail)
+	}
+}
+
+// twoTmuxWindows is two Ghostty windows, each a tmux client titled by tmux
+// with `#S / #W`, one title the other's prefix.
+const twoTmuxWindows = `[
+  {"app-name":"Firefox","app-pid":3747,"window-id":107,"window-title":"lenny / claude"},
+  {"app-name":"Ghostty","app-pid":1054,"window-id":47,"window-title":"lenny / claude-2"},
+  {"app-name":"Ghostty","app-pid":1054,"window-id":46,"window-title":"lenny / claude"}
+]`
+
+// clientChain is the chain core walks up from a tmux client: `tmux attach`,
+// its shell, login, Ghostty.
+func clientChain() []session.Ancestor {
+	return []session.Ancestor{
+		{PID: 1251, Command: "tmux"},
+		{PID: 1088, Command: "nu"},
+		{PID: 1079, Command: "login"},
+		{PID: 1054, Command: "ghostty"},
+	}
+}
+
+// TestFocusWindowGoesToTheWindowTitledWhole is D-141: the window a tmux
+// client is drawn in, by its title whole and by the terminal the client is
+// under. Neither the Ghostty window whose title only starts the same, nor the
+// Firefox window with the same title, is it.
+func TestFocusWindowGoesToTheWindowTitledWhole(t *testing.T) {
+	aerospace, asked := stand(t, listing(twoTmuxWindows, focusedJSON))
+
+	window := container.Window{ID: "/dev/ttys000", PID: 1251, Title: "lenny / claude"}
+	outcome, err := FocusWindow(aerospace, window, clientChain())
+	if err != nil || !outcome.OK {
+		t.Fatalf("FocusWindow = %+v, %v", outcome, err)
+	}
+	if !strings.Contains(asked(), "focus --window-id 46") {
+		t.Errorf("asked %q, want window 46", asked())
+	}
+}
+
+// TestFocusWindowWithNoTitleCannotChooseBetweenTwo: with `set-titles` off,
+// the chain finds Ghostty and two of its windows, and nothing is moved.
+func TestFocusWindowWithNoTitleCannotChooseBetweenTwo(t *testing.T) {
+	aerospace, asked := stand(t, listing(twoTmuxWindows, focusedJSON))
+
+	outcome, _ := FocusWindow(aerospace, container.Window{ID: "/dev/ttys000", PID: 1251}, clientChain())
+	if outcome.OK || outcome.Problem != container.Ambiguous {
+		t.Errorf("outcome = %+v, want ambiguous", outcome)
+	}
+	if strings.Contains(asked(), "focus --window-id") {
+		t.Errorf("asked %q, and a window was focused at random", asked())
 	}
 }
 

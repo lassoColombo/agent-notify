@@ -52,14 +52,26 @@ and each answer is one JSON object on stdout with exit 0; anything else means "I
 could not answer", and stderr is the reason (plan.md D-38). There is no socket,
 no cache and no state of its own.
 
-### The four subcommands
+### The five subcommands
 
 | | when core runs it | what it may do |
 | --- | --- | --- |
 | `capture-environment` | inside the agent, as a child of the hook | read local state and return — **never** ask aerospace anything |
 | `interpret-environment` | in the session-watcher, once per capture | anything; here it happens to ask nothing |
 | `focus` | when somebody asked for this session | ask aerospace, and move a window |
+| `focus-window` | when somebody asked for a session this has no key for, and a container inside names a window showing it | ask aerospace, and move that window |
 | `focused` | when a notifier is about to speak | ask aerospace |
+
+`focus-window` is what makes an agent inside tmux reachable (D-141). Such an
+agent's chain ends at the tmux server and its environment names no window, so
+`focus` has nothing to go on. But tmux knows which terminals are on the
+agent's session, and the title it gives each one's window: it names those
+windows, and core hands one to this program with the chain it walked up from
+the terminal's `tmux attach`. The window is found as `focus` finds one, by the
+chain and the title, with the title matched whole, so `home / claude` is not
+`home / claude-2`. With `set-titles` off, two Ghostty windows cannot be told
+apart, the answer is `ambiguous`, and tmux moves the terminal asked from as it
+did before.
 
 You never run them yourself — core does — but they are ordinary programs and
 running them by hand is the fastest way to see what this thinks:

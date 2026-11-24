@@ -85,6 +85,12 @@ type Client struct {
 	// on`; with them off it never hears the focus leave, and keeps saying
 	// yes [measured on 3.8].
 	Focused bool
+	// PID is the client's process, `tmux attach`, under the terminal that
+	// draws it.
+	PID int
+	// Title is what tmux titles the terminal's window, which it does only
+	// with `set-titles` on; empty with it off.
+	Title string
 }
 
 // The two halves of one look. Each line says which it is, because the two
@@ -97,10 +103,11 @@ var (
 	}, separator)
 	clientFormat = strings.Join([]string{
 		"client", "#{client_name}", "#{session_id}", "#{pane_id}", "#{client_activity}", "#{client_flags}",
+		"#{client_pid}", "#{?set-titles,#{T:set-titles-string},}",
 	}, separator)
 )
 
-const paneFields, clientFields = 9, 6
+const paneFields, clientFields = 9, 8
 
 // ErrNotThere is a server that is not running: tmux said so as it exited.
 // There is nothing on it to draw or to bring, and a render that finds it so
@@ -167,9 +174,11 @@ func ParseServer(output []byte) (Server, error) {
 				return Server{}, fmt.Errorf("not a client: %q", line)
 			}
 			activity, _ := strconv.ParseInt(field[4], 10, 64)
+			pid, _ := strconv.Atoi(field[6])
 			server.Clients = append(server.Clients, Client{
 				Name: field[1], Session: field[2], Pane: field[3], Activity: activity,
 				Focused: slices.Contains(strings.Split(field[5], ","), "focused"),
+				PID:     pid, Title: field[7],
 			})
 		default:
 			return Server{}, fmt.Errorf("not a line of either format: %q", line)

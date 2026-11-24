@@ -21,6 +21,7 @@ import (
 
 	"github.com/lassoColombo/agent-notify/container"
 	"github.com/lassoColombo/agent-notify/internal/config"
+	"github.com/lassoColombo/agent-notify/internal/process"
 	"github.com/lassoColombo/agent-notify/session"
 	"github.com/lassoColombo/agent-notify/tool"
 )
@@ -131,13 +132,46 @@ func Interpret(c Container, captured session.CapturedContext, timeout time.Durat
 	return tool.Ask(c.Binary, session.MethodInterpret, handed, timeout)
 }
 
-// Focus brings one container's place to the front.
-func Focus(c Container, coordinates json.RawMessage, timeout time.Duration) container.Outcome {
+// Focus brings one container's place to the front: through the window given,
+// when a container outside has just brought one forward for it (D-141).
+func Focus(c Container, coordinates json.RawMessage, window *container.Window, timeout time.Duration) container.Outcome {
 	if len(coordinates) == 0 || string(coordinates) == "null" {
 		return container.Failed(container.NeverPlaced, c.Name+" has no coordinates for this session")
 	}
+	input, err := json.Marshal(container.FocusInput{Coordinates: coordinates, Window: window})
+	if err != nil {
+		return container.Failed(container.Unreachable, err.Error())
+	}
+	return outcomeOf(c, session.MethodFocus, input, timeout)
+}
 
-	raw, err := tool.Ask(c.Binary, session.MethodFocus, coordinates, timeout)
+// WindowsShowing asks the container inside which windows already show its
+// place, the one to prefer first.
+func WindowsShowing(c Container, coordinates json.RawMessage, timeout time.Duration) ([]container.Window, error) {
+	raw, err := tool.Ask(c.Binary, session.MethodWindowsShowing, coordinates, timeout)
+	if err != nil {
+		return nil, err
+	}
+	var windows []container.Window
+	if err := json.Unmarshal(raw, &windows); err != nil {
+		return nil, fmt.Errorf("%s answered something that is not a list of windows: %s", c.Name, tool.Summarise(raw))
+	}
+	return windows, nil
+}
+
+// FocusWindow asks a container outside to bring forward a window a container
+// inside named.
+func FocusWindow(c Container, window container.Window, ancestry []session.Ancestor, timeout time.Duration) container.Outcome {
+	input, err := json.Marshal(container.FocusWindowInput{Window: window, Ancestry: ancestry})
+	if err != nil {
+		return container.Failed(container.Unreachable, err.Error())
+	}
+	return outcomeOf(c, session.MethodFocusWindow, input, timeout)
+}
+
+// outcomeOf runs one of the two verbs that answer an outcome.
+func outcomeOf(c Container, method string, input []byte, timeout time.Duration) container.Outcome {
+	raw, err := tool.Ask(c.Binary, method, input, timeout)
 	if err != nil {
 		return container.Failed(container.Unreachable, err.Error())
 	}
@@ -188,6 +222,9 @@ type Step struct {
 	// Skipped means this layer had nothing to say about this session, which is
 	// not the same as having failed.
 	Skipped bool
+	// Window is, for a step that brought a window forward, the inside
+	// container's name for it.
+	Window string
 }
 
 // FocusSession walks the configured containers outermost first and brings the
@@ -209,8 +246,19 @@ type Step struct {
 // second one exists because interpretation is not a yes-or-no — aerospace
 // interprets every session it is given and can place only the ones it can see a
 // window for (D-45).
+//
+// A skipped layer that can bring forward a window it is shown is not done with
+// (D-141). An agent in tmux gives aerospace nothing to find its window by, but
+// tmux knows which terminals already show the agent's session, and the title
+// tmux gave each one's window. So before the layer inside acts, it is asked
+// which windows show its place, and the skipped layers outside to bring one
+// forward; the first that comes forward is the one the layer inside then shows
+// its place through. When none does, the layer inside acts as it would have
+// alone. A terminal is moved only once its window is in front, which is what
+// D-123 asked of every focus.
 func FocusSession(
 	settings config.Config, answers map[string]session.Capabilities, record session.Record,
+	prober process.ReadsProcessFacts,
 ) ([]Step, container.Outcome) {
 	configured, problems := Configured(settings, answers)
 	if len(configured) == 0 {
@@ -223,15 +271,28 @@ func FocusSession(
 
 	var steps []Step
 	acted := false
+	// outside is the skipped layers, so far, that can bring forward a window
+	// a layer inside names.
+	var outside []Container
+	skip := func(one Container, outcome container.Outcome) {
+		steps = append(steps, Step{Container: one.Name, Skipped: true, Outcome: outcome})
+		if slices.Contains(one.Methods, session.MethodFocusWindow) {
+			outside = append(outside, one)
+		}
+	}
 	for _, one := range configured {
 		coordinates := Coordinates(record, one.Name)
 		if len(coordinates) == 0 {
-			steps = append(steps, Step{Container: one.Name, Skipped: true,
-				Outcome: container.Failed(container.NeverPlaced,
-					one.Name+" has no coordinates for this session")})
+			skip(one, container.Failed(container.NeverPlaced, one.Name+" has no coordinates for this session"))
 			continue
 		}
-		outcome := Focus(one, coordinates, focusTimeout)
+		var window *container.Window
+		if len(outside) > 0 && slices.Contains(one.Methods, session.MethodWindowsShowing) {
+			var raised []Step
+			window, raised = throughAWindow(outside, one, coordinates, prober)
+			steps = append(steps, raised...)
+		}
+		outcome := Focus(one, coordinates, window, focusTimeout)
 		if outcome.Problem == container.NeverPlaced {
 			// The same thing the branch above says, said by the container
 			// itself rather than by the absence of a section. A layer that
@@ -240,7 +301,7 @@ func FocusSession(
 			// outer container breaks focusing for every session that started
 			// before it — the inner pane, which is right there and would have
 			// worked, never gets asked.
-			steps = append(steps, Step{Container: one.Name, Skipped: true, Outcome: outcome})
+			skip(one, outcome)
 			continue
 		}
 		steps = append(steps, Step{Container: one.Name, Outcome: outcome})
@@ -248,6 +309,7 @@ func FocusSession(
 			return steps, outcome
 		}
 		acted = true
+		outside = nil
 	}
 
 	if !acted {
@@ -255,6 +317,33 @@ func FocusSession(
 			"no container ever placed this session — it started somewhere none of them was watching")
 	}
 	return steps, container.Done()
+}
+
+// throughAWindow asks the layer inside which windows already show its place,
+// and the layers outside to bring one forward, in the order the layer inside
+// prefers them. It returns the window that came forward, if one did, and a
+// step for each one asked. A window that does not come forward is a step
+// skipped and not a focus failed: the layer inside acts anyway.
+func throughAWindow(
+	outside []Container, inside Container, coordinates json.RawMessage, prober process.ReadsProcessFacts,
+) (*container.Window, []Step) {
+	windows, err := WindowsShowing(inside, coordinates, focusTimeout)
+	if err != nil {
+		return nil, []Step{{Container: inside.Name, Skipped: true,
+			Outcome: container.Failed(container.Unreachable, err.Error())}}
+	}
+	var steps []Step
+	for _, window := range windows {
+		ancestry := process.Ancestry(window.PID, prober)
+		for _, manager := range outside {
+			outcome := FocusWindow(manager, window, ancestry, focusTimeout)
+			steps = append(steps, Step{Container: manager.Name, Outcome: outcome, Skipped: !outcome.OK, Window: window.ID})
+			if outcome.OK {
+				return &window, steps
+			}
+		}
+	}
+	return nil, steps
 }
 
 // IsFocused asks every configured container whether its place is in front, and

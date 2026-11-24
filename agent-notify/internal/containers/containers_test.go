@@ -14,6 +14,7 @@ import (
 	"github.com/lassoColombo/agent-notify/container"
 	"github.com/lassoColombo/agent-notify/internal/config"
 	"github.com/lassoColombo/agent-notify/internal/containers"
+	"github.com/lassoColombo/agent-notify/internal/process"
 	"github.com/lassoColombo/agent-notify/session"
 )
 
@@ -69,6 +70,20 @@ func settingsWith(
 	return settings, methods
 }
 
+// machine is a process table for a focus to walk up: pid to what it is.
+type machine map[int]process.Facts
+
+func (m machine) FactsAbout(pid int) (process.Facts, error) {
+	facts, found := m[pid]
+	if !found {
+		return process.Facts{}, process.ErrNoSuchProcess
+	}
+	return facts, nil
+}
+
+// nobody is a machine with nothing on it, for a focus that walks nothing.
+var nobody = machine{}
+
 func placed(coordinates map[string]json.RawMessage) session.Record {
 	return session.Record{
 		Key:            session.Key{Host: "mac", Agent: "claude", SessionID: "s1"},
@@ -81,7 +96,7 @@ func placed(coordinates map[string]json.RawMessage) session.Record {
 func TestNothingConfiguredIsItsOwnAnswer(t *testing.T) {
 	// A fresh install has no container, and that is the default rather than an
 	// edge case: everything except navigation works without one (§A11.7).
-	_, outcome := containers.FocusSession(config.Defaults(), nil, placed(nil))
+	_, outcome := containers.FocusSession(config.Defaults(), nil, placed(nil), nobody)
 	if outcome.OK || outcome.Problem != container.NoContainer {
 		t.Errorf("outcome = %+v, want no-container-configured", outcome)
 	}
@@ -95,7 +110,7 @@ func TestNeverPlacedIsNotTheSameAsNothingConfigured(t *testing.T) {
 		"outer": {},
 	})
 
-	_, outcome := containers.FocusSession(settings, methods, placed(nil))
+	_, outcome := containers.FocusSession(settings, methods, placed(nil), nobody)
 	if outcome.OK || outcome.Problem != container.NeverPlaced {
 		t.Errorf("outcome = %+v, want never-placed", outcome)
 	}
@@ -118,7 +133,7 @@ func TestFocusWalksOutermostFirstAndStops(t *testing.T) {
 		"inner": json.RawMessage(`{"pane":7}`),
 	})
 
-	steps, outcome := containers.FocusSession(settings, methods, record)
+	steps, outcome := containers.FocusSession(settings, methods, record, nobody)
 	if outcome.OK || outcome.Problem != container.NotRunning {
 		t.Errorf("outcome = %+v, want the outer one's failure", outcome)
 	}
@@ -141,7 +156,7 @@ func TestASkippedLayerIsNotAFailedLayer(t *testing.T) {
 	// terminal window no window manager was recording.
 	record := placed(map[string]json.RawMessage{"inner": json.RawMessage(`{"pane":7}`)})
 
-	steps, outcome := containers.FocusSession(settings, methods, record)
+	steps, outcome := containers.FocusSession(settings, methods, record, nobody)
 	if !outcome.OK {
 		t.Fatalf("outcome = %+v, want success", outcome)
 	}
@@ -172,12 +187,128 @@ func TestALayerThatSaysItCannotPlaceThisOneIsSkipped(t *testing.T) {
 		"inner": json.RawMessage(`{"pane":7}`),
 	})
 
-	steps, outcome := containers.FocusSession(settings, methods, record)
+	steps, outcome := containers.FocusSession(settings, methods, record, nobody)
 	if !outcome.OK {
 		t.Fatalf("outcome = %+v, want the inner layer to have gone ahead", outcome)
 	}
 	if len(steps) != 2 || !steps[0].Skipped || steps[1].Skipped {
 		t.Errorf("steps = %+v, want the outer skipped and the inner acted on", steps)
+	}
+}
+
+// windowScene is D-141's: an outer container with nothing of its own for the
+// session that can bring a window forward, answering focus-window with
+// `raised`, and an inner one whose place is shown in one window, a tmux client
+// in a Ghostty window. Each writes what it was handed into a directory, under
+// the verb's name.
+func windowScene(t *testing.T, raised string, outerMethods []string) (
+	config.Config, map[string]session.Capabilities, session.Record, machine, string,
+) {
+	t.Helper()
+	handed := t.TempDir()
+	fake(t, "outer", `case "$1" in
+  focus-window) cat > '`+handed+`/focus-window'; echo '`+raised+`' ;;
+  *) exit 1 ;;
+esac`)
+	fake(t, "inner", `case "$1" in
+  windows-showing) cat > '`+handed+`/windows-showing'; echo '[{"id":"/dev/ttys000","pid":1251,"title":"lenny / claude"}]' ;;
+  focus) cat > '`+handed+`/focus'; echo '{"ok":true}' ;;
+  *) exit 1 ;;
+esac`)
+	settings, _ := settingsWith([]string{"outer", "inner"}, map[string]config.Integration{
+		"outer": {},
+		"inner": {},
+	})
+	methods := map[string]session.Capabilities{
+		"outer": {Methods: outerMethods},
+		"inner": {Methods: []string{session.MethodFocus, session.MethodWindowsShowing}},
+	}
+	record := placed(map[string]json.RawMessage{"inner": json.RawMessage(`{"pane":"%38"}`)})
+	// tmux attach, under a shell, under Ghostty
+	processes := machine{
+		1251: {PID: 1251, Command: "tmux", Parent: 1088},
+		1088: {PID: 1088, Command: "nu", Parent: 1054},
+		1054: {PID: 1054, Command: "ghostty", Parent: 1},
+	}
+	return settings, methods, record, processes, handed
+}
+
+func handedTo(t *testing.T, handed, verb string) string {
+	t.Helper()
+	read, err := os.ReadFile(filepath.Join(handed, verb))
+	if err != nil {
+		return ""
+	}
+	return string(read)
+}
+
+// TestTheWindowShowingASessionComesForwardFirst is D-141: the outer layer
+// that had nothing of its own is handed the window the inner one names, with
+// the chain from its pid, and the inner one is then told to show its place
+// through it.
+func TestTheWindowShowingASessionComesForwardFirst(t *testing.T) {
+	settings, methods, record, processes, handed := windowScene(t, `{"ok":true}`,
+		[]string{session.MethodFocus, session.MethodFocusWindow})
+
+	steps, outcome := containers.FocusSession(settings, methods, record, processes)
+	if !outcome.OK {
+		t.Fatalf("outcome = %+v, want success", outcome)
+	}
+	if len(steps) != 3 || !steps[0].Skipped || steps[1].Window != "/dev/ttys000" || !steps[1].Outcome.OK || steps[2].Container != "inner" {
+		t.Errorf("steps = %+v, want the outer skipped, then its window brought forward, then the inner acted on", steps)
+	}
+	var window container.FocusWindowInput
+	if err := json.Unmarshal([]byte(handedTo(t, handed, "focus-window")), &window); err != nil {
+		t.Fatalf("focus-window was handed %q: %v", handedTo(t, handed, "focus-window"), err)
+	}
+	if window.Window.Title != "lenny / claude" || len(window.Ancestry) != 3 || window.Ancestry[2].PID != 1054 {
+		t.Errorf("focus-window was handed %+v, want the window and the chain up to Ghostty", window)
+	}
+	var focus container.FocusInput
+	if err := json.Unmarshal([]byte(handedTo(t, handed, "focus")), &focus); err != nil {
+		t.Fatalf("focus was handed %q: %v", handedTo(t, handed, "focus"), err)
+	}
+	if focus.Window == nil || focus.Window.ID != "/dev/ttys000" || string(focus.Coordinates) != `{"pane":"%38"}` {
+		t.Errorf("focus was handed %+v, want the coordinates and the window that came forward", focus)
+	}
+}
+
+// TestAWindowThatDoesNotComeForwardIsNotUsed: the inner layer acts as it would
+// have alone, and the focus has not failed. A terminal is never moved behind a
+// window nobody brought forward (D-123).
+func TestAWindowThatDoesNotComeForwardIsNotUsed(t *testing.T) {
+	settings, methods, record, processes, handed := windowScene(t,
+		`{"ok":false,"problem":"ambiguous","detail":"2 Ghostty windows"}`,
+		[]string{session.MethodFocus, session.MethodFocusWindow})
+
+	steps, outcome := containers.FocusSession(settings, methods, record, processes)
+	if !outcome.OK {
+		t.Fatalf("outcome = %+v, want the inner layer to have gone ahead", outcome)
+	}
+	if len(steps) != 3 || !steps[1].Skipped || steps[1].Window == "" {
+		t.Errorf("steps = %+v, want the window that did not come forward as a step skipped", steps)
+	}
+	var focus container.FocusInput
+	if err := json.Unmarshal([]byte(handedTo(t, handed, "focus")), &focus); err != nil {
+		t.Fatalf("focus was handed %q: %v", handedTo(t, handed, "focus"), err)
+	}
+	if focus.Window != nil {
+		t.Errorf("focus was handed the window %+v, which never came forward", focus.Window)
+	}
+}
+
+// TestNoWindowIsAskedForWithNothingToBringItForward: an outer layer that
+// cannot focus a window costs the inner one no question.
+func TestNoWindowIsAskedForWithNothingToBringItForward(t *testing.T) {
+	settings, methods, record, processes, handed := windowScene(t, `{"ok":true}`,
+		[]string{session.MethodFocus})
+
+	steps, outcome := containers.FocusSession(settings, methods, record, processes)
+	if !outcome.OK || len(steps) != 2 {
+		t.Fatalf("steps = %+v, outcome = %+v; want the outer skipped and the inner acted on", steps, outcome)
+	}
+	if asked := handedTo(t, handed, "windows-showing"); asked != "" {
+		t.Errorf("the inner layer was asked which windows show it, with nobody to bring one forward")
 	}
 }
 
@@ -198,7 +329,7 @@ func TestAmbiguityStopsTheWalk(t *testing.T) {
 		"inner": json.RawMessage(`{"pane":7}`),
 	})
 
-	steps, outcome := containers.FocusSession(settings, methods, record)
+	steps, outcome := containers.FocusSession(settings, methods, record, nobody)
 	if outcome.OK || outcome.Problem != container.Ambiguous {
 		t.Errorf("outcome = %+v, want ambiguous", outcome)
 	}
@@ -216,7 +347,7 @@ func TestAContainerThatIsNotOnPATHIsUnreachable(t *testing.T) {
 		"tmux": {},
 	})
 	record := placed(map[string]json.RawMessage{"tmux": json.RawMessage(`{"TMUX_PANE":"%7"}`)})
-	_, outcome := containers.FocusSession(settings, methods, record)
+	_, outcome := containers.FocusSession(settings, methods, record, nobody)
 	if outcome.OK || outcome.Problem != container.Unreachable {
 		t.Errorf("outcome = %+v, want container-unreachable", outcome)
 	}
@@ -248,7 +379,7 @@ func TestAContainerThatHangsIsGivenUpOn(t *testing.T) {
 	// what is being measured and it is an argument here — five seconds is the
 	// right bound for a person waiting and the wrong one for a test.
 	start := time.Now()
-	outcome := containers.Focus(one, json.RawMessage(`{"pane":1}`), 200*time.Millisecond)
+	outcome := containers.Focus(one, json.RawMessage(`{"pane":1}`), nil, 200*time.Millisecond)
 	waited := time.Since(start)
 
 	if outcome.OK || outcome.Problem != container.Unreachable {
@@ -267,7 +398,7 @@ func TestAContainerThatAnswersNonsenseIsUnreachable(t *testing.T) {
 		settings, methods := settingsWith([]string{"odd"}, map[string]config.Integration{"odd": {}})
 		record := placed(map[string]json.RawMessage{"odd": json.RawMessage(`{"pane":1}`)})
 
-		if _, outcome := containers.FocusSession(settings, methods, record); outcome.Problem != container.Unreachable {
+		if _, outcome := containers.FocusSession(settings, methods, record, nobody); outcome.Problem != container.Unreachable {
 			t.Errorf("%q produced %+v, want container-unreachable", body, outcome)
 		}
 	}
@@ -279,7 +410,7 @@ func TestARefusalWithNoReasonIsStillARefusal(t *testing.T) {
 	settings, methods := settingsWith([]string{"shy"}, map[string]config.Integration{"shy": {}})
 	record := placed(map[string]json.RawMessage{"shy": json.RawMessage(`{"pane":1}`)})
 
-	if _, outcome := containers.FocusSession(settings, methods, record); outcome.Problem != container.Refused {
+	if _, outcome := containers.FocusSession(settings, methods, record, nobody); outcome.Problem != container.Refused {
 		t.Errorf("outcome = %+v, want refused", outcome)
 	}
 }

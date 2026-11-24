@@ -19,6 +19,10 @@ const (
 	MethodFocus     = "focus"
 	MethodFocused   = "focused"
 	MethodRender    = "render"
+	// The two a focus asks when a container outside has nothing of its own
+	// for a session and one inside can name the window showing it (D-141).
+	MethodWindowsShowing = "windows-showing"
+	MethodFocusWindow    = "focus-window"
 )
 
 // CoreRuns is whether a declared method is one core calls, as opposed to one
@@ -26,7 +30,8 @@ const (
 // something else — an agent's hooks, a keybinding — and core only asks.
 func CoreRuns(method string) bool {
 	switch method {
-	case CaptureCommand, MethodInterpret, MethodFocus, MethodFocused, MethodRender:
+	case CaptureCommand, MethodInterpret, MethodFocus, MethodFocused, MethodRender,
+		MethodWindowsShowing, MethodFocusWindow:
 		return true
 	}
 	return false

@@ -56,7 +56,7 @@ showing a session can be known (plan.md D-128).
 | list | `j` `k`, arrows, `Ctrl j/k/n/p`, `Alt j/k` | move the cursor; the stage follows once it rests |
 | list | `g` `G` | first, last |
 | list | `Enter` | onto the stage, like `Alt Tab` |
-| list | `o` | go to the window the agent lives in, leaving the tab |
+| list | `o` | go to where the agent lives, leaving the tab: `agent-notify focus-session`, as a banner's tap does |
 | list | `q` | close the tab |
 | list | `F12` | look at the server now; the tab's hooks type it (see below) |
 | stage | anything | it is the agent's pane |

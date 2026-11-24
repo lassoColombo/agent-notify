@@ -1936,7 +1936,9 @@ discoverable, so it is configuration: `order = ["aerospace-container",
 (D-37). Focus
 walks it outermost first, each step validated before it acts and required to
 succeed before the next one is attempted. Displays have no such order because
-they never interact.
+they never interact. **[amended 2026-11-24 — D-141]** A layer outside that was
+skipped can still be asked to bring forward a window a layer inside names,
+before that layer acts.
 
 ### A11.3 Failure is typed, not generic
 
@@ -6195,6 +6197,66 @@ of this section is that it prevents re-litigating.
   - **What it was worth once.** It was the evidence D-137 measured
     compactions against. A question like that is asked of the log and of
     the agent's own transcripts now, which keep more and are kept anyway.
+
+- **D-140** (2026-11-24) — **The cockpit's `o` is `agent-notify
+  focus-session`.** The tab still sends everything home first; then, rather
+  than its own `switch-client`, it runs the jump a banner's tap and the
+  picker's enter run.
+  - **Why.** Its `switch-client` moved one tmux client and nothing else: it
+    knew no window manager, and so did not reach a session whose terminal sat
+    on another workspace, and it was a second answer to where a session lives,
+    which is the containers' business (§A11.2).
+  - **Which terminal moves.** The jump is asked from the list's pane, and
+    agent-notify-tmux moves the terminal showing the pane it was asked from
+    (D-123), which is the one showing the tab. It sends it through a session
+    other than `_agents` whenever one holds the window.
+  - **Tested where it lives.** The tab's test asks only that nothing is
+    borrowed when the jump is asked; where the terminal lands is
+    agent-notify-tmux's test.
+
+- **D-141** (2026-11-24) — **A focus goes to the window already showing the
+  session, when the window manager can bring it forward.** *Amends* D-123's
+  "the asker first" and §A11.2's walk; *keeps* D-123 wherever no window comes
+  forward.
+  - **What was wrong.** Two Ghostty windows, one on tmux session `home` with
+    the cockpit, one on `lenny` with the agent. `o` on the agent moved the
+    first terminal to `lenny`, and the second, already there, stayed as it
+    was: the same session in two windows. aerospace had been skipped, because
+    an agent's chain ends at the tmux server and its environment names no
+    window; and tmux, asked from inside, moves the terminal asked from.
+  - **Why D-123 chose the asker.** D-122 moved a terminal already on the
+    session, which might be on another workspace or behind other windows: it
+    reported success and the screen of the person asking did not change.
+    What was missing then was the window coming forward, and that is what is
+    added here.
+  - **What tmux knows.** [verified 2026-11-24, tmux 3.8, aerospace, Ghostty]
+    With `set-titles on` tmux titles each terminal's window, and
+    `#{T:set-titles-string}` in `list-clients` is that title, client by client:
+    `lenny / claude` there and `lenny / claude` in `aerospace list-windows`.
+    A pid tells only the application: every Ghostty window has the same one.
+  - **The walk.** An outer layer skipped for want of coordinates, which
+    answers `focus-window`, is remembered. Before the next layer that answers
+    `windows-showing` acts, it is asked which windows show its place (tmux:
+    the terminals on a session its window is in, asker first, then the one
+    used last), and core asks the remembered layers to bring one forward,
+    handing each the window and the chain it walked up from the window's pid.
+    The first that comes forward is handed to `focus`, which moves that
+    terminal. When none does, `focus` is handed nothing and D-123 holds. So a
+    terminal other than the asker's is moved only once its window is in
+    front.
+  - **A window, not a terminal.** `container.Window` is the window as the
+    container outside recognises it: a pid under its application and its
+    title, with the inside container's own name for it (a client's) to be
+    handed back. Nothing in it says tmux or terminal, so any container inside
+    that can name its window works with any window manager.
+  - **The title is matched whole** by `focus-window`, unlike the prefix a
+    `title` template builds: `home / claude` is not `home / claude-2`.
+  - **The protocol breaks** (core is unpublished): `focus` reads
+    `{"coordinates", "window"}` rather than the bare coordinates, and the SDK's
+    `Commands.Focus` takes the window as a second argument.
+  - **What it costs.** Two processes more per focus, and only when a layer
+    outside was skipped and a layer inside can name windows: a machine with
+    no window manager asks nothing new.
 
 **The payload discussion of 2026-09-17 is now ratified**
  in D-10 through D-18.
